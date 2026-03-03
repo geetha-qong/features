@@ -1,4 +1,5 @@
 """Dashboard route: /dashboard — job list for current user."""
+from pathlib import Path
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -9,7 +10,7 @@ from webapp.auth import get_current_user
 from webapp.database import get_db
 
 router = APIRouter()
-templates = Jinja2Templates(directory="webapp/templates")
+templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
 
 
 @router.get("/dashboard", response_class=HTMLResponse)

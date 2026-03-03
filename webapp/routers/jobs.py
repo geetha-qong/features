@@ -16,7 +16,7 @@ from webapp.database import SessionLocal, get_db
 from webapp.pipeline_runner import run_pipeline_for_job
 
 router = APIRouter()
-templates = Jinja2Templates(directory="webapp/templates")
+templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
 
 
 def _run_in_thread(job_id: int, pdf_path: str, pid_no_override: str):

@@ -1,4 +1,5 @@
 """Auth routes: /login, /register, /logout."""
+from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -9,7 +10,7 @@ from webapp.auth import create_access_token, hash_password, verify_password
 from webapp.database import get_db
 
 router = APIRouter()
-templates = Jinja2Templates(directory="webapp/templates")
+templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
 
 
 @router.get("/login", response_class=HTMLResponse)
