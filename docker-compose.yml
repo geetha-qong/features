@@ -1,0 +1,14 @@
+version: "3.9"
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./job_outputs:/app/job_outputs
+      - ./webapp.db:/app/webapp.db
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+    restart: unless-stopped

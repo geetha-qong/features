@@ -1,0 +1,35 @@
+# Secrets
+.env
+
+# Intermediate / temp files
+tmp/
+uploads/
+job_outputs/
+
+# Database
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Claude Code session state
+.claude/
+memory/
+
+# Intermediate run outputs (keep only final CSV)
+docs/runs/
+
+# Large binary inputs (PDFs/images tracked separately if needed)
+docs/*.pdf
+
+# Excel working files
+*.xlsx

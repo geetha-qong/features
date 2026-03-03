@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.env
+tmp/
+uploads/
+job_outputs/
+webapp.db
+*.egg-info/
+.venv/
+venv/
