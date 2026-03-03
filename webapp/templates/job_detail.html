@@ -9,7 +9,9 @@
     <span class="text-muted small">
     P&ID: <code>{{ job.pid_no }}</code> &nbsp;|&nbsp; Job #{{ job.id }}
     {% if job.processing_time %}
-      &nbsp;|&nbsp; ⏱ {{ job.processing_time }}s
+      {% set mins = (job.processing_time / 60) | int %}
+      {% set secs = job.processing_time | int %}
+      &nbsp;|&nbsp; ⏱ {% if mins > 0 %}{{ mins }} min ({{ secs }}s){% else %}{{ secs }}s{% endif %}
     {% endif %}
     &nbsp;|&nbsp;
     {% if job.include_control_valves %}

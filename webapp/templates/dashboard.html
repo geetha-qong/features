@@ -38,7 +38,13 @@
             <span class="badge badge-{{ job.status }}">{{ job.status }}</span>
           </td>
           <td>{{ job.valve_count if job.valve_count else '—' }}</td>
-          <td class="text-muted small">{{ job.processing_time ~ 's' if job.processing_time else '—' }}</td>
+          <td class="text-muted small">
+            {% if job.processing_time %}
+              {% set mins = (job.processing_time / 60) | int %}
+              {% set secs = job.processing_time | int %}
+              {% if mins > 0 %}{{ mins }} min ({{ secs }}s){% else %}{{ secs }}s{% endif %}
+            {% else %}—{% endif %}
+          </td>
           <td class="text-muted small">{{ job.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
           <td>
             <a href="/jobs/{{ job.id }}" class="btn btn-sm btn-outline-secondary">View</a>
