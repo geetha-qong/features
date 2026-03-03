@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from pdf_to_tiles import pdf_to_tiles
-from extractor import extract_all_tiles
+from extractor import extract_all_tiles, extract_drawing_number
 from parser import parse_raw_extractions
 from validator import validate_and_report, write_csv, compare_with_ground_truth
 from corrections import apply_corrections
@@ -54,7 +54,13 @@ def run(pdf_path: str, output_path: str = None, skip_extraction: bool = False):
     print(f"Output: {output_path}")
     print(f"{'='*60}\n")
 
-    config = DRAWING_CONFIG.get(pdf_path, {"pid_no": "UNKNOWN", "description": pdf_path})
+    # Look up known config or auto-extract drawing number from title block
+    config = DRAWING_CONFIG.get(pdf_path)
+    if not config:
+        print("Stage 0: Extracting drawing number from title block...")
+        pid_no = extract_drawing_number(pdf_path, tmp_dir="tmp")
+        config = {"pid_no": pid_no, "description": pdf_path}
+        print(f"  P&ID No: {pid_no}\n")
 
     # Stage 1: PDF → tiles
     if not skip_extraction:

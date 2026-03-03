@@ -72,6 +72,63 @@ def extract_json_object(text: str) -> dict:
     return {}
 
 
+# ── Title block extraction ──────────────────────────────────────────────────────
+
+def extract_drawing_number(pdf_path: str, tmp_dir: str = "tmp") -> str:
+    """
+    Crop the bottom-right 35% × 20% of the first PDF page (title block area)
+    and ask the vision model to read the 'Drawing No.' field.
+    Returns the drawing number string, or 'UNKNOWN' on failure.
+    """
+    import fitz
+    from PIL import Image
+
+    try:
+        doc = fitz.open(pdf_path)
+        page = doc[0]
+        mat = fitz.Matrix(2.0, 2.0)  # 2x zoom is enough for title block
+        pix = page.get_pixmap(matrix=mat)
+        full_path = Path(tmp_dir) / "titleblock_full.png"
+        Path(tmp_dir).mkdir(exist_ok=True)
+        pix.save(str(full_path))
+        doc.close()
+
+        img = Image.open(str(full_path))
+        W, H = img.size
+        # Title block is bottom-right corner: rightmost 40%, bottom 22%
+        crop = img.crop((int(W * 0.60), int(H * 0.78), W, H))
+        crop_path = Path(tmp_dir) / "titleblock_crop.png"
+        crop.save(str(crop_path))
+
+        client = get_client()
+        img_b64 = image_to_base64(str(crop_path))
+        response = client.chat.completions.create(
+            model=DEFAULT_MODEL,
+            max_tokens=128,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+                    {"type": "text", "text": (
+                        "This is the title block from a P&ID engineering drawing. "
+                        "Find the field labelled 'Drawing No.' or 'DRG NO' or 'Drawing Number' and return ONLY its value, "
+                        "nothing else. Example output: MUK-62-1-15-1004-001-24C7. "
+                        "If you cannot find it, reply with: UNKNOWN"
+                    )},
+                ],
+            }],
+        )
+        result = (response.choices[0].message.content or "").strip()
+        # Strip any surrounding quotes or whitespace
+        result = result.strip('"\'').strip()
+        print(f"  Extracted Drawing No.: {result}")
+        return result if result else "UNKNOWN"
+
+    except Exception as e:
+        print(f"  Warning: could not extract drawing number: {e}")
+        return "UNKNOWN"
+
+
 # ── Pass 1 ─────────────────────────────────────────────────────────────────────
 
 def pass1_tile(tile: dict, client: OpenAI, model: str) -> list:
