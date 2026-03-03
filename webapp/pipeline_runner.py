@@ -26,7 +26,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 
-def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: Session) -> None:
+def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: Session, include_control_valves: bool = True) -> None:
     """
     Called in a background thread. Runs the pipeline and updates the DB.
     """
@@ -72,7 +72,7 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
 
     # Read CSV → insert valve rows
     try:
-        _ingest_csv(job_id, output_csv, pid_no_override, db)
+        _ingest_csv(job_id, output_csv, pid_no_override, db, include_control_valves)
     except Exception as exc:
         job.status = "failed"
         job.error_msg = f"CSV ingest error: {traceback.format_exc()}"
@@ -89,12 +89,13 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
     db.commit()
 
 
-def _ingest_csv(job_id: int, csv_path: str, pid_no_override: str, db: Session) -> None:
+def _ingest_csv(job_id: int, csv_path: str, pid_no_override: str, db: Session, include_control_valves: bool = True) -> None:
     """Read the output CSV and insert rows into valve_rows table."""
-    # Note: validator.py uses "Pneumatic Actuator " (trailing space) as column name
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            if not include_control_valves and row.get("Category", "").strip().upper() == "CV":
+                continue
             valve = models.ValveRow(
                 job_id=job_id,
                 pid_no=pid_no_override or row.get("P&ID No", ""),

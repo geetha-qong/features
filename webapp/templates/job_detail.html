@@ -11,6 +11,12 @@
     {% if job.processing_time %}
       &nbsp;|&nbsp; ⏱ {{ job.processing_time }}s
     {% endif %}
+    &nbsp;|&nbsp;
+    {% if job.include_control_valves %}
+      <span class="badge bg-info text-dark">CV included</span>
+    {% else %}
+      <span class="badge bg-secondary">CV excluded</span>
+    {% endif %}
   </span>
   </div>
   <div>

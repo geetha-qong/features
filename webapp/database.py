@@ -19,6 +19,7 @@ def run_migrations():
     new_columns = [
         ("jobs", "processing_time", "REAL"),
         ("jobs", "processing_log", "TEXT"),
+        ("jobs", "include_control_valves", "INTEGER DEFAULT 1"),
     ]
     with engine.connect() as conn:
         for table, column, col_type in new_columns:

@@ -1,6 +1,6 @@
 """ORM models: User, Job, ValveRow, Feedback."""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float, ForeignKey
+from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, Float, ForeignKey
 from webapp.database import Base
 
 
@@ -26,6 +26,7 @@ class Job(Base):
     valve_count = Column(Integer, default=0)
     error_msg = Column(Text, nullable=True)
     output_csv_path = Column(String, nullable=True)
+    include_control_valves = Column(Boolean, default=True)
     processing_time = Column(Float, nullable=True)   # seconds
     processing_log = Column(Text, nullable=True)     # captured stdout from pipeline
     created_at = Column(DateTime, default=datetime.utcnow)

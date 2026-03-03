@@ -19,11 +19,11 @@ router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
 
 
-def _run_in_thread(job_id: int, pdf_path: str, pid_no_override: str):
+def _run_in_thread(job_id: int, pdf_path: str, pid_no_override: str, include_control_valves: bool = True):
     """Run pipeline in a separate thread with its own DB session."""
     db = SessionLocal()
     try:
-        run_pipeline_for_job(job_id, pdf_path, pid_no_override, db)
+        run_pipeline_for_job(job_id, pdf_path, pid_no_override, db, include_control_valves)
     finally:
         db.close()
 
@@ -33,6 +33,7 @@ async def upload_pdf(
     request: Request,
     file: UploadFile = File(...),
     pid_no: str = Form(""),
+    include_control_valves: str = Form("off"),
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -50,6 +51,7 @@ async def upload_pdf(
         stored_filename=stored_name,
         pid_no=pid_no.strip() or "UNKNOWN",
         status="pending",
+        include_control_valves=(include_control_valves == "on"),
     )
     db.add(job)
     db.commit()
@@ -63,7 +65,7 @@ async def upload_pdf(
 
     t = threading.Thread(
         target=_run_in_thread,
-        args=(job.id, job_pdf, pid_no.strip()),
+        args=(job.id, job_pdf, pid_no.strip(), job.include_control_valves),
         daemon=True,
     )
     t.start()
