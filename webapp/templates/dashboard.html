@@ -16,8 +16,7 @@
       <thead class="table-light">
         <tr>
           <th>#</th>
-          <th>Filename</th>
-          <th>P&ID No</th>
+          <th>Filename / P&ID No</th>
           <th>Status</th>
           <th>Valves</th>
           <th>Time</th>
@@ -29,8 +28,12 @@
         {% for job in jobs %}
         <tr>
           <td class="text-muted">{{ job.id }}</td>
-          <td>{{ job.original_filename }}</td>
-          <td><code>{{ job.pid_no }}</code></td>
+          <td>
+            {{ job.original_filename }}
+            {% if job.pid_no and job.pid_no != 'UNKNOWN' %}
+            <br><code class="text-muted small">{{ job.pid_no }}</code>
+            {% endif %}
+          </td>
           <td>
             <span class="badge badge-{{ job.status }}">{{ job.status }}</span>
           </td>
