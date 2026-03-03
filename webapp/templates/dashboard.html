@@ -45,7 +45,7 @@
               {% if mins > 0 %}{{ mins }} min ({{ secs }}s){% else %}{{ secs }}s{% endif %}
             {% else %}—{% endif %}
           </td>
-          <td class="text-muted small">{{ job.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td class="text-muted small">{{ job.created_at | to_ist }}</td>
           <td>
             <a href="/jobs/{{ job.id }}" class="btn btn-sm btn-outline-secondary">View</a>
           </td>

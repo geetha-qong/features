@@ -1,16 +1,14 @@
 """Dashboard route: /dashboard — job list for current user."""
-from pathlib import Path
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from webapp import models
 from webapp.auth import get_current_user
 from webapp.database import get_db
+from webapp.jinja import templates
 
 router = APIRouter()
-templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
 
 
 @router.get("/dashboard", response_class=HTMLResponse)

@@ -155,7 +155,7 @@
           {% for fb in feedbacks %}
           <div class="mb-3 border-bottom pb-2">
             <p class="mb-1" style="white-space:pre-wrap">{{ fb.notes }}</p>
-            <small class="text-muted">{{ fb.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+            <small class="text-muted">{{ fb.created_at | to_ist }}</small>
           </div>
           {% endfor %}
         {% else %}

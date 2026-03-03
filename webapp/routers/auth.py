@@ -1,16 +1,14 @@
 """Auth routes: /login, /register (auth-only), /logout."""
-from pathlib import Path
 from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from webapp import models
 from webapp.auth import create_access_token, get_current_user, hash_password, verify_password
 from webapp.database import get_db
+from webapp.jinja import templates
 
 router = APIRouter()
-templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
 
 
 @router.get("/login", response_class=HTMLResponse)

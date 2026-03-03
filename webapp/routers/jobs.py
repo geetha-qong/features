@@ -6,17 +6,16 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from webapp import models
 from webapp.auth import get_current_user
 from webapp.config import JOB_OUTPUT_DIR, UPLOAD_DIR
 from webapp.database import SessionLocal, get_db
+from webapp.jinja import templates
 from webapp.pipeline_runner import run_pipeline_for_job
 
 router = APIRouter()
-templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
 
 
 def _run_in_thread(job_id: int, pdf_path: str, pid_no_override: str, include_control_valves: bool = True):
