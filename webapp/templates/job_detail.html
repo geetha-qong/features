@@ -6,7 +6,12 @@
   <div>
     <a href="/dashboard" class="text-muted small">← Dashboard</a>
     <h4 class="mt-1 mb-0">{{ job.original_filename }}</h4>
-    <span class="text-muted small">P&ID: <code>{{ job.pid_no }}</code> &nbsp;|&nbsp; Job #{{ job.id }}</span>
+    <span class="text-muted small">
+    P&ID: <code>{{ job.pid_no }}</code> &nbsp;|&nbsp; Job #{{ job.id }}
+    {% if job.processing_time %}
+      &nbsp;|&nbsp; ⏱ {{ job.processing_time }}s
+    {% endif %}
+  </span>
   </div>
   <div>
     <span id="status-badge" class="badge badge-{{ job.status }} fs-6">{{ job.status }}</span>
@@ -79,8 +84,30 @@
 </div>
 {% endif %}
 
-<!-- Feedback section -->
+<!-- AI log + Feedback section -->
 <div class="row">
+
+  {% if job.processing_log %}
+  <div class="col-12 mb-4">
+    <div class="card shadow-sm border-0">
+      <div class="card-header d-flex justify-content-between align-items-center"
+           style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#aiLog">
+        <span>🤖 <strong>AI Processing Log</strong>
+          {% if job.processing_time %}
+            <span class="badge bg-secondary ms-2">{{ job.processing_time }}s</span>
+          {% endif %}
+        </span>
+        <span class="text-muted small">click to expand ▾</span>
+      </div>
+      <div class="collapse" id="aiLog">
+        <div class="card-body p-0">
+          <pre class="m-0 p-3 small" style="background:#1e1e1e;color:#d4d4d4;max-height:500px;overflow-y:auto;border-radius:0 0 .375rem .375rem;white-space:pre-wrap;word-break:break-word">{{ job.processing_log }}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="col-md-6">
     <div class="card shadow-sm mb-4">
       <div class="card-header"><strong>Engineer Feedback</strong></div>

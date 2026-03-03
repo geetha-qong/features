@@ -26,6 +26,8 @@ class Job(Base):
     valve_count = Column(Integer, default=0)
     error_msg = Column(Text, nullable=True)
     output_csv_path = Column(String, nullable=True)
+    processing_time = Column(Float, nullable=True)   # seconds
+    processing_log = Column(Text, nullable=True)     # captured stdout from pipeline
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 

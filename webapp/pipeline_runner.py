@@ -3,10 +3,13 @@ Adapter: runs the existing pipeline.run() in a per-job directory,
 then stores results in the database.
 """
 import csv
+import io
 import os
 import sys
 import threading
+import time
 import traceback
+from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
 
@@ -41,22 +44,26 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
     output_csv = str(job_dir / "valve_list.csv")
 
     original_cwd = os.getcwd()
+    log_buffer = io.StringIO()
+    start_time = time.time()
     try:
         with _pipeline_lock:
             os.chdir(str(job_dir))
-            # Ensure tmp/ subdir exists relative to new cwd
             Path("tmp").mkdir(exist_ok=True)
 
             import importlib
             import pipeline as pl
-            importlib.reload(pl)  # reload so RAW_CACHE path resolves relative to new cwd
+            importlib.reload(pl)
 
-            pl.run(pdf_path=pdf_path, output_path=output_csv)
+            with redirect_stdout(log_buffer):
+                pl.run(pdf_path=pdf_path, output_path=output_csv)
 
     except Exception as exc:
         os.chdir(original_cwd)
         job.status = "failed"
         job.error_msg = traceback.format_exc()
+        job.processing_time = round(time.time() - start_time, 1)
+        job.processing_log = log_buffer.getvalue()
         job.completed_at = datetime.utcnow()
         db.commit()
         return
@@ -76,6 +83,8 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
     job.status = "done"
     job.output_csv_path = output_csv
     job.completed_at = datetime.utcnow()
+    job.processing_time = round(time.time() - start_time, 1)
+    job.processing_log = log_buffer.getvalue()
     job.valve_count = db.query(models.ValveRow).filter(models.ValveRow.job_id == job_id).count()
     db.commit()
 

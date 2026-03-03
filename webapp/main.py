@@ -3,11 +3,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from webapp.database import Base, engine
+from webapp.database import Base, engine, run_migrations
 from webapp.routers import auth, dashboard, jobs, feedback
 
-# Create all DB tables on startup
+# Create all DB tables and run column migrations on startup
 Base.metadata.create_all(bind=engine)
+run_migrations()
 
 app = FastAPI(title="P&ID Valve Extractor")
 
