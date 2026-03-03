@@ -138,3 +138,42 @@ async def download_csv(
         media_type="text/csv",
         filename=f"valve_list_{job.pid_no}.csv",
     )
+
+
+@router.post("/jobs/{job_id}/rerun")
+async def rerun_job(
+    job_id: int,
+    include_control_valves: str = Form("off"),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job or job.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status == "processing":
+        raise HTTPException(status_code=409, detail="Job is already running")
+
+    job_pdf = str(JOB_OUTPUT_DIR / str(job_id) / "input.pdf")
+    if not Path(job_pdf).exists():
+        raise HTTPException(status_code=404, detail="Original PDF not found — cannot re-run")
+
+    # Clear previous results
+    db.query(models.ValveRow).filter(models.ValveRow.job_id == job_id).delete()
+    job.status = "pending"
+    job.valve_count = 0
+    job.error_msg = None
+    job.output_csv_path = None
+    job.processing_time = None
+    job.processing_log = None
+    job.completed_at = None
+    job.include_control_valves = (include_control_valves == "on")
+    db.commit()
+
+    t = threading.Thread(
+        target=_run_in_thread,
+        args=(job.id, job_pdf, job.pid_no, job.include_control_valves),
+        daemon=True,
+    )
+    t.start()
+
+    return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
