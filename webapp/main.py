@@ -1,4 +1,5 @@
 """FastAPI application entry point."""
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,7 +11,11 @@ from webapp.routers import auth, dashboard, jobs, feedback
 Base.metadata.create_all(bind=engine)
 run_migrations()
 
-app = FastAPI(title="P&ID Valve Extractor")
+app = FastAPI(title="Qong — P&ID Valve Extractor")
+
+# Serve static assets (logo, etc.)
+_imgs_dir = Path(__file__).parent / "imgs"
+app.mount("/imgs", StaticFiles(directory=_imgs_dir), name="imgs")
 
 # Register routers
 app.include_router(auth.router)

@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Register — P&ID Extractor{% endblock %}
+{% block title %}Create User — Qong{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-md-4">
     <div class="card shadow-sm">
       <div class="card-body p-4">
-        <h4 class="card-title mb-4">Create Account</h4>
+        <h5 class="card-title mb-4 fw-semibold">Create New User</h5>
         <form method="post" action="/register">
           <div class="mb-3">
             <label class="form-label">Username</label>
@@ -20,11 +20,8 @@
             <label class="form-label">Password</label>
             <input type="password" name="password" class="form-control" required minlength="6">
           </div>
-          <button type="submit" class="btn btn-success w-100">Register</button>
+          <button type="submit" class="btn btn-dark w-100">Create User</button>
         </form>
-        <p class="mt-3 text-center text-muted small">
-          Already have an account? <a href="/login">Login</a>
-        </p>
       </div>
     </div>
   </div>
