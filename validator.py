@@ -7,7 +7,11 @@ import pandas as pd
 from pathlib import Path
 from parser import ValveRow
 
-TAG_REGEX = re.compile(r"^\d{2}-[A-Z]{2,4}-\d{5,6}$")
+# Format 1: 62-BF-151031
+TAG_REGEX_1 = re.compile(r"^\d{2}-[A-Z]{2,4}-\d{5,6}$")
+# Format 2: VB15-2011A, AVF250-2016
+TAG_REGEX_2 = re.compile(r"^[A-Z]?V[A-Z]{0,2}\d{2,4}-\d{1}\d{3}[A-Z]?$", re.IGNORECASE)
+
 VALID_CATEGORIES = {
     "BF", "BV", "VB", "VC", "VM", "VG", "VGL", "NV", "SV",
     "CV", "PCV", "FCV", "LCV",
@@ -15,18 +19,21 @@ VALID_CATEGORIES = {
     "CK",   # Check valve
     "DB",   # Double Block & Bleed assembly
     "DBB",  # Double Block & Bleed (alternate code)
+    "VF",   # Format 2 valve types
+    "V",    # Generic valve (Format 2)
 }
 
 
 def validate_row(row: ValveRow) -> list[str]:
     """Return list of warning strings for this row. Empty = valid."""
     warnings = []
-    if not TAG_REGEX.match(row.raw_tag.upper()):
+    tag_upper = row.raw_tag.upper()
+    if not TAG_REGEX_1.match(tag_upper) and not TAG_REGEX_2.match(tag_upper):
         warnings.append(f"Unusual tag format: '{row.raw_tag}'")
     if row.category.upper() not in VALID_CATEGORIES:
         warnings.append(f"Unknown valve category: '{row.category}'")
     if row.size == "TBA":
-        warnings.append("Size not extracted from line number")
+        warnings.append("Size not extracted")
     if not row.fluid_code:
         warnings.append("Fluid code missing")
     if not row.piping_class:

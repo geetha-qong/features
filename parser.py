@@ -1,8 +1,9 @@
 """
 Stage 3: Parse raw Claude extractions into structured CSV rows.
-- Deduplicates valves by (area_code + serial_no), merging line number data
-- Parses valve tag → Category, Area Code, Serial No
-- Parses line number → Size, Fluid Code, Piping Class (tiered patterns)
+- Supports multiple tag/line formats (Format 1: Oman, Format 2: compact)
+- Deduplicates valves by (area_code + serial_no), merging series codes
+- Parses valve tag → Category, Area Code, Serial No, (optionally Size, Series)
+- Parses line number → Fluid Code, Piping Class (size comes from tag or drawing, NOT line)
 - Maps actuator → Dynamic Code + 3 actuator columns
 """
 from __future__ import annotations
@@ -11,35 +12,44 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
-# ── Tag pattern ───────────────────────────────────────────────────────────────
-TAG_PATTERN = re.compile(
+# ── Tag patterns ─────────────────────────────────────────────────────────────
+
+# Format 1: [Area(2d)]-[Type(2-4L)]-[Serial(5-6d)]  e.g. 62-BF-151031
+TAG_PATTERN_1 = re.compile(
     r"(?P<area>\d{2})-(?P<type>[A-Z]{2,4})-(?P<serial>\d{5,6})",
+    re.IGNORECASE,
+)
+
+# Format 2: [Actuator?][Type][Size]-[Area(1d)][Serial(3d)][Series?]
+# e.g. VB15-2011A, VF300-2057, AVF250-2016
+TAG_PATTERN_2 = re.compile(
+    r"^(?P<actuator>[A-Z])?(?P<type>V[A-Z]{0,2})(?P<size>\d{2,4})-(?P<area>\d)(?P<serial>\d{3})(?P<series>[A-Z])?$",
     re.IGNORECASE,
 )
 
 # ── Line number patterns (tried in order, most → least specific) ──────────────
 
-# Tier 1 — full format: 20"-W-62151019-BGA
+# Format 2 line: 250-WAP-XXXX-AS1LC → fluid=WAP, piping=AS1LC (no size extraction)
+_LINE_FMT2 = re.compile(
+    r"\d+-(?P<fluid>[A-Z]{2,4})-[A-Z0-9]+-(?P<piping>[A-Z0-9]{3,10})",
+    re.IGNORECASE,
+)
+
+# Format 1 Tier 1 — full format: 20"-W-62151019-BGA (no size extraction)
 _FULL = re.compile(
-    r'(?P<size>\d+(?:\.\d+)?)\s*["\']?\s*-\s*(?P<fluid>[A-Z]{1,4})\s*-\s*\d+\s*-\s*(?P<piping>[A-Z][A-Z0-9\-]{1,10})',
+    r'\d+(?:\.\d+)?\s*["\']?\s*-\s*(?P<fluid>[A-Z]{1,4})\s*-\s*\d+\s*-\s*(?P<piping>[A-Z][A-Z0-9\-]{1,10})',
     re.IGNORECASE,
 )
 
-# Tier 2 — size + fluid only (piping class missing): 2"-W-62151067
+# Format 1 Tier 2 — size + fluid only (piping class missing): 2"-W-62151067
 _SIZE_FLUID = re.compile(
-    r'(?P<size>\d+(?:\.\d+)?)\s*["\']?\s*[-–]\s*(?P<fluid>[A-Z]{1,4})',
+    r'\d+(?:\.\d+)?\s*["\']?\s*[-–]\s*(?P<fluid>[A-Z]{1,4})',
     re.IGNORECASE,
 )
 
-# Tier 3 — comma-separated partial: "10",LO  or  10",LO
+# Format 1 Tier 3 — comma-separated partial: "10",LO  or  10",LO
 _CSV_PARTIAL = re.compile(
-    r'(?P<size>\d+(?:\.\d+)?)\s*["\']?,\s*(?P<fluid>[A-Z]{1,4})',
-    re.IGNORECASE,
-)
-
-# Tier 4 — size only: 20" or 2"
-_SIZE_ONLY = re.compile(
-    r'^(?P<size>\d+(?:\.\d+)?)\s*["\']',
+    r'\d+(?:\.\d+)?\s*["\']?,\s*(?P<fluid>[A-Z]{1,4})',
     re.IGNORECASE,
 )
 
@@ -47,6 +57,7 @@ ACTUATOR_MAP = {
     "M":    {"dynamic": "M",  "motor": "x", "pneumatic": "-", "solenoid": "-"},
     "P":    {"dynamic": "P",  "motor": "-", "pneumatic": "x", "solenoid": "-"},
     "SL":   {"dynamic": "SL", "motor": "-", "pneumatic": "-", "solenoid": "x"},
+    "A":    {"dynamic": "A",  "motor": "-", "pneumatic": "-", "solenoid": "-"},
     "none": {"dynamic": "-",  "motor": "-", "pneumatic": "-", "solenoid": "-"},
 }
 
@@ -69,6 +80,7 @@ class ValveRow:
     line: str = ""
     raw_tag: str = field(default="", repr=False)
     confidence: float = field(default=0.0, repr=False)
+    _series_codes: list = field(default_factory=list, repr=False)
 
     def completeness(self) -> int:
         """Score: how many of the 3 key line fields are filled (0-3)."""
@@ -98,17 +110,48 @@ class ValveRow:
 
 
 def parse_valve_tag(tag: str) -> Optional[dict]:
-    """Parse '62-BF-151031' → {area, type_code, serial}"""
-    m = TAG_PATTERN.search(tag.strip().upper())
+    """
+    Parse a valve tag string into its components.
+    Tries Format 1 first (62-BF-151031), then Format 2 (VB15-2011A).
+    Returns dict with keys: area, type_code, serial, and optionally:
+      size, series_code, actuator_from_tag, format
+    """
+    s = tag.strip().upper()
+
+    # Format 1: 62-BF-151031
+    m = TAG_PATTERN_1.search(s)
     if m:
-        return {"area": m.group("area"), "type_code": m.group("type"), "serial": m.group("serial")}
+        return {
+            "area": m.group("area"),
+            "type_code": m.group("type"),
+            "serial": m.group("serial"),
+            "format": 1,
+        }
+
+    # Format 2: VB15-2011A, AVF250-2016
+    m = TAG_PATTERN_2.match(s)
+    if m:
+        result = {
+            "area": m.group("area"),
+            "type_code": m.group("type").upper(),
+            "serial": m.group("serial"),
+            "size": m.group("size"),
+            "format": 2,
+        }
+        if m.group("series"):
+            result["series_code"] = m.group("series").upper()
+        if m.group("actuator"):
+            result["actuator_from_tag"] = m.group("actuator").upper()
+        return result
+
     return None
 
 
 def parse_line_number(line_no: str) -> dict:
     """
-    Parse a pipe line number string into {size, fluid_code, piping_class}.
-    Tries 4 tiers from most to least specific.
+    Parse a pipe line number string into {fluid_code, piping_class}.
+    Size is NEVER extracted from line numbers (comes from tag or drawing).
+    Tries multiple formats from most to least specific.
     Returns whatever it can extract; missing fields are absent from the dict.
     """
     if not line_no:
@@ -116,35 +159,35 @@ def parse_line_number(line_no: str) -> dict:
 
     s = line_no.strip()
 
-    # Tier 1 — full
-    m = _FULL.search(s)
+    # Format 2 line: 250-WAP-XXXX-AS1LC
+    m = _LINE_FMT2.search(s)
     if m:
         return {
-            "size": m.group("size"),
             "fluid_code": m.group("fluid").upper(),
             "piping_class": m.group("piping").upper(),
         }
 
-    # Tier 2 — size + fluid
+    # Format 1 Tier 1 — full: 20"-W-62151019-BGA
+    m = _FULL.search(s)
+    if m:
+        return {
+            "fluid_code": m.group("fluid").upper(),
+            "piping_class": m.group("piping").upper(),
+        }
+
+    # Format 1 Tier 2 — fluid only: 2"-W-62151067
     m = _SIZE_FLUID.search(s)
     if m:
         return {
-            "size": m.group("size"),
             "fluid_code": m.group("fluid").upper(),
         }
 
-    # Tier 3 — comma-separated partial: "10",LO
+    # Format 1 Tier 3 — comma-separated partial: "10",LO
     m = _CSV_PARTIAL.search(s)
     if m:
         return {
-            "size": m.group("size"),
             "fluid_code": m.group("fluid").upper(),
         }
-
-    # Tier 4 — size only
-    m = _SIZE_ONLY.match(s)
-    if m:
-        return {"size": m.group("size")}
 
     return {}
 
@@ -153,6 +196,7 @@ def merge_rows(base: ValveRow, extra: ValveRow) -> ValveRow:
     """
     Merge two rows for the same valve: fill gaps in base from extra.
     Keeps base tag/actuator/confidence if higher, fills in missing line data from extra.
+    Collects series codes from both.
     """
     winner = base if base.confidence >= extra.confidence else extra
     loser  = extra if base.confidence >= extra.confidence else base
@@ -167,27 +211,70 @@ def merge_rows(base: ValveRow, extra: ValveRow) -> ValveRow:
     if not winner.line and loser.line:
         winner.line = loser.line
 
+    # Merge series codes
+    all_series = set(winner._series_codes + loser._series_codes)
+    winner._series_codes = sorted(all_series)
+
     return winner
 
 
-def build_valve_row(raw: dict, pid_no: str = "MUK-62-1-15-1004-001-24C7") -> Optional[ValveRow]:
+def _format_series_codes(codes: list[str]) -> tuple[str, int]:
+    """
+    Format a list of series codes into a display string and quantity.
+    ['A', 'B', 'C'] → ("A-C", 3)
+    ['A', 'C'] → ("A,C", 2)
+    [] → ("-", 1)
+    """
+    if not codes:
+        return "-", 1
+
+    codes = sorted(set(codes))
+    qty = len(codes)
+
+    if qty == 1:
+        return codes[0], 1
+
+    # Check if consecutive
+    if all(ord(codes[i]) == ord(codes[i-1]) + 1 for i in range(1, len(codes))):
+        return f"{codes[0]}-{codes[-1]}", qty
+    else:
+        return ",".join(codes), qty
+
+
+def build_valve_row(raw: dict, pid_no: str = "") -> Optional[ValveRow]:
     tag = raw.get("valve_tag", "")
     tag_parts = parse_valve_tag(tag)
     if not tag_parts:
         return None
 
     line_parts = parse_line_number(raw.get("line_number") or "")
-    actuator = raw.get("actuator", "none")
-    act_cols = ACTUATOR_MAP.get(actuator, ACTUATOR_MAP["none"])
+
+    # Determine actuator: tag prefix overrides raw.actuator for Format 2
+    actuator_key = "none"
+    if "actuator_from_tag" in tag_parts:
+        actuator_key = tag_parts["actuator_from_tag"]
+    else:
+        actuator_key = raw.get("actuator", "none")
+    act_cols = ACTUATOR_MAP.get(actuator_key, ACTUATOR_MAP["none"])
+
+    # Size: from tag (Format 2) or NOT DEFINED (Format 1 — no line number size)
+    size = tag_parts.get("size", "NOT DEFINED")
+
+    # Series codes tracking
+    series_codes = []
+    if "series_code" in tag_parts:
+        series_codes = [tag_parts["series_code"]]
+
+    series_display, _ = _format_series_codes(series_codes)
 
     return ValveRow(
         pid_no=pid_no,
         dynamic_code=act_cols["dynamic"],
         category=tag_parts["type_code"],
-        size=line_parts.get("size", "NOT DEFINED"),
+        size=size,
         area_code=tag_parts["area"],
         serial_no=tag_parts["serial"],
-        series_code="-",
+        series_code=series_display,
         fluid_code=line_parts.get("fluid_code", ""),
         piping_class=line_parts.get("piping_class", ""),
         qty=1,
@@ -197,13 +284,14 @@ def build_valve_row(raw: dict, pid_no: str = "MUK-62-1-15-1004-001-24C7") -> Opt
         line=raw.get("line_number") or "",
         raw_tag=tag,
         confidence=float(raw.get("confidence", 0.0)),
+        _series_codes=series_codes,
     )
 
 
 def deduplicate(rows: list) -> list:
     """
     Keep one row per (area_code, serial_no), merging data from all duplicates.
-    Merge strategy: take highest-confidence row as base, fill gaps from others.
+    Series codes (A, B, C) get merged — qty reflects distinct series count.
     """
     groups: dict = {}
     for row in rows:
@@ -218,12 +306,16 @@ def deduplicate(rows: list) -> list:
         base = group[0]
         for extra in group[1:]:
             base = merge_rows(base, extra)
+
+        # Finalize series code display and qty
+        if base._series_codes:
+            base.series_code, base.qty = _format_series_codes(base._series_codes)
         merged.append(base)
 
     return sorted(merged, key=lambda r: (r.area_code, r.serial_no))
 
 
-def parse_raw_extractions(raw_valves: list, pid_no: str = "MUK-62-1-15-1004-001-24C7") -> list:
+def parse_raw_extractions(raw_valves: list, pid_no: str = "") -> list:
     rows, skipped = [], 0
     for raw in raw_valves:
         row = build_valve_row(raw, pid_no=pid_no)
@@ -247,4 +339,4 @@ if __name__ == "__main__":
     rows = parse_raw_extractions(raw)
     for r in rows:
         status = "OK" if r.completeness() == 3 else f"MISS:{3-r.completeness()}"
-        print(f"  {r.raw_tag:25s} | {r.category:4s} | {r.size:5s} | {r.fluid_code:4s} | {r.piping_class:8s} {status}")
+        print(f"  {r.raw_tag:25s} | {r.category:4s} | {r.size:5s} | {r.fluid_code:4s} | {r.piping_class:8s} | series={r.series_code} qty={r.qty} {status}")
