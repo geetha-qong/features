@@ -70,6 +70,21 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
     finally:
         os.chdir(original_cwd)
 
+    # If pid_no was not provided by user, read it from the CSV (auto-extracted by pipeline)
+    if not pid_no_override or pid_no_override == "UNKNOWN":
+        try:
+            with open(output_csv, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                first_row = next(reader, None)
+                if first_row:
+                    extracted_pid = first_row.get("P&ID No", "").strip()
+                    if extracted_pid and extracted_pid != "UNKNOWN":
+                        pid_no_override = extracted_pid
+                        job.pid_no = extracted_pid
+                        db.commit()
+        except Exception:
+            pass  # non-fatal, keep UNKNOWN
+
     # Read CSV → insert valve rows
     try:
         _ingest_csv(job_id, output_csv, pid_no_override, db, include_control_valves)

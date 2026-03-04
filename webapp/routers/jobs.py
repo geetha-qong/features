@@ -118,6 +118,25 @@ async def job_status(
     return JSONResponse({"status": job.status, "valve_count": job.valve_count, "error_msg": job.error_msg})
 
 
+@router.get("/jobs/{job_id}/pdf")
+async def view_pdf(
+    job_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job or job.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Job not found")
+    pdf_path = JOB_OUTPUT_DIR / str(job_id) / "input.pdf"
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="PDF file not found")
+    return FileResponse(
+        str(pdf_path),
+        media_type="application/pdf",
+        filename=job.original_filename,
+    )
+
+
 @router.get("/jobs/{job_id}/download")
 async def download_csv(
     job_id: int,

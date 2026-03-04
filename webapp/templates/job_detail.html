@@ -5,9 +5,11 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <a href="/dashboard" class="text-muted small">← Dashboard</a>
-    <h4 class="mt-1 mb-0">{{ job.original_filename }}</h4>
+    <h4 class="mt-1 mb-0">{{ job.original_filename }}
+      <a href="/jobs/{{ job.id }}/pdf" target="_blank" class="btn btn-sm btn-outline-secondary ms-2" title="View uploaded PDF">📄 View PDF</a>
+    </h4>
     <span class="text-muted small">
-    P&ID: <code>{{ job.pid_no }}</code> &nbsp;|&nbsp; Job #{{ job.id }}
+    Drawing No: <code>{{ job.pid_no }}</code> &nbsp;|&nbsp; Job #{{ job.id }}
     {% if job.processing_time %}
       {% set mins = (job.processing_time / 60) | int %}
       {% set secs = job.processing_time | int %}
@@ -76,7 +78,10 @@
 <div class="card shadow-sm mb-4">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span><strong>{{ valve_rows|length }}</strong> valve{{ 's' if valve_rows|length != 1 else '' }} extracted</span>
-    <a href="/jobs/{{ job.id }}/download" class="btn btn-sm btn-success">⬇ Download CSV</a>
+    <div class="d-flex gap-2">
+      <a href="/jobs/{{ job.id }}/pdf" target="_blank" class="btn btn-sm btn-outline-primary">📄 View PDF</a>
+      <a href="/jobs/{{ job.id }}/download" class="btn btn-sm btn-success">⬇ Download CSV</a>
+    </div>
   </div>
   <div class="card-body p-0" style="overflow-x:auto">
     <table class="table table-sm table-hover valve-table mb-0">
