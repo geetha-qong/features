@@ -3,7 +3,7 @@ Stage 3: Parse raw Claude extractions into structured CSV rows.
 - Supports multiple tag/line formats (Format 1: Oman, Format 2: compact)
 - Deduplicates valves by (area_code + serial_no), merging series codes
 - Parses valve tag → Category, Area Code, Serial No, (optionally Size, Series)
-- Parses line number → Fluid Code, Piping Class (size comes from tag or drawing, NOT line)
+- Parses line number → Size, Fluid Code, Piping Class
 - Maps actuator → Dynamic Code + 3 actuator columns
 """
 from __future__ import annotations
@@ -35,21 +35,21 @@ _LINE_FMT2 = re.compile(
     re.IGNORECASE,
 )
 
-# Format 1 Tier 1 — full format: 20"-W-62151019-BGA (no size extraction)
+# Format 1 Tier 1 — full format: 20"-W-62151019-BGA
 _FULL = re.compile(
-    r'\d+(?:\.\d+)?\s*["\']?\s*-\s*(?P<fluid>[A-Z]{1,4})\s*-\s*\d+\s*-\s*(?P<piping>[A-Z][A-Z0-9\-]{1,10})',
+    r'(?P<size>\d+(?:\.\d+)?)\s*["\']?\s*-\s*(?P<fluid>[A-Z]{1,4})\s*-\s*\d+\s*-\s*(?P<piping>[A-Z][A-Z0-9\-]{1,10})',
     re.IGNORECASE,
 )
 
 # Format 1 Tier 2 — size + fluid only (piping class missing): 2"-W-62151067
 _SIZE_FLUID = re.compile(
-    r'\d+(?:\.\d+)?\s*["\']?\s*[-–]\s*(?P<fluid>[A-Z]{1,4})',
+    r'(?P<size>\d+(?:\.\d+)?)\s*["\']?\s*[-–]\s*(?P<fluid>[A-Z]{1,4})',
     re.IGNORECASE,
 )
 
 # Format 1 Tier 3 — comma-separated partial: "10",LO  or  10",LO
 _CSV_PARTIAL = re.compile(
-    r'\d+(?:\.\d+)?\s*["\']?,\s*(?P<fluid>[A-Z]{1,4})',
+    r'(?P<size>\d+(?:\.\d+)?)\s*["\']?,\s*(?P<fluid>[A-Z]{1,4})',
     re.IGNORECASE,
 )
 
@@ -149,8 +149,7 @@ def parse_valve_tag(tag: str) -> Optional[dict]:
 
 def parse_line_number(line_no: str) -> dict:
     """
-    Parse a pipe line number string into {fluid_code, piping_class}.
-    Size is NEVER extracted from line numbers (comes from tag or drawing).
+    Parse a pipe line number string into {size, fluid_code, piping_class}.
     Tries multiple formats from most to least specific.
     Returns whatever it can extract; missing fields are absent from the dict.
     """
@@ -170,15 +169,18 @@ def parse_line_number(line_no: str) -> dict:
     # Format 1 Tier 1 — full: 20"-W-62151019-BGA
     m = _FULL.search(s)
     if m:
-        return {
+        result = {
+            "size": m.group("size"),
             "fluid_code": m.group("fluid").upper(),
             "piping_class": m.group("piping").upper(),
         }
+        return result
 
-    # Format 1 Tier 2 — fluid only: 2"-W-62151067
+    # Format 1 Tier 2 — size + fluid only: 2"-W-62151067
     m = _SIZE_FLUID.search(s)
     if m:
         return {
+            "size": m.group("size"),
             "fluid_code": m.group("fluid").upper(),
         }
 
@@ -186,6 +188,7 @@ def parse_line_number(line_no: str) -> dict:
     m = _CSV_PARTIAL.search(s)
     if m:
         return {
+            "size": m.group("size"),
             "fluid_code": m.group("fluid").upper(),
         }
 
@@ -257,8 +260,8 @@ def build_valve_row(raw: dict, pid_no: str = "") -> Optional[ValveRow]:
         actuator_key = raw.get("actuator", "none")
     act_cols = ACTUATOR_MAP.get(actuator_key, ACTUATOR_MAP["none"])
 
-    # Size: from tag (Format 2) or NOT DEFINED (Format 1 — no line number size)
-    size = tag_parts.get("size", "NOT DEFINED")
+    # Size: from tag (Format 2), then line number (Format 1), then NOT DEFINED
+    size = tag_parts.get("size") or line_parts.get("size") or "NOT DEFINED"
 
     # Series codes tracking
     series_codes = []
