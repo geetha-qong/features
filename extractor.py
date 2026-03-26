@@ -111,8 +111,10 @@ def extract_drawing_number(pdf_path: str, tmp_dir: str = "tmp") -> str:
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
                     {"type": "text", "text": (
                         "This is the title block from a P&ID engineering drawing. "
-                        "Find the field labelled 'Drawing No.' or 'DRG NO' or 'Drawing Number' and return ONLY its value, "
-                        "nothing else. Example output: MUK-62-1-15-1004-001-24C7. "
+                        "Find the field labelled 'Drawing No.' or 'DRG NO' or 'Drawing Number' and return ONLY its full value including any revision suffix. "
+                        "Example outputs: MUK-62-1-15-1004-001-24C7-D  or  MUK-62-1-15-1005-001-24C7-D "
+                        "(note the trailing -D or similar revision code must be included if present). "
+                        "Return ONLY the drawing number string, nothing else. "
                         "If you cannot find it, reply with: UNKNOWN"
                     )},
                 ],

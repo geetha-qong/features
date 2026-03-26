@@ -43,7 +43,7 @@ def make_output_path(pdf_path: str) -> str:
     return str(OUTPUT_DIR / f"valve_list_{stem}_{ts}.csv")
 
 
-def run(pdf_path: str, output_path: str = None, skip_extraction: bool = False):
+def run(pdf_path: str, output_path: str = None, skip_extraction: bool = False, original_filename: str = ""):
     if output_path is None:
         output_path = make_output_path(pdf_path)
 
@@ -88,7 +88,9 @@ def run(pdf_path: str, output_path: str = None, skip_extraction: bool = False):
     print()
 
     # Stage 3b: Apply drawing-specific manual corrections
-    drawing_stem = Path(pdf_path).stem.replace("INPUT-", "")
+    # Use original_filename if provided (webapp passes input.pdf as pdf_path)
+    name_for_stem = original_filename if original_filename else pdf_path
+    drawing_stem = Path(name_for_stem).stem.replace("INPUT-", "")
     rows = apply_corrections(rows, drawing_stem)
     print()
 

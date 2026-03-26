@@ -26,7 +26,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 
-def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: Session, include_control_valves: bool = True) -> None:
+def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: Session, include_control_valves: bool = True, original_filename: str = "") -> None:
     """
     Called in a background thread. Runs the pipeline and updates the DB.
     """
@@ -56,7 +56,7 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
             importlib.reload(pl)
 
             with redirect_stdout(log_buffer):
-                pl.run(pdf_path=pdf_path, output_path=output_csv)
+                pl.run(pdf_path=pdf_path, output_path=output_csv, original_filename=original_filename)
 
     except Exception as exc:
         os.chdir(original_cwd)

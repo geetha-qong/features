@@ -18,11 +18,11 @@ from webapp.pipeline_runner import run_pipeline_for_job
 router = APIRouter()
 
 
-def _run_in_thread(job_id: int, pdf_path: str, pid_no_override: str, include_control_valves: bool = True):
+def _run_in_thread(job_id: int, pdf_path: str, pid_no_override: str, include_control_valves: bool = True, original_filename: str = ""):
     """Run pipeline in a separate thread with its own DB session."""
     db = SessionLocal()
     try:
-        run_pipeline_for_job(job_id, pdf_path, pid_no_override, db, include_control_valves)
+        run_pipeline_for_job(job_id, pdf_path, pid_no_override, db, include_control_valves, original_filename=original_filename)
     finally:
         db.close()
 
@@ -65,6 +65,7 @@ async def upload_pdf(
     t = threading.Thread(
         target=_run_in_thread,
         args=(job.id, job_pdf, pid_no.strip(), job.include_control_valves),
+        kwargs={"original_filename": file.filename},
         daemon=True,
     )
     t.start()
@@ -190,6 +191,7 @@ async def rerun_job(
     t = threading.Thread(
         target=_run_in_thread,
         args=(job.id, job_pdf, job.pid_no, job.include_control_valves),
+        kwargs={"original_filename": job.original_filename},
         daemon=True,
     )
     t.start()

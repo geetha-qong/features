@@ -262,6 +262,9 @@ def build_valve_row(raw: dict, pid_no: str = "") -> Optional[ValveRow]:
 
     # Size: from tag (Format 2), then line number (Format 1), then NOT DEFINED
     size = tag_parts.get("size") or line_parts.get("size") or "NOT DEFINED"
+    # DB (Double Block & Bleed) valves are always on 2" instrument taps
+    if tag_parts.get("type_code", "").upper() == "DB" and size == "NOT DEFINED":
+        size = "2"
 
     # Series codes tracking
     series_codes = []
