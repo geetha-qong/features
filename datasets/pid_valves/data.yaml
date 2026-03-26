@@ -1,0 +1,16 @@
+path: datasets/pid_valves
+train: images/train
+val: images/val
+
+nc: 10
+names:
+  0: valve_bf        # Butterfly valve — bowtie/diamond on pipe
+  1: valve_bv        # Ball valve — circle with line through it
+  2: valve_ck        # Check valve — arrowhead / half-circle
+  3: valve_gl        # Globe valve — circle with internal plug
+  4: valve_db        # Double Block & Bleed — cluster of 3 small symbols
+  5: valve_cv        # Control valve — circle with actuator dome
+  6: valve_gen       # Generic (VM, VG, NV, SV, UZV, PV, FV)
+  7: actuator_motor  # Motor box with M label (square)
+  8: actuator_pneu   # Pneumatic dome / diaphragm
+  9: actuator_sol    # Solenoid coil or SL text box
