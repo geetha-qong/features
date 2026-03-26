@@ -73,11 +73,12 @@
         </div>
         <div class="modal-body">
           <div class="mb-3">
-            <label class="form-label">PDF File <span class="text-danger">*</span></label>
-            <input type="file" name="file" class="form-control" accept=".pdf" required>
+            <label class="form-label">PDF File(s) <span class="text-danger">*</span></label>
+            <input type="file" name="files" class="form-control" accept=".pdf" multiple required>
+            <div class="form-text">Select one or more P&ID PDFs. Each file creates a separate job.</div>
           </div>
           <div class="mb-3">
-            <label class="form-label">P&ID Number <span class="text-muted">(optional)</span></label>
+            <label class="form-label">P&ID Number <span class="text-muted">(optional, single file only)</span></label>
             <input type="text" name="pid_no" class="form-control" placeholder="e.g. MUK-62-1-15-1004-001">
             <div class="form-text">Leave blank to auto-extract from title block.</div>
           </div>

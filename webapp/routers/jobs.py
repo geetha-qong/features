@@ -4,6 +4,8 @@ import threading
 import uuid
 from pathlib import Path
 
+from typing import List
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -30,47 +32,56 @@ def _run_in_thread(job_id: int, pdf_path: str, pid_no_override: str, include_con
 @router.post("/upload")
 async def upload_pdf(
     request: Request,
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...),
     pid_no: str = Form(""),
     include_control_valves: str = Form("off"),
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+    include_cv = (include_control_valves == "on")
+    # P&ID number override only makes sense for a single file
+    pid_no_override = pid_no.strip() if len(files) == 1 else ""
 
-    stored_name = f"{uuid.uuid4()}.pdf"
-    dest = UPLOAD_DIR / stored_name
-    with dest.open("wb") as buf:
-        shutil.copyfileobj(file.file, buf)
+    last_job_id = None
+    for file in files:
+        if not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail=f"{file.filename}: only PDF files are accepted")
 
-    job = models.Job(
-        user_id=current_user.id,
-        original_filename=file.filename,
-        stored_filename=stored_name,
-        pid_no=pid_no.strip() or "UNKNOWN",
-        status="pending",
-        include_control_valves=(include_control_valves == "on"),
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
+        stored_name = f"{uuid.uuid4()}.pdf"
+        dest = UPLOAD_DIR / stored_name
+        with dest.open("wb") as buf:
+            shutil.copyfileobj(file.file, buf)
 
-    # Copy PDF to job output dir so pipeline can reference it
-    job_dir = JOB_OUTPUT_DIR / str(job.id)
-    job_dir.mkdir(parents=True, exist_ok=True)
-    job_pdf = str(job_dir / "input.pdf")
-    shutil.copy2(str(dest), job_pdf)
+        job = models.Job(
+            user_id=current_user.id,
+            original_filename=file.filename,
+            stored_filename=stored_name,
+            pid_no=pid_no_override or "UNKNOWN",
+            status="pending",
+            include_control_valves=include_cv,
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
 
-    t = threading.Thread(
-        target=_run_in_thread,
-        args=(job.id, job_pdf, pid_no.strip(), job.include_control_valves),
-        kwargs={"original_filename": file.filename},
-        daemon=True,
-    )
-    t.start()
+        job_dir = JOB_OUTPUT_DIR / str(job.id)
+        job_dir.mkdir(parents=True, exist_ok=True)
+        job_pdf = str(job_dir / "input.pdf")
+        shutil.copy2(str(dest), job_pdf)
 
-    return RedirectResponse(url=f"/jobs/{job.id}", status_code=303)
+        t = threading.Thread(
+            target=_run_in_thread,
+            args=(job.id, job_pdf, pid_no_override, include_cv),
+            kwargs={"original_filename": file.filename},
+            daemon=True,
+        )
+        t.start()
+        last_job_id = job.id
+
+    # Single upload → go to job detail; multi → go to dashboard
+    if last_job_id and len(files) == 1:
+        return RedirectResponse(url=f"/jobs/{last_job_id}", status_code=303)
+    return RedirectResponse(url="/dashboard", status_code=303)
 
 
 @router.get("/jobs/{job_id}", response_class=HTMLResponse)
