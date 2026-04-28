@@ -6,6 +6,7 @@ Drop-in replacement for extractor.py — same public API:
 """
 import json
 import re
+import tempfile
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 
@@ -39,7 +40,7 @@ VALVE_TYPE_CODES = {
 }
 
 # Text patterns
-TAG_RE = re.compile(r'(\d{2,3})-([A-Z]{2,4})-(\d{4,8})')
+TAG_RE = re.compile(r'(?<!\d)(\d{2})-([A-Z]{2,4})-(\d{6})(?!\d)')
 LINE_RE = re.compile(
     r'(\d{1,3})["\u201d\u2019\']?\s*[-\u2013]\s*([A-Z]{1,3})\s*[-\u2013]\s*(\d{5,8})\s*[-\u2013]\s*([A-Z0-9]{2,6})'
 )
@@ -207,19 +208,104 @@ def _associate_text(valve: Dict, ocr_texts: List[Dict],
         key=lambda t: _dist(vx, vy, t["cx"], t["cy"]),
     )
     combined = " ".join(t["text"] for t in nearby[:20]).upper()
+    combined_ns = combined.replace(" ", "")  # no-space: catches OCR-fragmented tags
 
     valve_tag = None
     line_number = None
 
-    m = TAG_RE.search(combined)
-    if m:
-        valve_tag = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    for txt in (combined, combined_ns):
+        for m in TAG_RE.finditer(txt):
+            if m.group(2) in VALVE_TYPE_CODES:
+                valve_tag = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+                break
+        if valve_tag:
+            break
 
     m = LINE_RE.search(combined)
     if m:
         line_number = f'{m.group(1)}"-{m.group(2)}-{m.group(3)}-{m.group(4)}'
 
     return valve_tag, line_number
+
+
+def _targeted_crop_ocr(tile_path: str, cx: float, cy: float,
+                       tile_x0: int, tile_y0: int,
+                       crop_size: int = 400) -> List[Dict]:
+    """
+    Extract a crop from the full-page image around a YOLO detection and run OCR.
+    Returns OCR results with coordinates relative to the tile origin.
+    """
+    tile_dir = Path(tile_path).parent
+    full_png = tile_dir / "page_0_full.png"
+    if not full_png.exists():
+        return []
+    try:
+        img = Image.open(str(full_png))
+        fx = tile_x0 + cx
+        fy = tile_y0 + cy
+        x0 = max(0, int(fx - crop_size / 2))
+        y0 = max(0, int(fy - crop_size / 2))
+        x1 = min(img.width, int(fx + crop_size / 2))
+        y1 = min(img.height, int(fy + crop_size / 2))
+        crop = img.crop((x0, y0, x1, y1))
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            crop.save(f.name)
+            crop_texts = _run_ocr(f.name)
+        # Shift coordinates into tile space
+        dx, dy = x0 - tile_x0, y0 - tile_y0
+        for t in crop_texts:
+            for key in ("x1", "x2", "cx"):
+                t[key] += dx
+            for key in ("y1", "y2", "cy"):
+                t[key] += dy
+        return crop_texts
+    except Exception:
+        return []
+
+
+def _extract_tags_from_tile(ocr_texts: List[Dict]) -> List[Tuple[str, float, float]]:
+    """
+    Find all valve tags from OCR regions, handling fragmented tokens.
+    Clusters tokens into approximate text rows, then tries consecutive
+    groups of 1-4 tokens to recover tags split across tokens.
+    Returns [(tag, cx, cy), ...] deduplicated.
+    """
+    if not ocr_texts:
+        return []
+
+    sorted_texts = sorted(ocr_texts, key=lambda t: (t["cy"], t["cx"]))
+
+    # Cluster into approximate text rows (y within 40px = same row)
+    rows: List[List[Dict]] = []
+    current_row = [sorted_texts[0]]
+    for t in sorted_texts[1:]:
+        if abs(t["cy"] - current_row[-1]["cy"]) <= 40:
+            current_row.append(t)
+        else:
+            rows.append(sorted(current_row, key=lambda x: x["cx"]))
+            current_row = [t]
+    if current_row:
+        rows.append(sorted(current_row, key=lambda x: x["cx"]))
+
+    found: List[Tuple[str, float, float]] = []
+    seen: set = set()
+
+    for row in rows:
+        for start in range(len(row)):
+            for end in range(start + 1, min(start + 5, len(row) + 1)):
+                group = row[start:end]
+                combined = "".join(t["text"] for t in group).upper()
+                m = TAG_RE.search(combined)
+                if m and m.group(2) in VALVE_TYPE_CODES:
+                    tag = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+                    if tag not in seen:
+                        seen.add(tag)
+                        cx = sum(t["cx"] for t in group) / len(group)
+                        cy = sum(t["cy"] for t in group) / len(group)
+                        found.append((tag, cx, cy))
+                    break  # don't extend this start further
+
+    return found
 
 
 def _associate_actuator(valve: Dict, actuators: List[Dict], max_dist: float = 150) -> str:
@@ -267,32 +353,29 @@ def _detect_tile(tile: Dict) -> List[Dict]:
     results = []
     yolo_indices_used = set()
 
-    # Strategy 1: OCR-centric — find all complete tags in individual OCR texts,
-    # then associate the nearest YOLO detection for type classification.
-    for t in ocr_texts:
-        m = TAG_RE.search(t["text"].upper())
-        if not m:
-            continue
-        type_code = m.group(2)
-        if type_code not in VALVE_TYPE_CODES:
-            continue  # instrument tag (FIT, LIT, XZT, etc.) — skip
-        tag = f"{m.group(1)}-{type_code}-{m.group(3)}"
+    # Strategy 1: OCR-driven tile scan — find valve tags by combining adjacent OCR
+    # row tokens. Handles fragmented tags (e.g. "62-BF-" + "151031").
+    tag_hits = _extract_tags_from_tile(ocr_texts)
 
-        # Nearest YOLO valve (for type classification)
-        best_idx, best_v, best_d = None, None, 400.0
-        for i, v in enumerate(valves):
-            d = _dist(t["cx"], t["cy"], v["cx"], v["cy"])
+    for tag, tcx, tcy in tag_hits:
+        # Nearest YOLO valve within 500px for class/bbox
+        best_idx, best_v, best_d = None, None, 500.0
+        for vi, v in enumerate(valves):
+            d = _dist(tcx, tcy, v["cx"], v["cy"])
             if d < best_d:
-                best_d, best_idx, best_v = d, i, v
+                best_d, best_idx, best_v = d, vi, v
 
-        yolo_class = best_v["class_name"] if best_v else "valve_gen"
-        yolo_conf = best_v["conf"] if best_v else 0.0
         if best_idx is not None:
             yolo_indices_used.add(best_idx)
 
-        line_number = _find_line_near(t, ocr_texts)
-        actuator = _associate_actuator({"cx": t["cx"], "cy": t["cy"]}, actuators, max_dist=200)
+        yolo_class = best_v["class_name"] if best_v else "valve_gen"
+        yolo_conf = best_v["conf"] if best_v else 0.0
 
+        line_number = _find_line_near({"cx": tcx, "cy": tcy}, ocr_texts)
+        actuator = _associate_actuator({"cx": tcx, "cy": tcy}, actuators, max_dist=200)
+
+        bbox = [best_v["x1"], best_v["y1"], best_v["x2"], best_v["y2"]] if best_v else \
+               [tcx - 30, tcy - 30, tcx + 30, tcy + 30]
         print(f"      {tag:25s}  line={line_number or '—':35s}  act={actuator}  [{yolo_class} {round(yolo_conf,3)}]")
         results.append({
             "valve_tag": tag,
@@ -302,25 +385,65 @@ def _detect_tile(tile: Dict) -> List[Dict]:
             "yolo_conf": round(yolo_conf, 3),
             "tile_row": tile["row"],
             "tile_col": tile["col"],
+            "bbox_tile": bbox,
+            "source": "OCR",
         })
 
-    # Strategy 2: YOLO-only fallback — high-confidence detections with no matched OCR tag
+    # Strategy 2: YOLO-anchored — for detections not matched by OCR above.
+    # Uses _associate_text which combines all nearby OCR tokens (+ no-space fallback).
+    SERIAL_RE = re.compile(r'^-?(\d{6,8})$')
+    AREA_RE = re.compile(r'^\d{2}$')
     for i, v in enumerate(valves):
         if i in yolo_indices_used:
             continue
-        if v["conf"] < 0.5:
+        if v["conf"] < 0.35:
             continue
-        line_number = _find_line_near(v, ocr_texts)
+
+        valve_tag, line_number = _associate_text(v, ocr_texts, radius=500)
+
+        # Targeted crop OCR — if still no tag, zoom in on the valve location
+        # in the full-page image to get better OCR on small/noisy text
+        if not valve_tag:
+            tile_x0 = tile.get("x0", 0)
+            tile_y0 = tile.get("y0", 0)
+            crop_texts = _targeted_crop_ocr(tile["path"], v["cx"], v["cy"], tile_x0, tile_y0)
+            if crop_texts:
+                crop_tag_hits = _extract_tags_from_tile(crop_texts)
+                if crop_tag_hits:
+                    valve_tag = crop_tag_hits[0][0]  # first hit from crop
+                if not valve_tag:
+                    valve_tag, line_number = _associate_text(v, crop_texts, radius=300)
+
+        # Serial reassembly fallback — require BOTH area + serial fragments
+        if not valve_tag:
+            type_code = CLASS_TO_TYPE.get(v["class_name"])
+            if type_code:
+                nearby = [t for t in ocr_texts if _dist(v["cx"], v["cy"], t["cx"], t["cy"]) <= 300]
+                serial = None
+                area_code = None
+                for t in sorted(nearby, key=lambda t: _dist(v["cx"], v["cy"], t["cx"], t["cy"])):
+                    txt = t["text"].strip()
+                    if serial is None and SERIAL_RE.match(txt):
+                        serial = SERIAL_RE.match(txt).group(1)
+                    if area_code is None and AREA_RE.match(txt):
+                        area_code = txt
+                if serial and area_code:  # require BOTH to reduce false positives
+                    valve_tag = f"{area_code}-{type_code}-{serial}"
+
         actuator = _associate_actuator(v, actuators)
-        print(f"      {'?':25s}  line={line_number or '—':35s}  act={actuator}  [{v['class_name']} {round(v['conf'],3)}] (YOLO-only)")
+        suffix = "(crop)" if valve_tag else "(YOLO-only)"
+        label = valve_tag or "?"
+        print(f"      {label:25s}  line={line_number or '—':35s}  act={actuator}  [{v['class_name']} {round(v['conf'],3)}] {suffix}")
         results.append({
-            "valve_tag": None,
+            "valve_tag": valve_tag,
             "line_number": line_number,
             "actuator": actuator,
             "yolo_class": v["class_name"],
             "yolo_conf": round(v["conf"], 3),
             "tile_row": tile["row"],
             "tile_col": tile["col"],
+            "bbox_tile": [v["x1"], v["y1"], v["x2"], v["y2"]],
+            "source": suffix,
         })
 
     return results
@@ -342,6 +465,11 @@ def extract_all_tiles(tiles: List[Dict], model: str = None, save_raw: bool = Tru
         print(f"  [{i+1}/{len(tiles)}] Tile r{tile['row']}c{tile['col']}...")
         try:
             tile_valves = _detect_tile(tile)
+            # Annotate each detection with tile page offsets for visualization
+            for v in tile_valves:
+                v["tile_x0"] = tile.get("x0", 0)
+                v["tile_y0"] = tile.get("y0", 0)
+                v["tile_page"] = tile.get("page", 0)
             all_valves.extend(tile_valves)
         except Exception as e:
             print(f"    ERROR: {e}")
