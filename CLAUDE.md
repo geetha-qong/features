@@ -14,6 +14,7 @@ Target: **≥90% recall** on valve identification.
 
 - `main` — stable, production-deployed API-based pipeline
 - `feature/own-system` — offline YOLO+PaddleOCR system (annotation → training → replace extractor.py)
+- `feature/super-admin-labeling` — 3-tier role system, user approval flow, Label Studio sync from webapp
 
 ## P&ID Document Structure
 
@@ -66,6 +67,10 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 ## Webapp Features (production at https://dev.theqong.com)
 
 - Login/register (JWT cookie auth). Admin: `admin / Qong@2024`
+- **Roles (3-tier)**: `super_admin` (all jobs + admin menu), `annotator` (/annotate queue), `user` (own jobs only)
+- Public `/register` creates inactive account (`is_active=False`) — super_admin approves at `/admin/users`
+- Admin-created users (via `/admin/users` modal) are active immediately
+- First-ever registered user auto-promoted to super_admin; existing `admin` account promoted on startup
 - Upload one or more P&ID PDFs → one background job per file (serialized via `_pipeline_lock`)
   - Form field: `name="files"` (multiple). Single file → redirect to job detail; batch → redirect to dashboard
   - P&ID number override only applied when single file uploaded
@@ -97,6 +102,8 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - `run_migrations()` in `database.py` handles ALTER TABLE on startup
 - Job columns: `processing_time` (Float), `processing_log` (Text), `include_control_valves` (Bool),
   `original_filename` (Str) — used to derive `drawing_stem` for corrections lookup
+- User columns added: `role` (Str default `'user'`), `is_active` (Bool default `True`)
+- Job columns added: `ls_project_id` (Int), `ls_synced` (Bool) — Label Studio sync state
 
 ## Critical Bug Fixes (already applied)
 
@@ -261,6 +268,23 @@ docker compose run --rm trainer python3 train.py
 - Actuator linked to nearest valve within **150px**
 - OCR may miss or misread tags — tune radius in `_associate_text()` in `detector.py` if recall drops
 - `valve_ck` and `valve_gl` YOLO detections unreliable (mAP50 <0.05) — OCR text is the fallback
+
+## Label Studio Sync (feature/super-admin-labeling)
+
+- `/admin/label-studio` — super_admin pushes completed job tiles to Label Studio as annotation tasks
+- `/annotate` — annotator-role users see synced projects + progress, link out to Label Studio
+- `/jobs/{id}/tiles/{filename}` — serves tile PNGs so Label Studio can load images via URL
+- `webapp/label_studio_client.py` — LS REST API client; configured via `LS_URL` + `LS_API_KEY` env vars
+- LS project created per P&ID drawing (named by pid_no); one project per drawing, re-sync safe
+- `LS_URL` default: `http://localhost:8080`; `LS_API_KEY`: get from Label Studio → Account → Access Token
+
+## Offline Detector Recall Improvements (feature/own-system, committed cf21758)
+
+- `_extract_tags_from_tile()` — row-based OCR token clustering (40px y-tolerance), groups 1–4 tokens to reassemble fragmented tags
+- `_targeted_crop_ocr()` — 400×400px crop from full-page image centered on YOLO detection; major win for noisy/hatched tiles
+- TAG_RE: `(?<!\d)(\d{2})-([A-Z]{2,4})-(\d{6})(?!\d)` — exact 6-digit serial, no leading-digit leakage
+- Benchmark (2 drawings): 73.3% recall (44/60), up from 53.4% baseline
+- Annotated PDF named after source drawing: `INPUT-MUK-..._annotated.pdf` (not timestamped CSV name)
 
 ## Temporary Files
 
