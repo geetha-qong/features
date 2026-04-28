@@ -20,6 +20,10 @@ def run_migrations():
         ("jobs", "processing_time", "REAL"),
         ("jobs", "processing_log", "TEXT"),
         ("jobs", "include_control_valves", "INTEGER DEFAULT 1"),
+        ("jobs", "ls_project_id", "INTEGER"),
+        ("jobs", "ls_synced", "INTEGER DEFAULT 0"),
+        ("users", "role", "TEXT DEFAULT 'user'"),
+        ("users", "is_active", "INTEGER DEFAULT 1"),
     ]
     with engine.connect() as conn:
         for table, column, col_type in new_columns:

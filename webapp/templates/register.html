@@ -1,12 +1,31 @@
 {% extends "base.html" %}
-{% block title %}Create User — Qong{% endblock %}
+{% block title %}{% if user and user.role == 'super_admin' %}Create User{% else %}Sign Up{% endif %} — Qong{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-md-4">
+
+    {% if success is defined and success %}
+    <div class="card shadow-sm border-success">
+      <div class="card-body p-4 text-center">
+        <div class="mb-3" style="font-size:3rem">✅</div>
+        <h5 class="fw-semibold">Registration Submitted</h5>
+        <p class="text-muted">{{ success }}</p>
+        <a href="/login" class="btn btn-dark w-100">Back to Login</a>
+      </div>
+    </div>
+    {% else %}
     <div class="card shadow-sm">
       <div class="card-body p-4">
-        <h5 class="card-title mb-4 fw-semibold">Create New User</h5>
+        <h5 class="card-title mb-1 fw-semibold">
+          {% if user and user.role == 'super_admin' %}Create New User{% else %}Request Account{% endif %}
+        </h5>
+        {% if not (user and user.role == 'super_admin') %}
+        <p class="text-muted small mb-4">Your account will require approval before you can log in.</p>
+        {% else %}
+        <p class="text-muted small mb-4">User will be activated immediately.</p>
+        {% endif %}
+
         <form method="post" action="/register">
           <div class="mb-3">
             <label class="form-label">Username</label>
@@ -20,10 +39,17 @@
             <label class="form-label">Password</label>
             <input type="password" name="password" class="form-control" required minlength="6">
           </div>
-          <button type="submit" class="btn btn-dark w-100">Create User</button>
+          <button type="submit" class="btn btn-dark w-100">
+            {% if user and user.role == 'super_admin' %}Create User{% else %}Submit Request{% endif %}
+          </button>
         </form>
+        <div class="mt-3 text-center">
+          <a href="/login" class="text-muted small">Back to Login</a>
+        </div>
       </div>
     </div>
+    {% endif %}
+
   </div>
 </div>
 {% endblock %}

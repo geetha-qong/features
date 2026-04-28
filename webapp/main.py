@@ -1,18 +1,19 @@
 """FastAPI application entry point."""
 from pathlib import Path
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from webapp.database import Base, engine, run_migrations, SessionLocal
 from webapp.routers import auth, dashboard, jobs, feedback
+from webapp.routers import admin as admin_router
+from webapp.config import JOB_OUTPUT_DIR
 
 # Create all DB tables and run column migrations on startup
 Base.metadata.create_all(bind=engine)
 run_migrations()
 
-# On every startup, any job still marked 'processing' was killed mid-run
-# (server restart / deploy during pipeline). Mark them failed so users can re-run.
+
 def _reset_stale_jobs() -> None:
     from webapp import models
     db = SessionLocal()
@@ -31,7 +32,30 @@ def _reset_stale_jobs() -> None:
     finally:
         db.close()
 
+
+def _ensure_super_admin() -> None:
+    """Promote the 'admin' user to super_admin if no super_admin exists yet."""
+    from webapp import models
+    db = SessionLocal()
+    try:
+        has_super = db.query(models.User).filter(models.User.role == "super_admin").first()
+        if has_super:
+            return
+        # Promote 'admin' account if it exists, otherwise promote oldest user
+        candidate = (
+            db.query(models.User).filter(models.User.username == "admin").first()
+            or db.query(models.User).order_by(models.User.id).first()
+        )
+        if candidate:
+            candidate.role = "super_admin"
+            db.commit()
+            print(f"[startup] Promoted '{candidate.username}' to super_admin")
+    finally:
+        db.close()
+
+
 _reset_stale_jobs()
+_ensure_super_admin()
 
 app = FastAPI(title="Qong — P&ID Valve Extractor")
 
@@ -44,6 +68,7 @@ app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(jobs.router)
 app.include_router(feedback.router)
+app.include_router(admin_router.router)
 
 
 @app.get("/")
@@ -52,3 +77,13 @@ async def root(request: Request):
     if token:
         return RedirectResponse(url="/dashboard")
     return RedirectResponse(url="/login")
+
+
+@app.get("/jobs/{job_id}/tiles/{filename}")
+async def serve_tile(job_id: int, filename: str):
+    """Serve tile PNG images — used by Label Studio to load task images."""
+    tile_path = Path(JOB_OUTPUT_DIR) / str(job_id) / "tmp" / filename
+    if not tile_path.exists() or tile_path.suffix != ".png":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Tile not found")
+    return FileResponse(str(tile_path), media_type="image/png")

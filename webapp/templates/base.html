@@ -30,9 +30,26 @@
       <div class="collapse navbar-collapse">
         <ul class="navbar-nav ms-auto">
           {% if user is defined and user %}
+            {% if user.role != 'annotator' %}
             <li class="nav-item"><a class="nav-link" href="/dashboard">Dashboard</a></li>
-            <li class="nav-item"><a class="nav-link" href="/register">Create User</a></li>
-            <li class="nav-item"><span class="nav-link text-secondary">{{ user.username }}</span></li>
+            {% endif %}
+            {% if user.role == 'annotator' %}
+            <li class="nav-item"><a class="nav-link" href="/annotate">Annotate</a></li>
+            {% endif %}
+            {% if user.role == 'super_admin' %}
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Admin</a>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="/admin/users">Manage Users</a></li>
+                <li><a class="dropdown-item" href="/admin/label-studio">Label Studio Sync</a></li>
+              </ul>
+            </li>
+            {% endif %}
+            <li class="nav-item"><span class="nav-link text-secondary">
+              {{ user.username }}
+              {% if user.role == 'super_admin' %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">ADMIN</span>{% endif %}
+              {% if user.role == 'annotator' %}<span class="badge bg-info text-dark ms-1" style="font-size:0.65rem">ANNOTATOR</span>{% endif %}
+            </span></li>
             <li class="nav-item"><a class="nav-link" href="/logout">Logout</a></li>
           {% else %}
             <li class="nav-item"><a class="nav-link" href="/login">Login</a></li>

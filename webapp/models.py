@@ -11,6 +11,8 @@ class User(Base):
     username = Column(String, unique=True, nullable=False)
     email = Column(String, unique=True, nullable=True)
     password_hash = Column(String, nullable=False)
+    role = Column(String, default="user")       # "user" | "annotator" | "super_admin"
+    is_active = Column(Boolean, default=True)   # super_admin can deactivate/approve users
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -31,6 +33,8 @@ class Job(Base):
     processing_log = Column(Text, nullable=True)     # captured stdout from pipeline
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
+    ls_project_id = Column(Integer, nullable=True)   # Label Studio project id
+    ls_synced = Column(Boolean, default=False)        # True once tiles pushed to LS
 
 
 class ValveRow(Base):
