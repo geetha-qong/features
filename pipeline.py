@@ -12,8 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from pdf_to_tiles import pdf_to_tiles
-from detector import extract_all_tiles, extract_drawing_number
-from extractor import extract_instruments
+from extractor import extract_all_tiles, extract_drawing_number, extract_instruments
 from parser import parse_raw_extractions
 from validator import validate_and_report, write_csv, compare_with_ground_truth
 from corrections import apply_corrections

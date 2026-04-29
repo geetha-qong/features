@@ -18,6 +18,21 @@ Target: **≥90% recall** on valve identification.
 
 **NEVER install any service or tool directly on the local Mac.** All services (nginx, databases, annotation tools, etc.) must be added as Docker containers in `docker-compose.yml`. This ensures the compose file can be pushed to production as-is.
 
+## CRITICAL: Two-Mode Architecture — Do NOT Mix
+
+**Production (end users)** → API-based pipeline only (`extractor.py`):
+- `pipeline.py` MUST import from `extractor`, NOT `detector`
+- Both valve list CSV and instrumentation index CSV are generated via OpenRouter Vision API
+- This is what customers see — 93% recall, battle-tested
+
+**Internal/training (team only)** → Offline model (`detector.py`):
+- Used for annotation review, YOLO training, accuracy benchmarking
+- Run `detector.py` manually or in a separate script — never wire it into the production pipeline
+- Goal: get offline recall to ≥93% before considering a switch
+
+**Rule**: `pipeline.py` line 15 must always read `from extractor import ...` — never `from detector import ...`
+If someone changes this by mistake, revert it immediately. The offline detector is NOT production-ready yet (73% recall vs 93% API).
+
 ## P&ID Document Structure
 
 ### Valve Tag Format
