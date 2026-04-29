@@ -42,6 +42,7 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
     tmp_dir = job_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     output_csv = str(job_dir / "valve_list.csv")
+    output_inst_index = str(job_dir / "instrumentation_index.csv")
 
     original_cwd = os.getcwd()
     log_buffer = io.StringIO()
@@ -56,7 +57,7 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
             importlib.reload(pl)
 
             with redirect_stdout(log_buffer):
-                pl.run(pdf_path=pdf_path, output_path=output_csv, original_filename=original_filename)
+                pl.run(pdf_path=pdf_path, output_path=output_csv, inst_output_path=output_inst_index, original_filename=original_filename)
 
     except Exception as exc:
         os.chdir(original_cwd)
@@ -97,6 +98,8 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
 
     job.status = "done"
     job.output_csv_path = output_csv
+    if Path(output_inst_index).exists():
+        job.output_inst_index_path = output_inst_index
     job.completed_at = datetime.utcnow()
     job.processing_time = round(time.time() - start_time, 1)
     job.processing_log = log_buffer.getvalue()

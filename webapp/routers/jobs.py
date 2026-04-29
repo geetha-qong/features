@@ -177,6 +177,27 @@ async def download_csv(
     )
 
 
+@router.get("/jobs/{job_id}/download-inst-index")
+async def download_inst_index(
+    job_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job or not _can_access_job(job, current_user):
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "done" or not job.output_inst_index_path:
+        raise HTTPException(status_code=400, detail="Instrument index not available")
+    csv_path = Path(job.output_inst_index_path)
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail="Instrument index file missing")
+    return FileResponse(
+        str(csv_path),
+        media_type="text/csv",
+        filename=f"instrumentation_index_{job.pid_no}.csv",
+    )
+
+
 @router.post("/jobs/{job_id}/rerun")
 async def rerun_job(
     job_id: int,
@@ -200,6 +221,7 @@ async def rerun_job(
     job.valve_count = 0
     job.error_msg = None
     job.output_csv_path = None
+    job.output_inst_index_path = None
     job.processing_time = None
     job.processing_log = None
     job.completed_at = None

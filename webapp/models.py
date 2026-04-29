@@ -35,6 +35,7 @@ class Job(Base):
     completed_at = Column(DateTime, nullable=True)
     ls_project_id = Column(Integer, nullable=True)   # Label Studio project id
     ls_synced = Column(Boolean, default=False)        # True once tiles pushed to LS
+    output_inst_index_path = Column(String, nullable=True)  # instrumentation_index.csv
 
 
 class ValveRow(Base):

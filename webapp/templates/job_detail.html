@@ -80,7 +80,10 @@
     <span><strong>{{ valve_rows|length }}</strong> valve{{ 's' if valve_rows|length != 1 else '' }} extracted</span>
     <div class="d-flex gap-2">
       <a href="/jobs/{{ job.id }}/pdf" target="_blank" class="btn btn-sm btn-outline-primary">📄 View PDF</a>
-      <a href="/jobs/{{ job.id }}/download" class="btn btn-sm btn-success">⬇ Download CSV</a>
+      <a href="/jobs/{{ job.id }}/download" class="btn btn-sm btn-success">⬇ Valve List CSV</a>
+      {% if job.output_inst_index_path %}
+      <a href="/jobs/{{ job.id }}/download-inst-index" class="btn btn-sm btn-outline-success">⬇ Instrument Index</a>
+      {% endif %}
     </div>
   </div>
   <div class="card-body p-0" style="overflow-x:auto">

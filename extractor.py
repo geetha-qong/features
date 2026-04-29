@@ -18,6 +18,7 @@ from prompts import (
     SYSTEM_PROMPT, USER_PROMPT_TEMPLATE,
     SECOND_PASS_SYSTEM, SECOND_PASS_USER_TEMPLATE,
 )
+from instrument_prompts import INST_SYSTEM_PROMPT, INST_USER_TEMPLATE
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -309,6 +310,56 @@ def extract_all_tiles(tiles: list, model: str = DEFAULT_MODEL, save_raw: bool = 
         _save_raw(all_valves, "tmp/raw_extractions.json")
 
     return all_valves
+
+
+def extract_instruments(tiles: list, drawing_description: str = "", model: str = DEFAULT_MODEL) -> list:
+    """
+    Single-pass instrument extraction across all tiles.
+    Finds all instrument bubbles (PT, TT, FT, PDT, LT, FCV, XV, ZT, etc.) — NOT valves.
+    Returns list of raw instrument dicts.
+    """
+    client = get_client()
+    desc = drawing_description or DRAWING_DESCRIPTION
+    all_instruments = []
+
+    print(f"\n  --- Instrument Pass: bubble extraction ({model}) ---")
+    for i, tile in enumerate(tiles):
+        print(f"  [{i+1}/{len(tiles)}] Tile r{tile['row']}c{tile['col']}...")
+        try:
+            img_b64 = image_to_base64(tile["path"])
+            user_text = INST_USER_TEMPLATE.format(
+                drawing_description=desc,
+                row=tile["row"],
+                col=tile["col"],
+            )
+            response = client.chat.completions.create(
+                model=model,
+                max_tokens=2048,
+                messages=[
+                    {"role": "system", "content": INST_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+                            {"type": "text", "text": user_text},
+                        ],
+                    },
+                ],
+            )
+            raw_text = response.choices[0].message.content or ""
+            instruments = extract_json_array(raw_text)
+            for inst in instruments:
+                inst["tile_row"] = tile["row"]
+                inst["tile_col"] = tile["col"]
+            print(f"    {len(instruments)} instruments found")
+            for inst in instruments:
+                print(f"      {inst.get('tag_number', '?'):30s}  sys={inst.get('system', '?')}")
+            all_instruments.extend(instruments)
+        except Exception as e:
+            print(f"    ERROR: {e}")
+
+    print(f"\n  Instrument pass complete: {len(all_instruments)} raw detections")
+    return all_instruments
 
 
 def _save_raw(data: list, path: str) -> None:

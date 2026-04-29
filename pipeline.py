@@ -13,10 +13,13 @@ from pathlib import Path
 
 from pdf_to_tiles import pdf_to_tiles
 from detector import extract_all_tiles, extract_drawing_number
+from extractor import extract_instruments
 from parser import parse_raw_extractions
 from validator import validate_and_report, write_csv, compare_with_ground_truth
 from corrections import apply_corrections
 from visualize import generate_annotated_pdf
+from instrument_parser import parse_raw_instruments
+from instrument_validator import write_instrument_index
 
 
 DEFAULT_PDF = "docs/INPUT-MUK-62-1-15-1004-001-24C7-D.pdf"
@@ -44,9 +47,19 @@ def make_output_path(pdf_path: str) -> str:
     return str(OUTPUT_DIR / f"valve_list_{stem}_{ts}.csv")
 
 
-def run(pdf_path: str, output_path: str = None, skip_extraction: bool = False, original_filename: str = ""):
+def make_inst_index_path(pdf_path: str) -> str:
+    """Generate timestamped path for instrument index CSV."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stem = Path(pdf_path).stem.replace("INPUT-", "")
+    return str(OUTPUT_DIR / f"instrumentation_index_{stem}_{ts}.csv")
+
+
+def run(pdf_path: str, output_path: str = None, inst_output_path: str = None, skip_extraction: bool = False, original_filename: str = ""):
     if output_path is None:
         output_path = make_output_path(pdf_path)
+    if inst_output_path is None:
+        inst_output_path = make_inst_index_path(pdf_path)
 
     run_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"\n{'='*60}")
@@ -117,6 +130,20 @@ def run(pdf_path: str, output_path: str = None, skip_extraction: bool = False, o
         generate_annotated_pdf(raw_valves, tiles if not skip_extraction else [], full_png, annotated_pdf, deduped_tags)
     except Exception as e:
         print(f"  [visualize] Failed: {e}")
+
+    # Stage 5b: Instrument Index (single Vision pass, separate from valve extraction)
+    if not skip_extraction:
+        print("\nStage 5b: Extracting instrument index...")
+        try:
+            raw_instruments = extract_instruments(
+                tiles,
+                drawing_description=config.get("description", pdf_path),
+            )
+            inst_rows = parse_raw_instruments(raw_instruments, pid_no=config["pid_no"])
+            print(f"Stage 5b: Writing instrument index ({len(inst_rows)} instruments)...")
+            write_instrument_index(inst_rows, inst_output_path)
+        except Exception as e:
+            print(f"  [instrument] Failed: {e}")
 
     # Compare with ground truth if available
     gt_path = "docs/Output-Valve List.csv"

@@ -116,6 +116,8 @@ def parse_valve_tag(tag: str) -> Optional[dict]:
     Returns dict with keys: area, type_code, serial, and optionally:
       size, series_code, actuator_from_tag, format
     """
+    if not tag:
+        return None
     s = tag.strip().upper()
 
     # Format 1: 62-BF-151031

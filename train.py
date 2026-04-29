@@ -22,13 +22,35 @@ from pathlib import Path
 from ultralytics import YOLO
 
 
-DATA_YAML = "datasets/pid_valves/data.yaml"
+DATA_YAML = str(Path(__file__).parent / "datasets/pid_valves/data.yaml")
 BASE_MODEL = "yolov8s.pt"          # COCO pre-trained, download on first run
-PROJECT = "runs/detect"
+PROJECT = str(Path(__file__).parent / "runs/detect")
 RUN_NAME = "pid_valves_v1"
 
 
+def _find_last_checkpoint():
+    """Find the most recently modified last.pt across all runs."""
+    checkpoints = list(Path(PROJECT).glob("*/weights/last.pt"))
+    if not checkpoints:
+        return None
+    return str(sorted(checkpoints, key=lambda p: p.stat().st_mtime)[-1])
+
+
 def train(resume: bool = False, finetune: str = None):
+    if resume:
+        last_ckpt = _find_last_checkpoint()
+        if not last_ckpt:
+            print("No checkpoint found — starting from base model.")
+            resume = False
+        else:
+            print(f"Resuming from: {last_ckpt}")
+            model = YOLO(last_ckpt)
+            results = model.train(resume=True)
+            print(f"\nTraining complete.")
+            print(f"Best weights: {results.save_dir}/weights/best.pt")
+            print(f"mAP@0.5: {results.results_dict.get('metrics/mAP50(B)', 'N/A'):.3f}")
+            return str(Path(results.save_dir) / "weights" / "best.pt")
+
     if finetune:
         print(f"Fine-tuning from: {finetune}")
         model = YOLO(finetune)
@@ -37,14 +59,14 @@ def train(resume: bool = False, finetune: str = None):
     else:
         print(f"Training from base: {BASE_MODEL}")
         model = YOLO(BASE_MODEL)
-        epochs = 100
+        epochs = 50
         lr0 = 0.005
 
     results = model.train(
         data=DATA_YAML,
         epochs=epochs,
         imgsz=1280,       # CRITICAL: P&ID symbols are 40-80px; need high res
-        batch=4,          # 4 tiles at 1280px fits 8GB RAM (CPU); use 8-16 on GPU
+        batch=2,          # 2 tiles at 1280px for CPU; use 8-16 on GPU
         lr0=lr0,
         warmup_epochs=5,
         # Augmentation — tailored for P&ID drawings
@@ -58,9 +80,10 @@ def train(resume: bool = False, finetune: str = None):
         hsv_s=0.3,        # reduce color variation (P&IDs are mostly black & white)
         hsv_v=0.3,        # brightness variation (simulates scan quality)
         perspective=0.0,  # no perspective warp (engineering drawings are orthographic)
+        device="mps",     # Apple Silicon GPU via Metal; swap to 0 for CUDA, cpu for CPU
+        amp=False,        # disable AMP — MPS mixed precision causes NaN/Inf in EMA
         project=PROJECT,
         name=RUN_NAME,
-        resume=resume,
         verbose=True,
         save=True,
         save_period=10,   # save checkpoint every 10 epochs

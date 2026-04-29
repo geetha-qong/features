@@ -1,5 +1,7 @@
 version: "3.9"
 services:
+
+  # ── Production webapp (FastAPI) ────────────────────────────────────────────
   web:
     build: .
     ports:
@@ -12,3 +14,71 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - SECRET_KEY=${SECRET_KEY}
     restart: unless-stopped
+
+  # ── Label Studio (annotation tool) ────────────────────────────────────────
+  # Usage:
+  #   docker compose up label-studio
+  #   Open http://localhost:8080, create account, then create a project.
+  #   Import images from annotate/tiles/ (they are mounted at /tiles inside container).
+  #   Use label_studio_config.xml for the labelling interface config.
+  #   Export annotations as YOLO format → save ZIP to annotate/exports/
+  label-studio:
+    image: heartexlabs/label-studio:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./annotate/ls_data:/label-studio/data      # persistent DB + media
+      - ./annotate/tiles:/tiles:ro                 # P&ID tiles (read-only)
+      - ./annotate/exports:/label-studio/exports   # exported annotations land here
+    environment:
+      - LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+      - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/tiles
+      - LABEL_STUDIO_CSRF_TRUSTED_ORIGINS=https://*.ngrok-free.app,https://*.ngrok.io
+    restart: unless-stopped
+
+  # ── Label Studio MCP server ───────────────────────────────────────────────
+  # Exposes the Label Studio MCP over SSE at http://localhost:8090/sse
+  # Claude Code (.claude/settings.json) connects to this URL.
+  label-studio-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    ports:
+      - "8090:8000"
+    environment:
+      - LABEL_STUDIO_URL=http://label-studio:8080
+      - LABEL_STUDIO_API_KEY=${LABEL_STUDIO_API_KEY}
+      - FASTMCP_HOST=0.0.0.0
+      - FASTMCP_PORT=8000
+    depends_on:
+      - label-studio
+    restart: unless-stopped
+
+  # ── YOLO training ──────────────────────────────────────────────────────────
+  # Usage:
+  #   First run (train from scratch):
+  #     docker compose run --rm trainer python3 train.py
+  #   Resume:
+  #     docker compose run --rm trainer python3 train.py --resume
+  #   Export to ONNX after training:
+  #     docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves_v1/weights/best.pt
+  #
+  # GPU note: if you have an NVIDIA GPU add these lines under trainer:
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+  trainer:
+    build:
+      context: .
+      dockerfile: Dockerfile.trainer
+    volumes:
+      - ./datasets:/app/datasets          # YOLO dataset (images + labels + data.yaml)
+      - ./runs:/app/runs                  # training output / checkpoints
+      - ./models:/app/models              # final ONNX model goes here
+      - ./annotate/tiles:/app/annotate/tiles:ro
+    working_dir: /app
+    restart: "no"
