@@ -12,9 +12,11 @@ Target: **≥90% recall** on valve identification.
 
 ## Branches
 
-- `main` — stable, production-deployed API-based pipeline
-- `feature/own-system` — offline YOLO+PaddleOCR system (annotation → training → replace extractor.py)
-- `feature/super-admin-labeling` — 3-tier role system, user approval flow, Label Studio sync from webapp
+- `main` — only branch; all features merged. Create new feature branches for new work.
+
+## Docker-First Rule
+
+**NEVER install any service or tool directly on the local Mac.** All services (nginx, databases, annotation tools, etc.) must be added as Docker containers in `docker-compose.yml`. This ensures the compose file can be pushed to production as-is.
 
 ## P&ID Document Structure
 
@@ -78,6 +80,10 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - Job detail: valve table, collapsible AI log, engineer feedback
 - Control valve toggle, job re-run, CSV download per job
 - Auto-extract Drawing No. from title block (bottom-right 40%×22% crop)
+- **Per-user file storage**: uploads → `uploads/{user_id}/`, job outputs → `job_outputs/{user_id}/{job_id}/`
+  - `get_job_dir(job)` in `config.py` — checks new path first, falls back to legacy `job_outputs/{job_id}/`
+- **Super admin sees all jobs**: `_can_access_job(job, user)` in `jobs.py` — owner OR super_admin can view/download/rerun
+- **Instrumentation Index download**: `/jobs/{id}/download-inst-index` endpoint; button shown on job detail when ready
 
 ## Environment
 
@@ -104,6 +110,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
   `original_filename` (Str) — used to derive `drawing_stem` for corrections lookup
 - User columns added: `role` (Str default `'user'`), `is_active` (Bool default `True`)
 - Job columns added: `ls_project_id` (Int), `ls_synced` (Bool) — Label Studio sync state
+- Job columns added: `output_inst_index_path` (Str) — path to instrumentation_index.csv when generated
 
 ## Critical Bug Fixes (already applied)
 
@@ -148,11 +155,23 @@ See `OWN_SYSTEM_DESIGN.md` for full spec. Summary:
 `valve_bf`, `valve_bv`, `valve_ck`, `valve_gl`, `valve_db`, `valve_cv`, `valve_gen`,
 `actuator_motor`, `actuator_pneumatic`, `actuator_solenoid`
 
-## Docker Services (feature/own-system branch)
+## Instrumentation Index (merged to main)
 
-Three services in `docker-compose.yml`:
+Pipeline now generates a 30-column Instrumentation Index CSV alongside the valve CSV:
+- `instrument_prompts.py` — Vision prompts (instrument-focused, excludes valves)
+- `instrument_parser.py` — `InstrumentRow` dataclass + `TYPE_MAP` (22 type codes → io_type, signal_type)
+- `instrument_validator.py` — 30-column CSV writer
+- `extractor.py` — `extract_instruments()` single Vision pass per tile
+- `pipeline.py` — Stage 5 writes `instrumentation_index.csv` to job dir alongside `valve_list.csv`
+- DB column: `output_inst_index_path` on `jobs` table; stored by `pipeline_runner.py` on success
+
+## Docker Services
+
+Five services in `docker-compose.yml`:
 - `web` — FastAPI webapp (port 8000)
 - `label-studio` — annotation tool (port 8080); tiles mounted at `/tiles` inside container; exports land in `annotate/exports/`
+- `nginx` — reverse proxy (port 9000); `/` → webapp (8000), `/ls/` → Label Studio (8080); use port 9000 for ngrok
+- `label-studio-mcp` — Label Studio MCP server (port 8090)
 - `trainer` — YOLOv8 training via `Dockerfile.trainer` (CPU PyTorch by default; uncomment `deploy.resources` for GPU)
 
 ```bash
@@ -178,13 +197,15 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 
 This script:
 1. Runs `caffeinate -i` to prevent Mac sleep
-2. Ensures Label Studio Docker container is up
-3. Starts `ngrok http 8080` → prints a public URL to share with the team
+2. Starts `web`, `label-studio`, and `nginx` Docker containers
+3. Starts `ngrok http 9000` → single tunnel covers both services
 
+- `<ngrok-url>/` → webapp, `<ngrok-url>/ls/` → Label Studio
+- nginx config: `nginx/nginx.conf` (mounted into `nginx:alpine` container)
 - Screen lock is fine; Mac **must not sleep** (caffeinate handles this)
 - ngrok URL changes on every restart — share fresh URL each session
 - Team login: `tnb@qongsystems.com` / `Qong@2024`
-- Local URL: `http://localhost:8080`
+- Local URLs: webapp `http://localhost:8000`, Label Studio `http://localhost:8080`, combined `http://localhost:9000`
 - ngrok installed at `/opt/homebrew/bin/ngrok`, auth token already configured
 - **Known 500 bug**: if `organization.created_by` is null after login, fix with:
   ```bash
@@ -269,14 +290,14 @@ docker compose run --rm trainer python3 train.py
 - OCR may miss or misread tags — tune radius in `_associate_text()` in `detector.py` if recall drops
 - `valve_ck` and `valve_gl` YOLO detections unreliable (mAP50 <0.05) — OCR text is the fallback
 
-## Label Studio Sync (feature/super-admin-labeling)
+## Label Studio Sync (merged to main)
 
 - `/admin/label-studio` — super_admin pushes completed job tiles to Label Studio as annotation tasks
 - `/annotate` — annotator-role users see synced projects + progress, link out to Label Studio
-- `/jobs/{id}/tiles/{filename}` — serves tile PNGs so Label Studio can load images via URL
+- `/jobs/{id}/tiles/{filename}` — serves tile PNGs so Label Studio can load images via URL; uses `get_job_dir(job)` with legacy fallback
 - `webapp/label_studio_client.py` — LS REST API client; configured via `LS_URL` + `LS_API_KEY` env vars
 - LS project created per P&ID drawing (named by pid_no); one project per drawing, re-sync safe
-- `LS_URL` default: `http://localhost:8080`; `LS_API_KEY`: get from Label Studio → Account → Access Token
+- `LS_URL` default: `http://localhost:8080`; `LS_API_KEY`: env var in `.env` — **must be named `LS_API_KEY`** (not `LABEL_STUDIO_API_KEY`)
 
 ## Offline Detector Recall Improvements (feature/own-system, committed cf21758)
 

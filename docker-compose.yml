@@ -36,6 +36,20 @@ services:
       - LABEL_STUDIO_CSRF_TRUSTED_ORIGINS=https://*.ngrok-free.app,https://*.ngrok.io
     restart: unless-stopped
 
+  # ── Nginx reverse proxy (combines webapp + Label Studio on one port) ────────
+  # Exposes port 9000: / → webapp (8000), /ls/ → Label Studio (8080)
+  # Use this single port for ngrok: ngrok http 9000
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - web
+      - label-studio
+    restart: unless-stopped
+
   # ── Label Studio MCP server ───────────────────────────────────────────────
   # Exposes the Label Studio MCP over SSE at http://localhost:8090/sse
   # Claude Code (.claude/settings.json) connects to this URL.
