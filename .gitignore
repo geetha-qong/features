@@ -33,3 +33,15 @@ docs/*.pdf
 
 # Excel working files
 *.xlsx
+
+# Own-system model artifacts (large binaries)
+models/*.onnx
+models/*.pt
+models/paddle_det/
+models/paddle_rec/
+models/paddle_cls/
+runs/
+annotate/tiles/
+
+# YOLO dataset images (regenerated from job_outputs)
+datasets/pid_valves/images/

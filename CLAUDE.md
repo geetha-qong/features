@@ -14,6 +14,7 @@ Target: **≥90% recall** on valve identification.
 
 - `main` — stable, production-deployed API-based pipeline
 - `feature/own-system` — offline YOLO+PaddleOCR system (annotation → training → replace extractor.py)
+- `feature/super-admin-labeling` — 3-tier role system, user approval flow, Label Studio sync from webapp
 
 ## P&ID Document Structure
 
@@ -66,7 +67,13 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 ## Webapp Features (production at https://dev.theqong.com)
 
 - Login/register (JWT cookie auth). Admin: `admin / Qong@2024`
-- Upload P&ID PDF → background pipeline job (serialized via `_pipeline_lock`)
+- **Roles (3-tier)**: `super_admin` (all jobs + admin menu), `annotator` (/annotate queue), `user` (own jobs only)
+- Public `/register` creates inactive account (`is_active=False`) — super_admin approves at `/admin/users`
+- Admin-created users (via `/admin/users` modal) are active immediately
+- First-ever registered user auto-promoted to super_admin; existing `admin` account promoted on startup
+- Upload one or more P&ID PDFs → one background job per file (serialized via `_pipeline_lock`)
+  - Form field: `name="files"` (multiple). Single file → redirect to job detail; batch → redirect to dashboard
+  - P&ID number override only applied when single file uploaded
 - Dashboard: job list with status, valve count, processing time
 - Job detail: valve table, collapsible AI log, engineer feedback
 - Control valve toggle, job re-run, CSV download per job
@@ -95,6 +102,8 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - `run_migrations()` in `database.py` handles ALTER TABLE on startup
 - Job columns: `processing_time` (Float), `processing_log` (Text), `include_control_valves` (Bool),
   `original_filename` (Str) — used to derive `drawing_stem` for corrections lookup
+- User columns added: `role` (Str default `'user'`), `is_active` (Bool default `True`)
+- Job columns added: `ls_project_id` (Int), `ls_synced` (Bool) — Label Studio sync state
 
 ## Critical Bug Fixes (already applied)
 
@@ -138,6 +147,144 @@ See `OWN_SYSTEM_DESIGN.md` for full spec. Summary:
 ### Annotation Classes (10 YOLO classes)
 `valve_bf`, `valve_bv`, `valve_ck`, `valve_gl`, `valve_db`, `valve_cv`, `valve_gen`,
 `actuator_motor`, `actuator_pneumatic`, `actuator_solenoid`
+
+## Docker Services (feature/own-system branch)
+
+Three services in `docker-compose.yml`:
+- `web` — FastAPI webapp (port 8000)
+- `label-studio` — annotation tool (port 8080); tiles mounted at `/tiles` inside container; exports land in `annotate/exports/`
+- `trainer` — YOLOv8 training via `Dockerfile.trainer` (CPU PyTorch by default; uncomment `deploy.resources` for GPU)
+
+```bash
+docker compose up label-studio                                                                        # start annotation tool
+docker compose run --rm trainer python3 train.py                                                      # train from scratch
+docker compose run --rm trainer python3 train.py --resume                                             # resume training
+docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves_v1/weights/best.pt  # export ONNX
+```
+
+## Annotation Status (feature/own-system branch)
+
+- 45 tiles ready in `annotate/tiles/` (exported from 5 P&IDs)
+- `datasets/pid_valves/` folder structure exists but `images/train|val/` and `labels/train|val/` are **empty** — annotations not yet done
+- Label Studio data: `annotate/ls_data/` (persistent DB + media); exports → `annotate/exports/` (YOLO ZIP)
+- After export: unzip into `datasets/pid_valves/`; drawings 1002–1005 → train/, drawing 1001 (9 tiles) → val/
+- **Login**: `tnb@qongsystems.com` / `Qong@2024`
+
+## Starting an Annotation Session (sharing with team)
+
+```bash
+./annotate/start_annotation_session.sh
+```
+
+This script:
+1. Runs `caffeinate -i` to prevent Mac sleep
+2. Ensures Label Studio Docker container is up
+3. Starts `ngrok http 8080` → prints a public URL to share with the team
+
+- Screen lock is fine; Mac **must not sleep** (caffeinate handles this)
+- ngrok URL changes on every restart — share fresh URL each session
+- Team login: `tnb@qongsystems.com` / `Qong@2024`
+- Local URL: `http://localhost:8080`
+- ngrok installed at `/opt/homebrew/bin/ngrok`, auth token already configured
+- **Known 500 bug**: if `organization.created_by` is null after login, fix with:
+  ```bash
+  docker compose exec label-studio bash -c "cd /label-studio/label_studio && python3 -c \"
+  import django, os, sys; sys.path.insert(0, '.'); os.environ['DJANGO_SETTINGS_MODULE'] = 'core.settings.label_studio'; django.setup()
+  from users.models import User; from organizations.models import Organization
+  u = User.objects.get(email='tnb@qongsystems.com'); org = Organization.objects.get(id=1)
+  org.created_by = u; org.save(); print('Fixed')
+  \""
+  ```
+
+## Training Lessons Learned (do NOT repeat these mistakes)
+
+### Environment Setup
+- Host Mac has **Python 3.9** (system) — ultralytics 8.4.42 + torch 2.8.0 installed at `~/Library/Python/3.9/`
+- Docker trainer uses Python 3.11 + torch 2.3.0 + ultralytics 8.2.0
+- **numpy must be pinned to `<2.0`** in Docker — ultralytics 8.2.0 uses `np.trapz` which was removed in numpy 2.0
+- **`onnxsim` cannot be installed on ARM64** (needs cmake + g++) — removed from Dockerfile.trainer
+
+### data.yaml Path
+- `path: /app/datasets/pid_valves` was Docker-only — breaks on host
+- Correct value: `path: datasets/pid_valves` — relative to cwd, works both in Docker (WORKDIR=/app) and on host (project root)
+- Current value is correct; do not change it back to an absolute path
+
+### MPS Training (Apple Silicon)
+- MPS is available via `torch.backends.mps.is_available()` — use `device="mps"` in `model.train()`
+- **AMP (mixed precision) causes NaN/Inf in EMA on MPS** — always set `amp=False` when training on MPS
+- MPS is ~3x faster than CPU: ~1.5 s/it vs ~6.5 s/it at batch=2, imgsz=1280
+- Docker cannot use MPS — run training directly on host for GPU speed
+
+### Resume vs Finetune
+- `--resume` loads saved `args.yaml` from the checkpoint run — device/project settings come from there, not from train.py
+- `--finetune <path>` starts a new run with train.py settings — correct way to change device or project
+- train.py `_find_last_checkpoint()` finds the most recently modified `last.pt` under `runs/detect/`
+- When finetune loads a checkpoint saved by a different ultralytics version, torch.load may fail — upgrade ultralytics to match
+
+### Root Cause of All 3 Training Failures
+**Never switch environments mid-training.** Training started in Docker (torch 2.3) was killed mid-batch, producing a corrupted `last.pt`. Attempts to resume/finetune that checkpoint on host MPS (torch 2.8) caused cascading failures:
+1. torch.load format mismatch (torch 2.3 → 2.8)
+2. Corrupted EMA state from mid-batch kill → NaN at epoch ~25 every time
+3. All checkpoints skipped due to NaN → empty weights directory, crash at end
+
+**Rule: if you switch environment (Docker → host, CPU → MPS), always start fresh. Never carry a checkpoint across.**
+
+### Training Results (pid_valves_v1-5) — COMPLETED
+- Run: `runs/detect/pid_valves_v1-5/` — 50 epochs, mAP50 = **0.511** (target ≥0.5 ✅)
+- Strong classes: `valve_db` 0.944, `valve_bf` 0.845, `valve_bv` 0.634
+- Weak classes (too few training instances): `valve_ck` 0.001, `valve_gl` 0.034
+- ONNX exported to `models/best.onnx` (43 MB)
+- To retrain: `python3 train.py` (always start fresh from `yolov8s.pt`; ~17 min on M3 Pro)
+- To export: `python3 train.py --export runs/detect/<run_name>/weights/best.pt`
+
+### Docker Trainer (for reference / CI)
+```bash
+docker compose build trainer   # must rebuild after editing train.py or data.yaml
+docker compose run --rm trainer python3 train.py
+```
+- Datasets are COPIED into image at build time — edits to `datasets/` require rebuild
+- Runs/weights are written inside container — mount a volume if you need them on host
+
+## Offline Detector (detector.py)
+
+`detector.py` is the offline replacement for `extractor.py` — same public API:
+- `extract_all_tiles(tiles, ...)` — YOLO ONNX inference + PaddleOCR text association
+- `extract_drawing_number(pdf_path, tmp_dir)` — OCR title block, falls back to API
+
+**pipeline.py is already switched**: `from detector import extract_all_tiles, extract_drawing_number`
+
+### PaddleOCR (host)
+- Installed: `pip3 install paddleocr paddlepaddle` (Python 3.9, `~/Library/Python/3.9/`)
+- Version: paddleocr 3.5.0, paddlepaddle 3.3.1
+- Label Studio has incompatible redis/rq — ignore pip conflict warnings, both work fine
+
+### ONNX Inference Notes
+- `onnxruntime` 1.19.2 already installed; use `CPUExecutionProvider` (MPS not needed at inference)
+- Model output shape: `[1, 14, 33600]` — transpose to `[33600, 14]`; cols 0-3 = xywh, 4-13 = class scores
+- Letterbox preprocess with pad=114 (grey); scale back with stored scale + pad offsets
+
+### Text Association Tuning
+- Valve tag + line number searched within **300px radius** of valve centroid in OCR results
+- Actuator linked to nearest valve within **150px**
+- OCR may miss or misread tags — tune radius in `_associate_text()` in `detector.py` if recall drops
+- `valve_ck` and `valve_gl` YOLO detections unreliable (mAP50 <0.05) — OCR text is the fallback
+
+## Label Studio Sync (feature/super-admin-labeling)
+
+- `/admin/label-studio` — super_admin pushes completed job tiles to Label Studio as annotation tasks
+- `/annotate` — annotator-role users see synced projects + progress, link out to Label Studio
+- `/jobs/{id}/tiles/{filename}` — serves tile PNGs so Label Studio can load images via URL
+- `webapp/label_studio_client.py` — LS REST API client; configured via `LS_URL` + `LS_API_KEY` env vars
+- LS project created per P&ID drawing (named by pid_no); one project per drawing, re-sync safe
+- `LS_URL` default: `http://localhost:8080`; `LS_API_KEY`: get from Label Studio → Account → Access Token
+
+## Offline Detector Recall Improvements (feature/own-system, committed cf21758)
+
+- `_extract_tags_from_tile()` — row-based OCR token clustering (40px y-tolerance), groups 1–4 tokens to reassemble fragmented tags
+- `_targeted_crop_ocr()` — 400×400px crop from full-page image centered on YOLO detection; major win for noisy/hatched tiles
+- TAG_RE: `(?<!\d)(\d{2})-([A-Z]{2,4})-(\d{6})(?!\d)` — exact 6-digit serial, no leading-digit leakage
+- Benchmark (2 drawings): 73.3% recall (44/60), up from 53.4% baseline
+- Annotated PDF named after source drawing: `INPUT-MUK-..._annotated.pdf` (not timestamped CSV name)
 
 ## Temporary Files
 

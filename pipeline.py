@@ -12,10 +12,11 @@ from datetime import datetime
 from pathlib import Path
 
 from pdf_to_tiles import pdf_to_tiles
-from extractor import extract_all_tiles, extract_drawing_number
+from detector import extract_all_tiles, extract_drawing_number
 from parser import parse_raw_extractions
 from validator import validate_and_report, write_csv, compare_with_ground_truth
 from corrections import apply_corrections
+from visualize import generate_annotated_pdf
 
 
 DEFAULT_PDF = "docs/INPUT-MUK-62-1-15-1004-001-24C7-D.pdf"
@@ -104,6 +105,18 @@ def run(pdf_path: str, output_path: str = None, skip_extraction: bool = False, o
             print(f"    {iss['tag']}: {', '.join(iss['warnings'])}")
 
     write_csv(valid_rows, output_path)
+
+    # Stage 5: Generate annotated PDF for human verification
+    full_png = "tmp/page_0_full.png"
+    # Name annotated PDF after the original drawing file (not the timestamped CSV)
+    source_stem = Path(name_for_stem if name_for_stem else pdf_path).stem
+    annotated_pdf = str(OUTPUT_DIR / f"{source_stem}_annotated.pdf")
+    print("\nStage 5: Generating annotated PDF for verification...")
+    deduped_tags = [r.raw_tag for r in valid_rows if r.raw_tag]
+    try:
+        generate_annotated_pdf(raw_valves, tiles if not skip_extraction else [], full_png, annotated_pdf, deduped_tags)
+    except Exception as e:
+        print(f"  [visualize] Failed: {e}")
 
     # Compare with ground truth if available
     gt_path = "docs/Output-Valve List.csv"

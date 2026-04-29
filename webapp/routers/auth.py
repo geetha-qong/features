@@ -1,4 +1,4 @@
-"""Auth routes: /login, /register (auth-only), /logout."""
+"""Auth routes: /login, /register (public with approval), /logout."""
 from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -30,28 +30,22 @@ async def login(
             {"request": request, "error": "Invalid username or password"},
             status_code=400,
         )
+    if not user.is_active:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Your account is pending approval. Please contact the administrator."},
+            status_code=403,
+        )
     token = create_access_token({"sub": user.username})
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     response.set_cookie(key="access_token", value=token, httponly=True, samesite="lax")
     return response
 
 
-def _can_register(db: Session, request: Request) -> bool:
-    """Allow registration only if: (a) no users exist yet, or (b) caller is logged in."""
-    token = request.cookies.get("access_token")
-    if token:
-        return True  # logged-in user can always create new accounts
-    return db.query(models.User).count() == 0  # first-time setup only
-
-
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request, db: Session = Depends(get_db)):
-    if not _can_register(db, request):
-        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
-    # Pass current user to template if logged in (for navbar)
     try:
-        from webapp.auth import get_current_user as _gcu
-        current_user = _gcu(request, db)
+        current_user = get_current_user(request, db)
     except Exception:
         current_user = None
     return templates.TemplateResponse("register.html", {"request": request, "user": current_user})
@@ -65,40 +59,58 @@ async def register(
     password: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    if not _can_register(db, request):
-        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    try:
+        current_user = get_current_user(request, db)
+    except Exception:
+        current_user = None
 
     if db.query(models.User).filter(models.User.username == username).first():
-        try:
-            from webapp.auth import get_current_user as _gcu
-            current_user = _gcu(request, db)
-        except Exception:
-            current_user = None
         return templates.TemplateResponse(
             "register.html",
             {"request": request, "error": "Username already taken", "user": current_user},
             status_code=400,
         )
 
+    is_first_user = db.query(models.User).count() == 0
+    # First user → super_admin, active immediately.
+    # Super_admin creating via this form → active immediately.
+    # Public self-registration → pending approval (is_active=False).
+    if is_first_user:
+        role, is_active = "super_admin", True
+    elif current_user and current_user.role == "super_admin":
+        role, is_active = "user", True
+    else:
+        role, is_active = "user", False  # requires admin approval
+
     user = models.User(
         username=username,
         email=email or None,
         password_hash=hash_password(password),
+        role=role,
+        is_active=is_active,
     )
     db.add(user)
     db.commit()
 
-    # If a user was already logged in (creating another account), stay logged in as them
-    token = request.cookies.get("access_token")
-    if token:
+    # Super_admin creating via /register form — stay logged in, go to dashboard
+    if current_user and current_user.role == "super_admin":
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+    if is_first_user:
+        new_token = create_access_token({"sub": user.username})
         response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+        response.set_cookie(key="access_token", value=new_token, httponly=True, samesite="lax")
         return response
 
-    # First-time setup: log in as the new user
-    new_token = create_access_token({"sub": user.username})
-    response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
-    response.set_cookie(key="access_token", value=new_token, httponly=True, samesite="lax")
-    return response
+    # Self-registered: show pending approval message
+    return templates.TemplateResponse(
+        "register.html",
+        {
+            "request": request,
+            "user": None,
+            "success": "Account created! Your account is pending approval by an administrator before you can log in.",
+        },
+    )
 
 
 @router.get("/logout")

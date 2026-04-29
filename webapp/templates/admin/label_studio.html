@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Label Studio Sync — Qong Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="mb-0">Label Studio — Annotation Sync</h4>
+  {% if ls_configured %}
+  <a href="{{ ls_url }}" target="_blank" class="btn btn-outline-primary btn-sm">Open Label Studio ↗</a>
+  {% endif %}
+</div>
+
+{% if not ls_configured %}
+<div class="alert alert-warning">
+  <strong>Label Studio not configured.</strong><br>
+  Set the <code>LS_API_KEY</code> environment variable to your Label Studio API token,
+  and optionally <code>LS_URL</code> (default: <code>http://localhost:8080</code>).
+  <br><small>Get your token from Label Studio → Account Settings → Access Token.</small>
+</div>
+{% endif %}
+
+{% if job_stats %}
+<div class="card shadow-sm">
+  <div class="card-body p-0">
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>#</th>
+          <th>P&ID / File</th>
+          <th>Sync Status</th>
+          <th>Tasks</th>
+          <th>Annotated</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in job_stats %}
+        {% set job = item.job %}
+        {% set stats = item.stats %}
+        <tr>
+          <td class="text-muted">{{ job.id }}</td>
+          <td>
+            <a href="/jobs/{{ job.id }}">{{ job.original_filename }}</a>
+            {% if job.pid_no and job.pid_no != 'UNKNOWN' %}
+            <br><code class="text-muted small">{{ job.pid_no }}</code>
+            {% endif %}
+          </td>
+          <td>
+            {% if job.ls_synced %}
+              <span class="badge bg-success">Synced</span>
+            {% else %}
+              <span class="badge bg-secondary">Not synced</span>
+            {% endif %}
+          </td>
+          <td>{{ stats.total_tasks if stats.total_tasks is defined else '—' }}</td>
+          <td>
+            {% if stats.annotated is defined and stats.total_tasks %}
+              {{ stats.annotated }} / {{ stats.total_tasks }}
+              <div class="progress mt-1" style="height:4px; width:80px;">
+                <div class="progress-bar bg-success"
+                     style="width: {{ ((stats.annotated / stats.total_tasks) * 100) | int }}%"></div>
+              </div>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            <div class="d-flex gap-2 align-items-center">
+              {% if ls_configured %}
+              <form method="post" action="/admin/label-studio/sync/{{ job.id }}">
+                <button type="submit" class="btn btn-sm btn-outline-primary"
+                        title="{{ 'Re-sync' if job.ls_synced else 'Sync tiles to Label Studio' }}">
+                  {{ 'Re-sync' if job.ls_synced else 'Sync' }}
+                </button>
+              </form>
+              {% endif %}
+              {% if job.ls_project_id and stats.url is defined %}
+              <a href="{{ stats.url }}" target="_blank" class="btn btn-sm btn-outline-secondary">Annotate ↗</a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="text-center py-5 text-muted">
+  <p class="fs-5">No completed jobs yet.</p>
+  <p>Completed P&ID jobs will appear here for syncing to Label Studio.</p>
+</div>
+{% endif %}
+
+<div class="mt-4 text-muted small">
+  <strong>How it works:</strong>
+  Clicking <em>Sync</em> pushes the tile images from that job into a Label Studio project named after the P&ID number.
+  Your annotation team can then log into Label Studio at <code>{{ ls_url }}</code> and draw bounding boxes around valves.
+  Annotations become training data for the offline YOLO model.
+</div>
+{% endblock %}

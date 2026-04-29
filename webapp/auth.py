@@ -45,3 +45,13 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> models.
     if user is None:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
     return user
+
+
+def require_super_admin(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> models.User:
+    user = get_current_user(request, db)
+    if user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Super-admin access required")
+    return user
