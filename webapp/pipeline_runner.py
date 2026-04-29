@@ -106,6 +106,34 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
     job.valve_count = db.query(models.ValveRow).filter(models.ValveRow.job_id == job_id).count()
     db.commit()
 
+    # Auto-sync tiles to Label Studio if configured
+    _auto_sync_to_label_studio(job, job_dir, db)
+
+
+def _auto_sync_to_label_studio(job, job_dir: Path, db) -> None:
+    """Push job tiles to Label Studio automatically after pipeline completes."""
+    from webapp import label_studio_client as ls
+    if not ls.is_configured():
+        return
+    try:
+        tile_files = sorted((job_dir / "tmp").glob("tile_p*_r*_c*.png"))
+        if not tile_files:
+            return
+        # Use WEBAPP_BASE_URL env var (set to ngrok URL when sharing externally,
+        # defaults to internal Docker URL so LS container can always reach tiles)
+        base_url = os.environ.get("WEBAPP_BASE_URL", "http://web:8000").rstrip("/")
+        tile_urls = [f"{base_url}/jobs/{job.id}/tiles/{f.name}" for f in tile_files]
+        project_id = job.ls_project_id or ls.get_or_create_project(job.pid_no or f"job-{job.id}")
+        if not project_id:
+            return
+        pushed = ls.push_tiles(project_id, tile_urls)
+        job.ls_project_id = project_id
+        job.ls_synced = pushed > 0
+        db.commit()
+        print(f"[label_studio] Auto-synced {pushed} tiles for job {job.id} → project {project_id}")
+    except Exception as e:
+        print(f"[label_studio] Auto-sync error for job {job.id}: {e}")
+
 
 def _ingest_csv(job_id: int, csv_path: str, pid_no_override: str, db: Session, include_control_valves: bool = True) -> None:
     """Read the output CSV and insert rows into valve_rows table."""
