@@ -10,7 +10,7 @@ from webapp.auth import get_current_user, hash_password, require_super_admin
 from webapp.database import get_db
 from webapp.jinja import templates
 from webapp import label_studio_client as ls
-from webapp.config import JOB_OUTPUT_DIR
+from webapp.config import JOB_OUTPUT_DIR, get_job_dir
 
 router = APIRouter()
 
@@ -204,7 +204,7 @@ async def admin_sync_job(
     if not ls.is_configured():
         raise HTTPException(status_code=400, detail="LS_API_KEY not configured")
 
-    job_dir = Path(JOB_OUTPUT_DIR) / str(job_id)
+    job_dir = get_job_dir(job)
     tile_files = sorted((job_dir / "tmp").glob("tile_p*_r*_c*.png"))
     if not tile_files:
         raise HTTPException(status_code=400, detail="No tiles found for this job")

@@ -14,3 +14,23 @@ DATABASE_URL: str = f"sqlite:///{BASE_DIR / 'webapp.db'}"
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 JOB_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def get_job_dir(job) -> Path:
+    """
+    Return the output directory for a job.
+    New layout: job_outputs/{user_id}/{job_id}/
+    Legacy fallback: job_outputs/{job_id}/  (for jobs created before per-user folders)
+    """
+    new_path = JOB_OUTPUT_DIR / str(job.user_id) / str(job.id)
+    if new_path.exists():
+        return new_path
+    legacy = JOB_OUTPUT_DIR / str(job.id)
+    return legacy
+
+
+def get_user_upload_dir(user_id: int) -> Path:
+    """Return (and create) the upload directory for a specific user."""
+    d = UPLOAD_DIR / str(user_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d

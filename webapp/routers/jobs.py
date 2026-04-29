@@ -12,12 +12,17 @@ from sqlalchemy.orm import Session
 
 from webapp import models
 from webapp.auth import get_current_user
-from webapp.config import JOB_OUTPUT_DIR, UPLOAD_DIR
+from webapp.config import JOB_OUTPUT_DIR, UPLOAD_DIR, get_job_dir, get_user_upload_dir
 from webapp.database import SessionLocal, get_db
 from webapp.jinja import templates
 from webapp.pipeline_runner import run_pipeline_for_job
 
 router = APIRouter()
+
+
+def _can_access_job(job, user) -> bool:
+    """Owner always; super_admin can access any job."""
+    return job.user_id == user.id or user.role == "super_admin"
 
 
 def _run_in_thread(job_id: int, pdf_path: str, pid_no_override: str, include_control_valves: bool = True, original_filename: str = ""):
@@ -48,7 +53,8 @@ async def upload_pdf(
             raise HTTPException(status_code=400, detail=f"{file.filename}: only PDF files are accepted")
 
         stored_name = f"{uuid.uuid4()}.pdf"
-        dest = UPLOAD_DIR / stored_name
+        user_upload_dir = get_user_upload_dir(current_user.id)
+        dest = user_upload_dir / stored_name
         with dest.open("wb") as buf:
             shutil.copyfileobj(file.file, buf)
 
@@ -64,7 +70,8 @@ async def upload_pdf(
         db.commit()
         db.refresh(job)
 
-        job_dir = JOB_OUTPUT_DIR / str(job.id)
+        # Per-user job folder: job_outputs/{user_id}/{job_id}/
+        job_dir = JOB_OUTPUT_DIR / str(current_user.id) / str(job.id)
         job_dir.mkdir(parents=True, exist_ok=True)
         job_pdf = str(job_dir / "input.pdf")
         shutil.copy2(str(dest), job_pdf)
@@ -92,7 +99,7 @@ async def job_detail(
     db: Session = Depends(get_db),
 ):
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
-    if not job or job.user_id != current_user.id:
+    if not job or not _can_access_job(job, current_user):
         raise HTTPException(status_code=404, detail="Job not found")
 
     valve_rows = (
@@ -125,7 +132,7 @@ async def job_status(
     db: Session = Depends(get_db),
 ):
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
-    if not job or job.user_id != current_user.id:
+    if not job or not _can_access_job(job, current_user):
         raise HTTPException(status_code=404, detail="Job not found")
     return JSONResponse({"status": job.status, "valve_count": job.valve_count, "error_msg": job.error_msg})
 
@@ -137,9 +144,9 @@ async def view_pdf(
     db: Session = Depends(get_db),
 ):
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
-    if not job or job.user_id != current_user.id:
+    if not job or not _can_access_job(job, current_user):
         raise HTTPException(status_code=404, detail="Job not found")
-    pdf_path = JOB_OUTPUT_DIR / str(job_id) / "input.pdf"
+    pdf_path = get_job_dir(job) / "input.pdf"
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="PDF file not found")
     return FileResponse(
@@ -156,7 +163,7 @@ async def download_csv(
     db: Session = Depends(get_db),
 ):
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
-    if not job or job.user_id != current_user.id:
+    if not job or not _can_access_job(job, current_user):
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != "done" or not job.output_csv_path:
         raise HTTPException(status_code=400, detail="Output not ready")
@@ -178,12 +185,12 @@ async def rerun_job(
     db: Session = Depends(get_db),
 ):
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
-    if not job or job.user_id != current_user.id:
+    if not job or not _can_access_job(job, current_user):
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status == "processing":
         raise HTTPException(status_code=409, detail="Job is already running")
 
-    job_pdf = str(JOB_OUTPUT_DIR / str(job_id) / "input.pdf")
+    job_pdf = str(get_job_dir(job) / "input.pdf")
     if not Path(job_pdf).exists():
         raise HTTPException(status_code=404, detail="Original PDF not found — cannot re-run")
 

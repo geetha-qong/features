@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from webapp.database import Base, engine, run_migrations, SessionLocal
 from webapp.routers import auth, dashboard, jobs, feedback
 from webapp.routers import admin as admin_router
-from webapp.config import JOB_OUTPUT_DIR
+from webapp.config import JOB_OUTPUT_DIR, get_job_dir
 
 # Create all DB tables and run column migrations on startup
 Base.metadata.create_all(bind=engine)
@@ -82,8 +82,17 @@ async def root(request: Request):
 @app.get("/jobs/{job_id}/tiles/{filename}")
 async def serve_tile(job_id: int, filename: str):
     """Serve tile PNG images — used by Label Studio to load task images."""
-    tile_path = Path(JOB_OUTPUT_DIR) / str(job_id) / "tmp" / filename
+    from fastapi import HTTPException
+    from webapp import models
+    from webapp.database import SessionLocal
+    db = SessionLocal()
+    try:
+        job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    finally:
+        db.close()
+    if not job:
+        raise HTTPException(status_code=404, detail="Tile not found")
+    tile_path = get_job_dir(job) / "tmp" / filename
     if not tile_path.exists() or tile_path.suffix != ".png":
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Tile not found")
     return FileResponse(str(tile_path), media_type="image/png")

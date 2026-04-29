@@ -16,7 +16,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from webapp import models
-from webapp.config import JOB_OUTPUT_DIR
+from webapp.config import JOB_OUTPUT_DIR, get_job_dir
 
 _pipeline_lock = threading.Lock()
 
@@ -37,7 +37,7 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
     job.status = "processing"
     db.commit()
 
-    job_dir = JOB_OUTPUT_DIR / str(job_id)
+    job_dir = get_job_dir(job)
     job_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = job_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
