@@ -13,6 +13,8 @@ services:
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - SECRET_KEY=${SECRET_KEY}
+      - LS_API_KEY=${LS_API_KEY}
+      - LS_URL=http://label-studio:8080
     restart: unless-stopped
 
   # ── Label Studio (annotation tool) ────────────────────────────────────────
@@ -61,7 +63,7 @@ services:
       - "8090:8000"
     environment:
       - LABEL_STUDIO_URL=http://label-studio:8080
-      - LABEL_STUDIO_API_KEY=${LABEL_STUDIO_API_KEY}
+      - LABEL_STUDIO_API_KEY=${LS_API_KEY}
       - FASTMCP_HOST=0.0.0.0
       - FASTMCP_PORT=8000
     depends_on:
