@@ -149,10 +149,13 @@ async def view_pdf(
     pdf_path = get_job_dir(job) / "input.pdf"
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="PDF file not found")
-    return FileResponse(
-        str(pdf_path),
+    from starlette.responses import Response
+    with open(str(pdf_path), "rb") as f:
+        content = f.read()
+    return Response(
+        content=content,
         media_type="application/pdf",
-        filename=job.original_filename,
+        headers={"Content-Disposition": f'inline; filename="{job.original_filename}"'},
     )
 
 
@@ -198,6 +201,45 @@ async def download_inst_index(
     )
 
 
+@router.get("/jobs/{job_id}/tiles/{filename}")
+async def serve_tile(
+    job_id: int,
+    filename: str,
+    db: Session = Depends(get_db),
+):
+    """Serve tile PNGs for Label Studio annotation — no auth (LS accesses directly)."""
+    if not filename.endswith(".png"):
+        raise HTTPException(status_code=400, detail="Only PNG tiles served here")
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    tile_path = get_job_dir(job) / "tmp" / filename
+    if not tile_path.exists():
+        raise HTTPException(status_code=404, detail="Tile not found")
+    return FileResponse(str(tile_path), media_type="image/png")
+
+
+@router.get("/jobs/{job_id}/download-inst-datasheets")
+async def download_inst_datasheets(
+    job_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job or not _can_access_job(job, current_user):
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "done" or not job.output_inst_datasheet_path:
+        raise HTTPException(status_code=400, detail="Instrument datasheets not available")
+    zip_path = Path(job.output_inst_datasheet_path)
+    if not zip_path.exists():
+        raise HTTPException(status_code=404, detail="Datasheets file missing")
+    return FileResponse(
+        str(zip_path),
+        media_type="application/zip",
+        filename=f"instrument_datasheets_{job.pid_no}.zip",
+    )
+
+
 @router.post("/jobs/{job_id}/rerun")
 async def rerun_job(
     job_id: int,
@@ -222,6 +264,7 @@ async def rerun_job(
     job.error_msg = None
     job.output_csv_path = None
     job.output_inst_index_path = None
+    job.output_inst_datasheet_path = None
     job.processing_time = None
     job.processing_log = None
     job.completed_at = None

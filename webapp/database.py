@@ -23,6 +23,7 @@ def run_migrations():
         ("jobs", "ls_project_id", "INTEGER"),
         ("jobs", "ls_synced", "INTEGER DEFAULT 0"),
         ("jobs", "output_inst_index_path", "TEXT"),
+        ("jobs", "output_inst_datasheet_path", "TEXT"),
         ("users", "role", "TEXT DEFAULT 'user'"),
         ("users", "is_active", "INTEGER DEFAULT 1"),
     ]

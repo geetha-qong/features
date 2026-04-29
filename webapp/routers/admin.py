@@ -42,7 +42,7 @@ async def annotate_page(
             "request": request,
             "user": current_user,
             "job_stats": job_stats,
-            "ls_url": ls.LS_URL,
+            "ls_url": ls.LS_EXTERNAL_URL,
             "ls_configured": ls.is_configured(),
         },
     )
@@ -185,7 +185,7 @@ async def admin_label_studio(
             "request": request,
             "user": current_user,
             "job_stats": job_stats,
-            "ls_url": ls.LS_URL,
+            "ls_url": ls.LS_EXTERNAL_URL,
             "ls_configured": ls.is_configured(),
         },
     )
@@ -216,6 +216,8 @@ async def admin_sync_job(
     if not project_id:
         raise HTTPException(status_code=500, detail="Could not create Label Studio project")
 
+    # Delete stale tasks first so re-sync replaces image URLs (not duplicates)
+    ls.delete_all_tasks(project_id)
     pushed = ls.push_tiles(project_id, tile_urls)
     job.ls_project_id = project_id
     job.ls_synced = pushed > 0

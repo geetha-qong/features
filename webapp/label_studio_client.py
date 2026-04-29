@@ -5,6 +5,8 @@ import requests
 
 LS_URL = os.environ.get("LS_URL", "http://localhost:8080").rstrip("/")
 LS_API_KEY = os.environ.get("LS_API_KEY", "")
+# Browser-accessible LS URL (for links shown to users). Default: direct port access.
+LS_EXTERNAL_URL = os.environ.get("LS_EXTERNAL_URL", "http://localhost:9001").rstrip("/")
 
 LABEL_CONFIG = """<View>
   <Image name="image" value="$image"/>
@@ -55,6 +57,22 @@ def get_or_create_project(pid_no: str) -> Optional[int]:
     return None
 
 
+def delete_all_tasks(project_id: int) -> bool:
+    """Delete all tasks in a project (so re-sync replaces stale image URLs)."""
+    if not is_configured():
+        return False
+    try:
+        resp = requests.delete(
+            f"{LS_URL}/api/projects/{project_id}/tasks/",
+            headers=_headers(),
+            timeout=15,
+        )
+        return resp.status_code in (200, 204)
+    except Exception as e:
+        print(f"[label_studio] delete_all_tasks error: {e}")
+    return False
+
+
 def push_tiles(project_id: int, tile_urls: list) -> int:
     """Push tile image URLs as tasks. Returns count of tasks created."""
     if not is_configured():
@@ -67,8 +85,10 @@ def push_tiles(project_id: int, tile_urls: list) -> int:
             json=tasks,
             timeout=30,
         )
-        if resp.status_code == 201:
-            return len(resp.json())
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            # LS returns a dict like {"task_count": N, ...}, not a list
+            return data.get("task_count", len(tile_urls)) if isinstance(data, dict) else len(data)
     except Exception as e:
         print(f"[label_studio] push_tiles error: {e}")
     return 0
@@ -85,7 +105,7 @@ def get_project_stats(project_id: int) -> dict:
             return {
                 "total_tasks": d.get("task_number", 0),
                 "annotated": d.get("num_tasks_with_annotations", 0),
-                "url": f"{LS_URL}/projects/{project_id}/",
+                "url": f"{LS_EXTERNAL_URL}/projects/{project_id}/",
             }
     except Exception as e:
         print(f"[label_studio] get_project_stats error: {e}")

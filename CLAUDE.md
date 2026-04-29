@@ -115,6 +115,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - Nginx: `/www/server/panel/vhost/nginx/dev.theqong.com.conf`
 - Code: `/www/wwwroot/qong_poc/`, auto-deploy via GitHub webhook
 - **To deploy**: `git push origin main` (webhook triggers pull + restart)
+- **After adding new pip dependencies**: webhook does NOT run pip install — SSH in and run `venv/bin/pip install -r requirements-webapp.txt` manually, then `systemctl restart qong_poc`
 - SSH alias for Winn-Projects GitHub: `winn-projects`
 
 ## DB Schema Notes
@@ -126,6 +127,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - User columns added: `role` (Str default `'user'`), `is_active` (Bool default `True`)
 - Job columns added: `ls_project_id` (Int), `ls_synced` (Bool) — Label Studio sync state
 - Job columns added: `output_inst_index_path` (Str) — path to instrumentation_index.csv when generated
+- Job columns added: `output_inst_datasheet_path` (Str) — path to instrument_datasheets.zip when generated
 
 ## Critical Bug Fixes (already applied)
 
@@ -135,6 +137,9 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 3. **P&ID No truncated**: Title block prompt updated to capture full revision suffix (e.g. `24C7-D`).
 4. **Jinja2 template path**: Use `Path(__file__).parent.parent / "templates"` (absolute) in all 3 router files.
 5. **Stale processing jobs**: Reset to `failed` on app startup.
+6. **Starlette 1.0.0 broke TemplateResponse**: `TypeError: unhashable type: 'dict'` on every page load. Fix: pin `fastapi>=0.111.0,<0.115.0` and `starlette>=0.37.0,<0.41.0` in `requirements-webapp.txt`.
+7. **`requests` missing from requirements-webapp.txt**: `label_studio_client.py` uses it — must include `requests>=2.31.0`.
+8. **PDF inline viewing**: `FileResponse` forces download. Use `starlette.responses.Response` with `media_type="application/pdf"` and `Content-Disposition: inline; filename="..."` to open in browser tab.
 
 ## Correction Rules (verified by engineer, MUK-62-1-15-1004)
 
@@ -180,12 +185,24 @@ Pipeline now generates a 30-column Instrumentation Index CSV alongside the valve
 - `pipeline.py` — Stage 5 writes `instrumentation_index.csv` to job dir alongside `valve_list.csv`
 - DB column: `output_inst_index_path` on `jobs` table; stored by `pipeline_runner.py` on success
 
+## Instrument Datasheets (merged to main)
+
+Pipeline Stage 5c generates a ZIP of per-instrument HTML spec forms alongside the CSVs:
+- `instrument_datasheet.py` — `generate_datasheet_html(inst)` + `write_datasheet_zip(inst_rows, zip_path)`
+- Output: `instrument_datasheets.zip` in job dir; one `.html` file per instrument tag
+- Fields from P&ID: tag, type, line, equipment, system. Unknown fields → `TBD` (grey italic) or `LATER` (red italic)
+- DB column: `output_inst_datasheet_path` on `jobs` table; stored by `pipeline_runner.py` on success
+- Download endpoint: `/jobs/{id}/download-inst-datasheets` → ZIP served as `instrument_datasheets_{pid_no}.zip`
+- Button shown on job detail page when `output_inst_datasheet_path` is set
+
 ## Docker Services
 
 Five services in `docker-compose.yml`:
 - `web` — FastAPI webapp (port 8000)
 - `label-studio` — annotation tool (port 8080); tiles mounted at `/tiles` inside container; exports land in `annotate/exports/`
-- `nginx` — reverse proxy (port 9000); `/` → webapp (8000), `/ls/` → Label Studio (8080); use port 9000 for ngrok
+- `nginx` — reverse proxy (port 9000 + 9001); **`absolute_redirect off` is REQUIRED** in the port 9000 server block — without it nginx appends `:9000` to redirect URLs, breaking ngrok/proxy access
+- nginx LS route list on port 9000: `/ls/`, `/api/`, `/static/`, `/react-app/`, `/media/`, `/data/`, `/user/`, `/projects/`, `/tasks/`, `/dm/`, `/organization/` — all proxied to LS; webapp uses none of these prefixes. `/user/` block needs `proxy_redirect ~^/$ /projects/;` — LS redirects to `/` after login which would otherwise hit the webapp
+- port 9001 = direct LS fallback (local only); `LS_EXTERNAL_URL` defaults to `http://localhost:9001`
 - `label-studio-mcp` — Label Studio MCP server (port 8090)
 - `trainer` — YOLOv8 training via `Dockerfile.trainer` (CPU PyTorch by default; uncomment `deploy.resources` for GPU)
 
@@ -215,8 +232,9 @@ This script:
 2. Starts `web`, `label-studio`, and `nginx` Docker containers
 3. Starts `ngrok http 9000` → single tunnel covers both services
 
-- `<ngrok-url>/` → webapp, `<ngrok-url>/ls/` → Label Studio
-- nginx config: `nginx/nginx.conf` (mounted into `nginx:alpine` container)
+- Port 9000 serves both webapp AND Label Studio via nginx — use this for ngrok: `ngrok http 9000`
+- Port 9001 is direct LS fallback (no prefix, local only); `LS_EXTERNAL_URL` defaults to `http://localhost:9001`
+- nginx config: `nginx/nginx.conf` — two server blocks (9000 + 9001); LS SPA paths (`/api/`, `/static/`, `/react-app/`, `/media/`, `/data/`) routed to LS on port 9000
 - Screen lock is fine; Mac **must not sleep** (caffeinate handles this)
 - ngrok URL changes on every restart — share fresh URL each session
 - Team login: `tnb@qongsystems.com` / `Qong@2024`
@@ -287,7 +305,7 @@ docker compose run --rm trainer python3 train.py
 - `extract_all_tiles(tiles, ...)` — YOLO ONNX inference + PaddleOCR text association
 - `extract_drawing_number(pdf_path, tmp_dir)` — OCR title block, falls back to API
 
-**pipeline.py is already switched**: `from detector import extract_all_tiles, extract_drawing_number`
+**pipeline.py uses extractor (NOT detector)** — `from extractor import extract_all_tiles, extract_drawing_number, extract_instruments`. Do not change this.
 
 ### PaddleOCR (host)
 - Installed: `pip3 install paddleocr paddlepaddle` (Python 3.9, `~/Library/Python/3.9/`)
@@ -312,7 +330,21 @@ docker compose run --rm trainer python3 train.py
 - `/jobs/{id}/tiles/{filename}` — serves tile PNGs so Label Studio can load images via URL; uses `get_job_dir(job)` with legacy fallback
 - `webapp/label_studio_client.py` — LS REST API client; configured via `LS_URL` + `LS_API_KEY` env vars
 - LS project created per P&ID drawing (named by pid_no); one project per drawing, re-sync safe
-- `LS_URL` default: `http://localhost:8080`; `LS_API_KEY`: env var in `.env` — **must be named `LS_API_KEY`** (not `LABEL_STUDIO_API_KEY`)
+- `LS_URL` (Docker-internal, API calls only) vs `LS_EXTERNAL_URL` (browser-facing project links, default `http://localhost:9001`) — both in `label_studio_client.py`; override `LS_EXTERNAL_URL` in web service env when deploying behind ngrok or a domain
+- `LS_API_KEY`: env var in `.env` — **must be named `LS_API_KEY`** (not `LABEL_STUDIO_API_KEY`); must be a user API token, not a JWT refresh token
+- **LS legacy token auth**: LS 1.23+ disables legacy API tokens by default. If 401s appear, enable via Django: `JWTSettings.legacy_api_tokens_enabled = True; settings.save()`
+- **Auto-sync**: After every pipeline job, `_auto_sync_to_label_studio()` in `pipeline_runner.py` runs automatically — no manual button needed
+- **`WEBAPP_BASE_URL` env var**: Tile image URL base for LS sync. Default `http://web:8000` (Docker-internal). Set to ngrok URL during team annotation sessions so LS container can load tile images.
+- **`push_tiles` response**: LS `/api/projects/{id}/import` returns a dict `{"task_count": N, ...}` — use `data.get("task_count", ...)`, not `len(data)` (which counts dict keys, not tasks)
+- **Re-sync deletes stale tasks first**: `delete_all_tasks(project_id)` is called before `push_tiles()` in the sync endpoint — prevents duplicate tasks with stale/broken image URLs
+- **Must sync via public URL**: tile image URLs use `request.base_url` from the sync HTTP request; always trigger Re-sync from ngrok/public URL (not localhost) so LS can load images externally
+
+## Non-Standard Tag Format P&IDs
+
+Some customer P&IDs use tags like `VB25`, `VB40 2090`, `VBPP40` — no `AreaCode-TypeCode-SerialNo` pattern.
+- Parser skips all 0 valves → valve count = 0 in webapp. **This is not a bug** — it's a different naming convention.
+- Instrument index extraction still works (instrument bubbles are standard).
+- To support these: extend `parser.py` with new regex patterns alongside existing ones (additive, never modify working patterns).
 
 ## Offline Detector Recall Improvements (feature/own-system, committed cf21758)
 

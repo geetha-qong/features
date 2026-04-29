@@ -19,6 +19,7 @@ from corrections import apply_corrections
 from visualize import generate_annotated_pdf
 from instrument_parser import parse_raw_instruments
 from instrument_validator import write_instrument_index
+from instrument_datasheet import write_datasheet_zip
 
 
 DEFAULT_PDF = "docs/INPUT-MUK-62-1-15-1004-001-24C7-D.pdf"
@@ -54,11 +55,21 @@ def make_inst_index_path(pdf_path: str) -> str:
     return str(OUTPUT_DIR / f"instrumentation_index_{stem}_{ts}.csv")
 
 
-def run(pdf_path: str, output_path: str = None, inst_output_path: str = None, skip_extraction: bool = False, original_filename: str = ""):
+def make_datasheet_zip_path(pdf_path: str) -> str:
+    """Generate timestamped path for instrument datasheets ZIP."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stem = Path(pdf_path).stem.replace("INPUT-", "")
+    return str(OUTPUT_DIR / f"instrument_datasheets_{stem}_{ts}.zip")
+
+
+def run(pdf_path: str, output_path: str = None, inst_output_path: str = None, datasheet_zip_path: str = None, skip_extraction: bool = False, original_filename: str = ""):
     if output_path is None:
         output_path = make_output_path(pdf_path)
     if inst_output_path is None:
         inst_output_path = make_inst_index_path(pdf_path)
+    if datasheet_zip_path is None:
+        datasheet_zip_path = make_datasheet_zip_path(pdf_path)
 
     run_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"\n{'='*60}")
@@ -130,7 +141,7 @@ def run(pdf_path: str, output_path: str = None, inst_output_path: str = None, sk
     except Exception as e:
         print(f"  [visualize] Failed: {e}")
 
-    # Stage 5b: Instrument Index (single Vision pass, separate from valve extraction)
+    # Stage 5b: Instrument Index + Datasheets (single Vision pass, separate from valve extraction)
     if not skip_extraction:
         print("\nStage 5b: Extracting instrument index...")
         try:
@@ -141,6 +152,8 @@ def run(pdf_path: str, output_path: str = None, inst_output_path: str = None, sk
             inst_rows = parse_raw_instruments(raw_instruments, pid_no=config["pid_no"])
             print(f"Stage 5b: Writing instrument index ({len(inst_rows)} instruments)...")
             write_instrument_index(inst_rows, inst_output_path)
+            print(f"Stage 5c: Writing instrument datasheets ZIP ({len(inst_rows)} sheets)...")
+            write_datasheet_zip(inst_rows, datasheet_zip_path)
         except Exception as e:
             print(f"  [instrument] Failed: {e}")
 

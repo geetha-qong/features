@@ -84,6 +84,9 @@
       {% if job.output_inst_index_path %}
       <a href="/jobs/{{ job.id }}/download-inst-index" class="btn btn-sm btn-outline-success">⬇ Instrument Index</a>
       {% endif %}
+      {% if job.output_inst_datasheet_path %}
+      <a href="/jobs/{{ job.id }}/download-inst-datasheets" class="btn btn-sm btn-outline-info">⬇ Instrument Datasheets</a>
+      {% endif %}
     </div>
   </div>
   <div class="card-body p-0" style="overflow-x:auto">
