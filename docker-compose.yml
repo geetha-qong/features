@@ -9,7 +9,7 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./job_outputs:/app/job_outputs
-      - ./webapp.db:/app/webapp.db
+      - webapp_db:/app/data
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - SECRET_KEY=${SECRET_KEY}
@@ -101,3 +101,6 @@ services:
       - ./annotate/tiles:/app/annotate/tiles:ro
     working_dir: /app
     restart: "no"
+
+volumes:
+  webapp_db:
