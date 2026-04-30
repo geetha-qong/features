@@ -116,11 +116,16 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - Code: `/www/wwwroot/qong_poc/`, auto-deploy via GitHub webhook
 - **To deploy**: `git push origin main` (webhook triggers pull + restart)
 - **After adding new pip dependencies**: webhook does NOT run pip install — SSH in and run `venv/bin/pip install -r requirements-webapp.txt` manually, then `systemctl restart qong_poc`
-- SSH alias for Winn-Projects GitHub: `winn-projects`
+- **Repo**: `Qong-Systems/qong_product` (migrated from `Winn-Projects/qong_poc` in Apr 2026)
+- SSH alias for Qong-Systems GitHub (local): `qongsystems`
+- SSH alias for Qong-Systems GitHub (server deploy key): `qong-product` (key: `~/.ssh/id_ed25519_qong_product` on server)
+- SSH alias for Winn-Projects GitHub (legacy, local only): `winn-projects`
 
 ## DB Schema Notes
 
-- SQLite at `webapp.db` (local) — NOT committed
+- SQLite at `data/webapp.db` inside container — mounted via named Docker volume `webapp_db:/app/data`
+- On fresh clone: named volume auto-created by Docker (no manual file creation needed)
+- Legacy path was `webapp.db` in project root — production server still uses this until Docker migration
 - `run_migrations()` in `database.py` handles ALTER TABLE on startup
 - Job columns: `processing_time` (Float), `processing_log` (Text), `include_control_valves` (Bool),
   `original_filename` (Str) — used to derive `drawing_stem` for corrections lookup
@@ -171,9 +176,11 @@ See `OWN_SYSTEM_DESIGN.md` for full spec. Summary:
 - **Integration**: `detector.py` replaces `extractor.py` with identical public API
 - **Pipeline.py change**: one line — `from extractor import` → `from detector import`
 
-### Annotation Classes (10 YOLO classes)
-`valve_bf`, `valve_bv`, `valve_ck`, `valve_gl`, `valve_db`, `valve_cv`, `valve_gen`,
-`actuator_motor`, `actuator_pneumatic`, `actuator_solenoid`
+### Annotation Classes (13 YOLO classes)
+- Valves (7): `valve_bf`, `valve_bv`, `valve_ck`, `valve_gl`, `valve_db`, `valve_cv`, `valve_gen`
+- Actuators (3): `actuator_motor`, `actuator_pneu`, `actuator_sol`
+- Instruments (3): `inst_bubble` (all circle tags — PT/TT/FT/LT/PDT/PI/PS/ZS/etc.), `inst_cv` (FCV/XV), `inst_solenoid` (FY/XY)
+- **inst_bubble is ONE class** — YOLO finds the circle, OCR reads the type code. Don't split by type.
 
 ## Instrumentation Index (merged to main)
 
@@ -357,3 +364,14 @@ Some customer P&IDs use tags like `VB25`, `VB40 2090`, `VBPP40` — no `AreaCode
 ## Temporary Files
 
 All intermediate files go in `job_outputs/{id}/tmp/` — never commit. Also never commit `webapp.db`, `uploads/`, `job_outputs/`.
+
+## Pending Architecture Change (agreed Apr 2026, not yet implemented)
+
+**Centralized team server**: migrate server from systemd → Docker Compose so interns use browser only (no local setup needed).
+Steps in order:
+1. Re-enable registration with admin approval (`_can_register()` in `webapp/routers/auth.py`)
+2. Migrate server to `docker compose up -d web nginx label-studio` (needs `.env` + DB volume migration, ~15 min downtime)
+3. Set `LS_EXTERNAL_URL=https://dev.theqong.com` and `WEBAPP_BASE_URL=https://dev.theqong.com` on server
+4. Create intern accounts via `/admin/users`, assign `annotator` or `user` role
+
+See `SESSION_STATE.md` for full details.
