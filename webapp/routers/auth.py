@@ -92,6 +92,11 @@ async def register(
     db.add(user)
     db.commit()
 
+    # Record signup trial credits in the ledger (column default already gives 10 credits;
+    # this creates the audit row so ledger invariant holds from day 1)
+    from webapp import credits as credits_module
+    credits_module.grant(user, 10, reason="signup_grant", db=db)
+
     # Super_admin creating via /register form — stay logged in, go to dashboard
     if current_user and current_user.role == "super_admin":
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
