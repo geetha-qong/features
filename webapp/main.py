@@ -8,6 +8,7 @@ from webapp.database import Base, engine, run_migrations, SessionLocal
 from webapp.routers import auth, dashboard, jobs, feedback
 from webapp.routers import admin as admin_router
 from webapp.routers import account as account_router
+from webapp.routers import api_v1 as api_v1_router
 from webapp.config import JOB_OUTPUT_DIR, get_job_dir
 
 # Create all DB tables and run column migrations on startup
@@ -71,6 +72,7 @@ app.include_router(jobs.router)
 app.include_router(feedback.router)
 app.include_router(admin_router.router)
 app.include_router(account_router.router)
+app.include_router(api_v1_router.router)
 
 
 @app.get("/")
