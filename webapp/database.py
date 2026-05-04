@@ -3,10 +3,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from webapp.config import DATABASE_URL
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},  # needed for SQLite
-)
+_connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -26,6 +24,9 @@ def run_migrations():
         ("jobs", "output_inst_datasheet_path", "TEXT"),
         ("users", "role", "TEXT DEFAULT 'user'"),
         ("users", "is_active", "INTEGER DEFAULT 1"),
+        ("users", "credits_remaining", "INTEGER DEFAULT 10"),
+        ("users", "tier", "TEXT DEFAULT 'trial'"),
+        ("users", "organization", "TEXT"),
     ]
     with engine.connect() as conn:
         for table, column, col_type in new_columns:
