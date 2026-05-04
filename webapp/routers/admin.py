@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from webapp import models
+from webapp import credits as credits_module
 from webapp.auth import get_current_user, hash_password, require_super_admin
 from webapp.database import get_db
 from webapp.jinja import templates
@@ -224,3 +225,177 @@ async def admin_sync_job(
     db.commit()
 
     return RedirectResponse(url="/admin/label-studio", status_code=303)
+
+
+# ── Admin Dashboard ────────────────────────────────────────────────────────────
+
+@router.get("/admin/dashboard", response_class=HTMLResponse)
+async def admin_dashboard(
+    request: Request,
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy import func
+    total_users = db.query(models.User).count()
+    active_users = db.query(models.User).filter(models.User.is_active == True).count()
+    pending_users = db.query(models.User).filter(models.User.is_active == False).count()
+    total_jobs = db.query(models.Job).count()
+    done_jobs = db.query(models.Job).filter(models.Job.status == "done").count()
+    open_feedback = db.query(models.UserFeedback).filter(models.UserFeedback.status == "new").count()
+    recent_txns = (
+        db.query(models.CreditTransaction)
+        .order_by(models.CreditTransaction.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    mtd_consumed = db.query(func.sum(models.CreditTransaction.delta)).filter(
+        models.CreditTransaction.delta < 0
+    ).scalar() or 0
+    mtd_granted = db.query(func.sum(models.CreditTransaction.delta)).filter(
+        models.CreditTransaction.delta > 0
+    ).scalar() or 0
+    users_map = {u.id: u for u in db.query(models.User).all()}
+    return templates.TemplateResponse("admin/dashboard.html", {
+        "request": request, "user": current_user,
+        "total_users": total_users, "active_users": active_users,
+        "pending_users": pending_users, "total_jobs": total_jobs,
+        "done_jobs": done_jobs, "open_feedback": open_feedback,
+        "mtd_consumed": abs(mtd_consumed), "mtd_granted": mtd_granted,
+        "recent_txns": recent_txns, "users_map": users_map,
+    })
+
+
+# ── Credits ledger ─────────────────────────────────────────────────────────────
+
+@router.get("/admin/credits", response_class=HTMLResponse)
+async def admin_credits(
+    request: Request,
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    txns = (
+        db.query(models.CreditTransaction)
+        .order_by(models.CreditTransaction.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    users_map = {u.id: u for u in db.query(models.User).all()}
+    return templates.TemplateResponse("admin/credits.html", {
+        "request": request, "user": current_user,
+        "txns": txns, "users_map": users_map,
+    })
+
+
+@router.post("/admin/users/{user_id}/grant-credits")
+async def admin_grant_credits(
+    user_id: int,
+    amount: int = Form(...),
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    target = db.query(models.User).filter(models.User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if amount <= 0 or amount > 10000:
+        raise HTTPException(status_code=400, detail="Amount must be 1–10000")
+    credits_module.grant(target, amount, reason="admin_grant", db=db, admin_id=current_user.id)
+    return RedirectResponse(url="/admin/users", status_code=303)
+
+
+@router.post("/admin/users/{user_id}/change-tier")
+async def admin_change_tier(
+    user_id: int,
+    tier: str = Form(...),
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    target = db.query(models.User).filter(models.User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if tier not in ("trial", "starter", "pro", "enterprise"):
+        raise HTTPException(status_code=400, detail="Invalid tier")
+    target.tier = tier
+    db.commit()
+    return RedirectResponse(url="/admin/users", status_code=303)
+
+
+# ── Feedback inbox ─────────────────────────────────────────────────────────────
+
+@router.get("/admin/feedback", response_class=HTMLResponse)
+async def admin_feedback(
+    request: Request,
+    status_filter: str = "new",
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    q = db.query(models.UserFeedback).order_by(models.UserFeedback.created_at.desc())
+    if status_filter and status_filter != "all":
+        q = q.filter(models.UserFeedback.status == status_filter)
+    items = q.limit(100).all()
+    users_map = {u.id: u for u in db.query(models.User).all()}
+    open_count = db.query(models.UserFeedback).filter(models.UserFeedback.status == "new").count()
+    return templates.TemplateResponse("admin/feedback.html", {
+        "request": request, "user": current_user,
+        "items": items, "users_map": users_map,
+        "status_filter": status_filter, "open_count": open_count,
+    })
+
+
+@router.post("/admin/feedback/{item_id}/update")
+async def admin_update_feedback(
+    item_id: int,
+    status: str = Form(...),
+    admin_notes: str = Form(""),
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    item = db.query(models.UserFeedback).filter(models.UserFeedback.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    if status in ("new", "in_progress", "resolved", "wontfix"):
+        item.status = status
+    item.admin_notes = admin_notes.strip() or None
+    db.commit()
+    return RedirectResponse(url="/admin/feedback", status_code=303)
+
+
+# ── Billing plans ──────────────────────────────────────────────────────────────
+
+@router.get("/admin/plans", response_class=HTMLResponse)
+async def admin_plans(
+    request: Request,
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    plans = db.query(models.BillingPlan).order_by(models.BillingPlan.price_usd_cents).all()
+    return templates.TemplateResponse("admin/plans.html", {
+        "request": request, "user": current_user, "plans": plans,
+    })
+
+
+@router.post("/admin/plans/create")
+async def admin_create_plan(
+    name: str = Form(...),
+    credits: int = Form(...),
+    price_usd_cents: int = Form(...),
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    plan = models.BillingPlan(name=name, credits=credits, price_usd_cents=price_usd_cents)
+    db.add(plan)
+    db.commit()
+    return RedirectResponse(url="/admin/plans", status_code=303)
+
+
+@router.post("/admin/plans/{plan_id}/toggle")
+async def admin_toggle_plan(
+    plan_id: int,
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    plan = db.query(models.BillingPlan).filter(models.BillingPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    plan.is_active = not plan.is_active
+    db.commit()
+    return RedirectResponse(url="/admin/plans", status_code=303)

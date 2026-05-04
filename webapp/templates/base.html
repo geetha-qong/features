@@ -40,11 +40,18 @@
             <li class="nav-item dropdown">
               <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Admin</a>
               <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="/admin/dashboard">Dashboard</a></li>
+                <li><hr class="dropdown-divider"></li>
                 <li><a class="dropdown-item" href="/admin/users">Manage Users</a></li>
+                <li><a class="dropdown-item" href="/admin/credits">Credits Ledger</a></li>
+                <li><a class="dropdown-item" href="/admin/feedback">Feedback Inbox</a></li>
+                <li><a class="dropdown-item" href="/admin/plans">Billing Plans</a></li>
+                <li><hr class="dropdown-divider"></li>
                 <li><a class="dropdown-item" href="/admin/label-studio">Label Studio Sync</a></li>
               </ul>
             </li>
             {% endif %}
+            <li class="nav-item"><a class="nav-link" href="/account">Account</a></li>
             <li class="nav-item"><span class="nav-link text-secondary">
               {{ user.username }}
               {% if user.role == 'super_admin' %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">ADMIN</span>{% endif %}

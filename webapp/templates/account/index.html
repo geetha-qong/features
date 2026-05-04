@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}My Account — Qong{% endblock %}
+{% block content %}
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="mb-0">My Account</h4>
+    <div class="text-muted small">{{ user.username }}{% if user.email %} · {{ user.email }}{% endif %}</div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body text-center">
+        <div class="text-muted small mb-1">Credits Remaining</div>
+        <div class="display-5 fw-bold {% if balance <= 2 %}text-danger{% elif balance <= 10 %}text-warning{% else %}text-success{% endif %}">
+          {{ balance }}
+        </div>
+        <div class="mt-2">
+          <span class="badge bg-light text-dark border">{{ user.tier or 'trial' }}</span>
+        </div>
+        <a href="/account/billing" class="btn btn-sm btn-outline-primary mt-3">Buy More Credits</a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="text-muted small">Recent Jobs</div>
+          <a href="/dashboard" class="small">All →</a>
+        </div>
+        {% for job in recent_jobs %}
+        <div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+          <a href="/jobs/{{ job.id }}" class="small text-truncate me-2" style="max-width:140px">
+            {{ job.pid_no or job.original_filename }}
+          </a>
+          <span class="badge badge-{{ job.status }} small">{{ job.status }}</span>
+        </div>
+        {% else %}
+        <div class="text-muted small py-3 text-center">No jobs yet</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small mb-2">Quick Links</div>
+        <div class="d-grid gap-2">
+          <a href="/account/api-keys" class="btn btn-sm btn-outline-secondary">API Keys</a>
+          <a href="/account/billing" class="btn btn-sm btn-outline-secondary">Billing &amp; Plans</a>
+          <a href="/feedback" class="btn btn-sm btn-outline-secondary">Submit Feedback</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h6 class="text-muted mb-2">Recent Credit Activity</h6>
+<div class="card shadow-sm">
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0">
+      <thead class="table-light">
+        <tr><th>When</th><th>Change</th><th>Balance</th><th>Reason</th></tr>
+      </thead>
+      <tbody>
+        {% for t in recent_txns %}
+        <tr>
+          <td class="text-muted small">{{ t.created_at | to_ist }}</td>
+          <td class="fw-semibold {% if t.delta > 0 %}text-success{% else %}text-danger{% endif %}">
+            {{ '+' if t.delta > 0 else '' }}{{ t.delta }}
+          </td>
+          <td>{{ t.balance_after }}</td>
+          <td><span class="badge bg-secondary">{{ t.reason }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-center text-muted py-3">No transactions yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

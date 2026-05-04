@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Billing & Plans — Qong{% endblock %}
+{% block content %}
+<h4 class="mb-1">Billing &amp; Plans</h4>
+<p class="text-muted mb-4">You currently have <strong>{{ balance }}</strong> credits.
+  1 credit = 1 P&amp;ID page processed.</p>
+
+<div class="row g-3 mb-4">
+  {% for plan in plans %}
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm h-100 {% if (user.tier or 'trial') == plan.name | lower %}border border-primary{% endif %}">
+      <div class="card-body text-center">
+        <h5 class="card-title">{{ plan.name }}</h5>
+        <div class="display-6 fw-bold my-2">
+          {% if plan.price_usd_cents == 0 %}Free{% else %}${{ "%.0f" | format(plan.price_usd_cents / 100) }}{% endif %}
+        </div>
+        <div class="text-muted mb-3">{{ plan.credits }} credits</div>
+        {% if plan.price_usd_cents == 0 %}
+        <span class="badge bg-secondary">Current trial</span>
+        {% else %}
+        <a href="mailto:hello@theqong.com?subject=Purchase {{ plan.name }} plan&body=I'd like to purchase the {{ plan.name }} plan ({{ plan.credits }} credits for ${{ "%.0f" | format(plan.price_usd_cents / 100) }})."
+           class="btn btn-primary btn-sm">Buy via Email →</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="col"><p class="text-muted">No plans available.</p></div>
+  {% endfor %}
+</div>
+
+<div class="alert alert-light">
+  <strong>Need more credits or Enterprise pricing?</strong>
+  <a href="mailto:hello@theqong.com">Contact us</a> — we'll set you up manually.
+</div>
+{% endblock %}

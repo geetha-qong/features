@@ -29,6 +29,8 @@
           <th>Username</th>
           <th>Email</th>
           <th>Role</th>
+          <th>Tier</th>
+          <th>Credits</th>
           <th>Status</th>
           <th>Created</th>
           <th>Actions</th>
@@ -50,6 +52,32 @@
               <span class="badge bg-info text-dark">Annotator</span>
             {% else %}
               <span class="badge bg-secondary">User</span>
+            {% endif %}
+          </td>
+          <td class="small text-muted">{{ u.tier or 'trial' }}</td>
+          <td>
+            <span class="fw-semibold">{{ u.credits_remaining or 0 }}</span>
+            {% if u.id != user.id %}
+            <form method="post" action="/admin/users/{{ u.id }}/grant-credits" class="d-inline ms-1">
+              <input type="number" name="amount" min="1" max="10000" value="10"
+                     class="form-control form-control-sm d-inline-block" style="width:60px">
+              <button type="submit" class="btn btn-sm btn-outline-success">+</button>
+            </form>
+            {% endif %}
+          </td>
+          <td>
+            {% if u.id != user.id %}
+            <form method="post" action="/admin/users/{{ u.id }}/change-tier" class="d-inline">
+              <select name="tier" class="form-select form-select-sm d-inline-block"
+                      style="width:auto" onchange="this.form.submit()">
+                <option value="trial"      {% if (u.tier or 'trial') == 'trial'      %}selected{% endif %}>Trial</option>
+                <option value="starter"    {% if (u.tier or 'trial') == 'starter'    %}selected{% endif %}>Starter</option>
+                <option value="pro"        {% if (u.tier or 'trial') == 'pro'        %}selected{% endif %}>Pro</option>
+                <option value="enterprise" {% if (u.tier or 'trial') == 'enterprise' %}selected{% endif %}>Enterprise</option>
+              </select>
+            </form>
+            {% else %}
+            <span class="text-muted small">—</span>
             {% endif %}
           </td>
           <td>

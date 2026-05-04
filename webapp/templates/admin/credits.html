@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Credits Ledger — Qong Admin{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="mb-0">Credits Ledger</h4>
+  <a href="/admin/users" class="btn btn-sm btn-outline-secondary">Grant Credits → Users page</a>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-body p-0">
+    <table class="table table-sm table-hover mb-0">
+      <thead class="table-light">
+        <tr><th>When</th><th>User</th><th>Delta</th><th>Balance After</th><th>Reason</th><th>Job</th></tr>
+      </thead>
+      <tbody>
+        {% for t in txns %}
+        <tr>
+          <td class="text-muted small">{{ t.created_at | to_ist }}</td>
+          <td class="small">
+            {% set u = users_map.get(t.user_id) %}
+            {{ u.username if u else '#' ~ t.user_id }}
+          </td>
+          <td class="fw-semibold {% if t.delta > 0 %}text-success{% else %}text-danger{% endif %}">
+            {{ '+' if t.delta > 0 else '' }}{{ t.delta }}
+          </td>
+          <td>{{ t.balance_after }}</td>
+          <td><span class="badge bg-secondary">{{ t.reason }}</span></td>
+          <td class="text-muted small">{% if t.job_id %}#{{ t.job_id }}{% else %}—{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-3">No transactions yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
