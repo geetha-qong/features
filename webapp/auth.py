@@ -55,3 +55,28 @@ def require_super_admin(
     if user.role != "super_admin":
         raise HTTPException(status_code=403, detail="Super-admin access required")
     return user
+
+
+async def get_user_from_api_key(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Optional[models.User]:
+    """Extract and verify a Bearer API key from the Authorization header."""
+    from webapp.models import ApiKey
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer qk_"):
+        return None
+    full_key = auth_header[7:]  # strip "Bearer "
+    prefix = full_key[:8]
+    candidates = db.query(ApiKey).filter(
+        ApiKey.key_prefix == prefix,
+        ApiKey.revoked_at.is_(None),
+    ).all()
+    for api_key in candidates:
+        if pwd_context.verify(full_key, api_key.key_hash):
+            # Update last_used_at
+            api_key.last_used_at = datetime.utcnow()
+            db.commit()
+            user = db.query(models.User).filter(models.User.id == api_key.user_id).first()
+            return user
+    return None
