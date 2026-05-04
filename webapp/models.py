@@ -1,6 +1,6 @@
 """ORM models: User, Job, ValveRow, Feedback."""
 from datetime import datetime
-from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, Float, ForeignKey
+from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, Float, ForeignKey, JSON
 from webapp.database import Base
 
 
@@ -14,6 +14,9 @@ class User(Base):
     role = Column(String, default="user")       # "user" | "annotator" | "super_admin"
     is_active = Column(Boolean, default=True)   # super_admin can deactivate/approve users
     created_at = Column(DateTime, default=datetime.utcnow)
+    credits_remaining = Column(Integer, default=10)
+    tier = Column(String, default="trial")               # 'trial'|'starter'|'pro'|'enterprise'
+    organization = Column(String, nullable=True)
 
 
 class Job(Base):
@@ -69,4 +72,56 @@ class Feedback(Base):
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     notes = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String, nullable=False)            # user-defined label e.g. "production"
+    key_prefix = Column(String(8), nullable=False)   # first 8 chars for display
+    key_hash = Column(String, nullable=False)         # pbkdf2_sha256 hash of full key
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+
+class CreditTransaction(Base):
+    __tablename__ = "credit_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    delta = Column(Integer, nullable=False)              # signed: positive=grant, negative=consume
+    balance_after = Column(Integer, nullable=False)      # snapshot for audit
+    reason = Column(String, nullable=False)              # 'signup_grant'|'admin_grant'|'job_consumed'|'purchase'|'refund'
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    meta = Column(Text, nullable=True)                   # JSON string for extra context
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BillingPlan(Base):
+    __tablename__ = "billing_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)                # "Trial" | "Starter" | "Pro" | "Enterprise"
+    credits = Column(Integer, nullable=False)
+    price_usd_cents = Column(Integer, nullable=False)    # 0 for Trial
+    is_active = Column(Boolean, default=True)
+    stripe_price_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserFeedback(Base):
+    __tablename__ = "user_feedback"                      # distinct from "feedback" (job-level engineer notes)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)   # nullable = anon submissions ok
+    category = Column(String, nullable=False)            # 'bug'|'feature'|'pricing'|'other'
+    subject = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    page_url = Column(String, nullable=True)
+    status = Column(String, default="new")               # 'new'|'in_progress'|'resolved'|'wontfix'
+    admin_notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
