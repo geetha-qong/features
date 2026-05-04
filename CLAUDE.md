@@ -12,7 +12,9 @@ Target: **≥90% recall** on valve identification.
 
 ## Branches
 
-- `main` — only branch; all features merged. Create new feature branches for new work.
+- `main` — production (Hetzner). Only critical fixes during migration.
+- `feature/multi-cloud-saas` — active integration branch (all phases merged here; staged before main cutover)
+  Sub-branches merged in: storage-abstraction (A1), postgres-rq (A2), saas-credits-ledger (B1–B2), admin-v2 (B3), account-pages (B4), api-v1 (B5)
 
 ## Docker-First Rule
 
@@ -81,6 +83,15 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - `webapp/` — FastAPI web app (upload → job queue → results → download)
 - `OWN_SYSTEM_DESIGN.md` — full design doc for offline YOLO+PaddleOCR system
 
+## SaaS Features (on feature/multi-cloud-saas, not yet on main)
+
+- **Credits ledger**: every balance change via `webapp/credits.py` — never UPDATE `credits_remaining` directly; always via `grant/deduct/refund`. Invariant: `SUM(delta) == credits_remaining` per user.
+- **API keys**: `qk_<32-hex>` format; stored hashed (pbkdf2_sha256). Full key shown once via `?new_key=` URL param after creation. `key_prefix` = first 8 chars for lookup.
+- **Admin panel v2**: `/admin/dashboard`, `/admin/credits`, `/admin/feedback`, `/admin/plans` — pass `users_map = {u.id: u for u in ...}` to templates (NOT `users` — collides with `user` context var for current user)
+- **User account pages**: `/account`, `/account/api-keys`, `/account/billing`
+- **REST API v1**: `POST /api/v1/jobs`, `GET /api/v1/jobs/{id}`, `GET /api/v1/account` — auth via `Authorization: Bearer qk_...` OR cookie JWT; returns 401 (not 303 redirect) on failure
+- **Pre-flight credit check**: `fitz.open(pdf).page_count` for page count → deduct before enqueue; `pipeline_runner.py` refunds on failure
+
 ## Webapp Features (production at https://dev.theqong.com)
 
 - Login/register (JWT cookie auth). Admin: `admin / Qong@2024`
@@ -123,9 +134,19 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 
 ## DB Schema Notes
 
+### New tables (feature/multi-cloud-saas, defined as SQLAlchemy models in models.py)
+- `api_keys` — `id, user_id, name, key_prefix(8), key_hash, created_at, last_used_at, revoked_at`
+- `credit_transactions` — ledger: `id, user_id, delta(signed), balance_after, reason, job_id, meta(JSON), created_at`
+- `billing_plans` — `id, name, credits, price_usd_cents, is_active, stripe_price_id, created_at`
+- `user_feedback` — `id, user_id(nullable for anon), category, subject, message, page_url, status, admin_notes, created_at`
+
+### New user columns (feature/multi-cloud-saas)
+- `credits_remaining INTEGER DEFAULT 10`, `tier VARCHAR DEFAULT 'trial'`, `organization VARCHAR`
+
+### SQLite (main branch / local dev fallback)
 - SQLite at `data/webapp.db` inside container — mounted via named Docker volume `webapp_db:/app/data`
 - On fresh clone: named volume auto-created by Docker (no manual file creation needed)
-- Legacy path was `webapp.db` in project root — production server still uses this until Docker migration
+- Legacy path was `webapp.db` in project root — **migrated to `data/webapp.db` on 2026-05-02** (39 jobs, 4 users moved). Root `webapp.db` is now stale/unused.
 - `run_migrations()` in `database.py` handles ALTER TABLE on startup
 - Job columns: `processing_time` (Float), `processing_log` (Text), `include_control_valves` (Bool),
   `original_filename` (Str) — used to derive `drawing_stem` for corrections lookup
@@ -133,6 +154,19 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - Job columns added: `ls_project_id` (Int), `ls_synced` (Bool) — Label Studio sync state
 - Job columns added: `output_inst_index_path` (Str) — path to instrumentation_index.csv when generated
 - Job columns added: `output_inst_datasheet_path` (Str) — path to instrument_datasheets.zip when generated
+
+## Admin / Password Reset (production server)
+
+- App uses **pbkdf2_sha256** (NOT bcrypt): `CryptContext(schemes=["pbkdf2_sha256"])` in `webapp/auth.py`
+- To reset a password directly in SQLite (e.g. after DB migration):
+  ```bash
+  cd /www/wwwroot/qong_poc && venv/bin/python3 -c "
+  from passlib.context import CryptContext; import sqlite3
+  h = CryptContext(schemes=['pbkdf2_sha256']).hash('Qong@2024')
+  c = sqlite3.connect('data/webapp.db'); c.execute('UPDATE users SET password_hash=? WHERE username=?', (h,'admin')); c.commit()
+  "
+  ```
+- Instrumentation Index / Datasheets buttons only appear on job detail when `output_inst_index_path` is set — old jobs need a **Re-run** to generate them
 
 ## Critical Bug Fixes (already applied)
 
@@ -202,9 +236,35 @@ Pipeline Stage 5c generates a ZIP of per-instrument HTML spec forms alongside th
 - Download endpoint: `/jobs/{id}/download-inst-datasheets` → ZIP served as `instrument_datasheets_{pid_no}.zip`
 - Button shown on job detail page when `output_inst_datasheet_path` is set
 
+## New Modules (feature/multi-cloud-saas)
+
+- `webapp/storage.py` — S3 adapter (`put_file`, `get_file`, `presigned_url`, `list`, `exists`, `delete`); singleton via `get_storage()`
+- `webapp/queue.py` — RQ wiring: `cpu_q = Queue("cpu", ...)`, `gpu_q = Queue("gpu", ...)`
+- `webapp/credits.py` — ledger helpers: `grant`, `deduct`, `refund`, `check_balance`, `get_balance`; all commit to `credit_transactions`
+- `webapp/routers/api_v1.py` — REST API endpoints; `_get_api_user` dep accepts Bearer OR cookie
+- `webapp/routers/account.py` — user-facing `/account/*` and `/feedback` routes
+
+## Testing Pattern (unit tests)
+
+- In-memory SQLite for FastAPI TestClient requires `StaticPool` — without it each new connection gets a fresh empty DB and ORM-created tables vanish:
+  ```python
+  from sqlalchemy.pool import StaticPool
+  engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+  ```
+- Override `get_db`: `app.dependency_overrides[get_db] = lambda: db_session` — must return same session as fixtures use
+- `get_current_user` raises HTTP 303 (redirect to /login), not 401 — API-facing deps must catch `HTTPException` and re-raise as 401
+- Run all unit tests: `python3 -m pytest tests/unit/ -v`
+
 ## Docker Services
 
-Five services in `docker-compose.yml`:
+### Additional services (feature/multi-cloud-saas, in docker-compose.yml)
+- `postgres` — Postgres 16; `DATABASE_URL=postgresql://...`; named volume `postgres_data`
+- `redis` — Redis 7 for RQ job queue; `REDIS_URL=redis://redis:6379/0`
+- `minio` — S3-compatible local storage; `STORAGE_ENDPOINT_URL=http://minio:9000`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`
+- `cpu-worker` — RQ worker consuming `cpu` queue; runs pipeline jobs off the main web process
+- `database.py` reads `DATABASE_URL` env var — falls back to SQLite when unset
+
+### Original five services in `docker-compose.yml`:
 - `web` — FastAPI webapp (port 8000)
 - `label-studio` — annotation tool (port 8080); tiles mounted at `/tiles` inside container; exports land in `annotate/exports/`
 - `nginx` — reverse proxy (port 9000 + 9001); **`absolute_redirect off` is REQUIRED** in the port 9000 server block — without it nginx appends `:9000` to redirect URLs, breaking ngrok/proxy access
@@ -365,13 +425,18 @@ Some customer P&IDs use tags like `VB25`, `VB40 2090`, `VBPP40` — no `AreaCode
 
 All intermediate files go in `job_outputs/{id}/tmp/` — never commit. Also never commit `webapp.db`, `uploads/`, `job_outputs/`.
 
-## Pending Architecture Change (agreed Apr 2026, not yet implemented)
+## Multi-Cloud Migration (in progress on feature/multi-cloud-saas)
 
-**Centralized team server**: migrate server from systemd → Docker Compose so interns use browser only (no local setup needed).
-Steps in order:
-1. Re-enable registration with admin approval (`_can_register()` in `webapp/routers/auth.py`)
-2. Migrate server to `docker compose up -d web nginx label-studio` (needs `.env` + DB volume migration, ~15 min downtime)
-3. Set `LS_EXTERNAL_URL=https://dev.theqong.com` and `WEBAPP_BASE_URL=https://dev.theqong.com` on server
-4. Create intern accounts via `/admin/users`, assign `annotator` or `user` role
+Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 
-See `SESSION_STATE.md` for full details.
+**Phases complete**: A1 (S3 adapter + MinIO), A2 (Postgres + RQ), B1–B2 (credits ledger + pre-flight), B3–B4 (admin panel v2 + account pages), B5 (REST API v1)
+
+**Phases pending**:
+- A3 — GCP VM provisioning, DNS cutover (blocked: needs GCP VM IP + bucket name)
+- A4 — GPU worker on Windows box (Docker + NVIDIA + Tailscale)
+- A5 — Pre-annotations: push YOLO predictions to Label Studio after GPU inference
+- A6 — Backups (`/healthz`, nightly `pg_dump → S3` cron)
+- B6/B7 — Stripe Checkout (deferred until 5+ paying customers)
+- Missing files: `compose/compose.cloud.yml`, `compose/compose.gpu.yml`, `deploy/migrate_prod_data.py`
+
+Full architecture plan: `sparkling-exploring-blum.md` in Claude plans folder.
