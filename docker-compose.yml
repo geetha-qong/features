@@ -16,6 +16,13 @@ services:
       - LS_API_KEY=${LS_API_KEY}
       - LS_URL=http://label-studio:8080
       - LS_EXTERNAL_URL=${LS_EXTERNAL_URL:-http://localhost:9001}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///data/webapp.db}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - STORAGE_ENDPOINT_URL=${STORAGE_ENDPOINT_URL:-http://minio:9000}
+      - STORAGE_BUCKET=${STORAGE_BUCKET:-qong-local}
+      - STORAGE_ACCESS_KEY=${STORAGE_ACCESS_KEY:-minioadmin}
+      - STORAGE_SECRET_KEY=${STORAGE_SECRET_KEY:-minioadmin}
+      - STORAGE_REGION=${STORAGE_REGION:-us-east-1}
     restart: unless-stopped
 
   # ── Label Studio (annotation tool) ────────────────────────────────────────
@@ -138,6 +145,63 @@ services:
       "
     restart: "no"
 
+  # ── PostgreSQL (local dev — production uses same image on GCP VM) ──────────
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=qong
+      - POSTGRES_PASSWORD=qong
+      - POSTGRES_DB=qong
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qong"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis (job queue broker) ──────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── CPU RQ worker (runs pipeline.py jobs from the 'cpu' queue) ───────────────────
+  cpu-worker:
+    build: .
+    command: python3 workers/cpu_worker.py
+    volumes:
+      - ./uploads:/app/uploads
+      - ./job_outputs:/app/job_outputs
+      - webapp_db:/app/data
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///data/webapp.db}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - STORAGE_ENDPOINT_URL=${STORAGE_ENDPOINT_URL:-http://minio:9000}
+      - STORAGE_BUCKET=${STORAGE_BUCKET:-qong-local}
+      - STORAGE_ACCESS_KEY=${STORAGE_ACCESS_KEY:-minioadmin}
+      - STORAGE_SECRET_KEY=${STORAGE_SECRET_KEY:-minioadmin}
+      - STORAGE_REGION=${STORAGE_REGION:-us-east-1}
+      - LS_API_KEY=${LS_API_KEY}
+      - LS_URL=http://label-studio:8080
+      - LS_EXTERNAL_URL=${LS_EXTERNAL_URL:-http://localhost:9001}
+      - WEBAPP_BASE_URL=${WEBAPP_BASE_URL:-http://web:8000}
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+
 volumes:
   webapp_db:
   minio_data:
+  postgres_data:

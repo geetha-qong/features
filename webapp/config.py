@@ -11,8 +11,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8  # 8 hours
 UPLOAD_DIR: Path = BASE_DIR / "uploads"
 JOB_OUTPUT_DIR: Path = BASE_DIR / "job_outputs"
 _DB_DIR = BASE_DIR / "data"
-_DB_DIR.mkdir(parents=True, exist_ok=True)
-DATABASE_URL: str = f"sqlite:///{_DB_DIR / 'webapp.db'}"
+DATABASE_URL: str = os.environ.get("DATABASE_URL", f"sqlite:///{_DB_DIR / 'webapp.db'}")
+if DATABASE_URL.startswith("sqlite"):
+    _DB_DIR.mkdir(parents=True, exist_ok=True)
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 JOB_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
