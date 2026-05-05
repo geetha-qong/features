@@ -1,4 +1,4 @@
-"""Dashboard route: /dashboard — job list for current user (all jobs for super_admin)."""
+"""Dashboard route: /dashboard — job list for current user (all jobs for super_admin/annotator)."""
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -17,7 +17,7 @@ async def dashboard(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if current_user.role == "super_admin":
+    if current_user.role in ("super_admin", "annotator"):
         jobs_q = (
             db.query(models.Job, models.User.username)
             .join(models.User, models.Job.user_id == models.User.id)

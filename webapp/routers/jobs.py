@@ -21,8 +21,8 @@ router = APIRouter()
 
 
 def _can_access_job(job, user) -> bool:
-    """Owner always; super_admin can access any job."""
-    return job.user_id == user.id or user.role == "super_admin"
+    """Owner always; super_admin and annotator can access any job."""
+    return job.user_id == user.id or user.role in ("super_admin", "annotator")
 
 
 def _run_in_thread(job_id: int, pdf_path: str, pid_no_override: str, include_control_valves: bool = True, original_filename: str = ""):

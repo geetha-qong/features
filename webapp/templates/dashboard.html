@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
-  <h4 class="mb-0">{% if user.role == 'super_admin' %}All Jobs{% else %}Your Jobs{% endif %}</h4>
+  <h4 class="mb-0">{% if user.role in ('super_admin', 'annotator') %}All Jobs{% else %}Your Jobs{% endif %}</h4>
   <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
     + Upload P&ID
   </button>
@@ -16,7 +16,7 @@
       <thead class="table-light">
         <tr>
           <th>#</th>
-          {% if user.role == 'super_admin' %}<th>User</th>{% endif %}
+          {% if user.role in ('super_admin', 'annotator') %}<th>User</th>{% endif %}
           <th>Filename / P&ID No</th>
           <th>Status</th>
           <th>Valves</th>
@@ -29,7 +29,7 @@
         {% for job in jobs %}
         <tr>
           <td class="text-muted">{{ job.id }}</td>
-          {% if user.role == 'super_admin' %}<td class="text-muted small">{{ job.owner_username }}</td>{% endif %}
+          {% if user.role in ('super_admin', 'annotator') %}<td class="text-muted small">{{ job.owner_username }}</td>{% endif %}
           <td>
             {{ job.original_filename }}
             {% if job.pid_no and job.pid_no != 'UNKNOWN' %}

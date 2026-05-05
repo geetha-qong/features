@@ -79,8 +79,8 @@ Live at: https://dev.qongsystems.com
 
 ## Label Studio (GCP)
 - URL: https://dev.qongsystems.com/ls/ (basic auth: `qong` / `Qong@LS2024`)
-- LS login: `tnb@qongsystems.com` / `Qong@2024`
-- LS API token: `1680e333886255f397165d8c017c1264116fb1ab` (legacy token for tnb@qongsystems.com)
+- LS login: `tnb@qongsystems.com` / `teNZmvlCg3GDcl99`
+- LS API token: `489d6c0dd73a50b72e9814d305d136fe1f505c7e` (legacy token for tnb@qongsystems.com)
 - `LS_API_KEY` set in `/app/qong_poc/.env` on GCP VM
 - Legacy tokens enabled via `jwt_auth.models.JWTSettings` Django model
 
@@ -100,7 +100,7 @@ valve_bf(0), valve_bv(1), valve_ck(2), valve_gl(3), valve_db(4),
 valve_cv(5), valve_gen(6), actuator_motor(7), actuator_pneu(8), actuator_sol(9)
 
 ## Webapp Features
-- Login/register (JWT cookie auth). Admin: `admin / Qong@2024`
+- Login/register (JWT cookie auth). Admin: `admin / s97nyGExH35FBeziyr`
 - Upload PDF → background job (serialized via `_pipeline_lock`)
 - Dashboard, job detail, CSV download, re-run, AI log, CV toggle, engineer feedback
 - Auto-extract Drawing No. from title block (bottom-right 40%×22% crop)
