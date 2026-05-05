@@ -1,0 +1,33 @@
+name: Deploy → dev.qongsystems.com
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GCP VM
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: 34.124.148.51
+          username: maahedev
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script: |
+            set -e
+            cd /app/qong_poc
+            git fetch origin dev
+            git checkout dev
+            git pull origin dev
+
+            # Rebuild app containers (picks up any code changes)
+            sudo docker compose build web cpu-worker
+
+            # Restart app services
+            sudo docker compose up -d web cpu-worker
+
+            # nginx caches container IPs — restart to pick up new IPs
+            sudo docker compose restart nginx
+
+            echo "Deploy complete: $(git log -1 --format='%h %s')"
