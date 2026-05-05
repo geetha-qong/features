@@ -54,17 +54,6 @@
               <span class="badge bg-secondary">User</span>
             {% endif %}
           </td>
-          <td class="small text-muted">{{ u.tier or 'trial' }}</td>
-          <td>
-            <span class="fw-semibold">{{ u.credits_remaining or 0 }}</span>
-            {% if u.id != user.id %}
-            <form method="post" action="/admin/users/{{ u.id }}/grant-credits" class="d-inline ms-1">
-              <input type="number" name="amount" min="1" max="10000" value="10"
-                     class="form-control form-control-sm d-inline-block" style="width:60px">
-              <button type="submit" class="btn btn-sm btn-outline-success">+</button>
-            </form>
-            {% endif %}
-          </td>
           <td>
             {% if u.id != user.id %}
             <form method="post" action="/admin/users/{{ u.id }}/change-tier" class="d-inline">
@@ -77,14 +66,24 @@
               </select>
             </form>
             {% else %}
-            <span class="text-muted small">—</span>
+            <span class="small text-muted">{{ u.tier or 'trial' }}</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="fw-semibold">{{ u.credits_remaining or 0 }}</span>
+            {% if u.id != user.id %}
+            <form method="post" action="/admin/users/{{ u.id }}/grant-credits" class="d-inline ms-1">
+              <input type="number" name="amount" min="1" max="10000" value="10"
+                     class="form-control form-control-sm d-inline-block" style="width:60px">
+              <button type="submit" class="btn btn-sm btn-outline-success">+</button>
+            </form>
             {% endif %}
           </td>
           <td>
             {% if u.is_active %}
               <span class="text-success small">Active</span>
             {% else %}
-              <span class="text-warning fw-semibold small">Pending Approval</span>
+              <span class="text-warning fw-semibold small">Pending</span>
             {% endif %}
           </td>
           <td class="text-muted small">{{ u.created_at | to_ist }}</td>
