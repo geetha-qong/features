@@ -8,12 +8,19 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Debug SSH key
+        run: |
+          SECRET_LEN=$(echo "${{ secrets.GCP_SSH_KEY }}" | wc -c)
+          echo "Secret char count: $SECRET_LEN"
+          echo "${{ secrets.GCP_SSH_KEY }}" | base64 -d 2>&1 | head -1 || echo "base64 decode failed"
+
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.GCP_SSH_KEY }}" | base64 -d > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -t ed25519 34.124.148.51 >> ~/.ssh/known_hosts
+          ssh-keygen -lf ~/.ssh/deploy_key || echo "Key validation failed"
 
       - name: Deploy to GCP VM
         run: |
