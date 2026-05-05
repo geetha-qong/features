@@ -8,27 +8,23 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.GCP_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -t ed25519 34.124.148.51 >> ~/.ssh/known_hosts
+
       - name: Deploy to GCP VM
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: 34.124.148.51
-          username: maahedev
-          key: ${{ secrets.GCP_SSH_KEY }}
-          fingerprint: "SHA256:wnAobyaNrnCAThUA2I7iBdiOGsSsXZlaxATUL/btxiw"
-          script: |
-            set -e
-            cd /app/qong_poc
-            git fetch origin dev
-            git checkout dev
-            git pull origin dev
-
-            # Rebuild app containers (picks up any code changes)
-            sudo docker compose build web cpu-worker
-
-            # Restart app services
-            sudo docker compose up -d web cpu-worker
-
-            # nginx caches container IPs — restart to pick up new IPs
-            sudo docker compose restart nginx
-
-            echo "Deploy complete: $(git log -1 --format='%h %s')"
+        run: |
+          ssh -i ~/.ssh/deploy_key maahedev@34.124.148.51 << 'ENDSSH'
+          set -e
+          cd /app/qong_poc
+          git fetch origin dev
+          git checkout dev
+          git pull origin dev
+          sudo docker compose build web cpu-worker
+          sudo docker compose up -d web cpu-worker
+          sudo docker compose restart nginx
+          echo "Deploy complete: $(git log -1 --format='%h %s')"
+          ENDSSH
