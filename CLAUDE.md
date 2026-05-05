@@ -12,9 +12,9 @@ Target: **≥90% recall** on valve identification.
 
 ## Branches
 
-- `main` — production (Hetzner). Only critical fixes during migration.
-- `feature/multi-cloud-saas` — active integration branch (all phases merged here; staged before main cutover)
-  Sub-branches merged in: storage-abstraction (A1), postgres-rq (A2), saas-credits-ledger (B1–B2), admin-v2 (B3), account-pages (B4), api-v1 (B5)
+- `dev` — active development; auto-deploys to `dev.qongsystems.com` on every push via GitHub Actions
+- `main` — reserved for future production at `app.qongsystems.com` (do not push until prod infra ready)
+- `feature/multi-cloud-saas` — superseded by `dev` (all phases A1-A3, B1-B5 merged in)
 
 ## Docker-First Rule
 
@@ -128,12 +128,13 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - **To deploy to Hetzner**: `git push origin main` (webhook triggers pull + restart)
 - **After adding new pip dependencies**: SSH in and run `venv/bin/pip install -r requirements-webapp.txt` manually, then `systemctl restart qong_poc`
 
-## Deployment (GCP — active, feature/multi-cloud-saas)
+## Deployment (GCP — active, dev branch)
 
 - **Live at**: https://dev.qongsystems.com
 - **VM**: `qong-dev-server`, `e2-standard-2`, zone `asia-southeast1-c`, IP `34.124.148.51`
 - **OS**: Debian 12 (bookworm), user `maahedev`
-- **Code**: `/app/qong_poc/` (branch `feature/multi-cloud-saas`)
+- **Code**: `/app/qong_poc/` (branch `dev`)
+- **Auto-deploy**: every push to `dev` branch triggers GitHub Actions → SSH → `git pull` + `docker compose build/up` (workflow: `.github/workflows/deploy-dev.yml`; requires `GCP_SSH_KEY` secret in repo settings)
 - **Access**: `gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="..."`
 - **Local gcloud**: installed at `/opt/homebrew/share/google-cloud-sdk/bin/gcloud`; add to PATH: `export PATH=/opt/homebrew/share/google-cloud-sdk/bin:"$PATH"`; auth: `theqongglobal@gmail.com`; project: `project-7555468d-d13a-482e-9ae`
 - **All docker commands need `sudo`** on GCP VM: `sudo docker compose ...`
@@ -143,9 +144,21 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - **GCP Firewall rules**: `qong-allow-http-https` (tcp:80,443), `qong-allow-web` (tcp:8000,9000,9001) — tag `qong-server` on VM
 - **LS_API_KEY**: set in `/app/qong_poc/.env` after logging into Label Studio; restart `web` + `cpu-worker` after setting
 
-### GCP — To redeploy after code changes:
+### GCP — To redeploy manually after code changes:
 ```bash
 gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="cd /app/qong_poc && git pull && sudo docker compose build web cpu-worker && sudo docker compose up -d web cpu-worker && sudo docker compose restart nginx"
+```
+
+### GCP — Fresh Postgres: create admin user on first deploy:
+```bash
+sudo docker compose exec web python3 -c "
+from webapp.database import SessionLocal
+from webapp import models, auth
+db = SessionLocal()
+u = models.User(username='admin', email='admin@qongsystems.com', password_hash=auth.pwd_context.hash('Qong@2024'), role='super_admin', is_active=True, credits_remaining=999)
+db.add(u); db.commit()
+print('admin created')
+"
 ```
 
 ### GCP — After nginx restart, always restart nginx one more time if 502:
@@ -301,7 +314,9 @@ Pipeline Stage 5c generates a ZIP of per-instrument HTML spec forms alongside th
 - `web` — FastAPI webapp (port 8000)
 - `label-studio` — annotation tool (port 8080); tiles mounted at `/tiles` inside container; exports land in `annotate/exports/`
 - `nginx` — reverse proxy; **`absolute_redirect off` is REQUIRED** — without it nginx appends the port to redirect URLs
-- nginx LS route list on port 9000: `/ls/`, `/api/`, `/static/`, `/react-app/`, `/media/`, `/data/`, `/user/`, `/projects/`, `/tasks/`, `/dm/`, `/organization/` — all proxied to LS; webapp uses none of these prefixes. `/user/` block needs `proxy_redirect ~^/$ /projects/;` — LS redirects to `/` after login which would otherwise hit the webapp
+- nginx LS route list: `/ls/`, `/api/`, `/static/`, `/react-app/`, `/media/`, `/data/`, `/user/`, `/projects/`, `/tasks/`, `/dm/`, `/organization/` — all proxied to LS; webapp uses none of these prefixes
+- **`LABEL_STUDIO_HOST=https://dev.qongsystems.com/ls`** — LS derives `FORCE_SCRIPT_NAME=/ls` from the URL path in `core/settings/base.py`; the bare `FORCE_SCRIPT_NAME` env var is silently ignored by LS
+- **Do NOT add `proxy_redirect / /ls/`** in the `/ls/` nginx block — once FORCE_SCRIPT_NAME is working, this causes double-prefix (`/ls/ls/` redirect loops)
 - port 9001 = direct LS fallback (local only); `LS_EXTERNAL_URL` defaults to `http://localhost:9001`
 - `label-studio-mcp` — Label Studio MCP server (port 8090)
 - `trainer` — YOLOv8 training via `Dockerfile.trainer` (CPU PyTorch by default; uncomment `deploy.resources` for GPU)
@@ -324,9 +339,9 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 ## Annotation Sessions
 
 **Team annotation**: use https://dev.qongsystems.com/ls/ (GCP, always on, HTTPS)
-- Basic auth gate: `qong` / `Qong@LS2024` (browser prompt)
-- LS login: `tnb@qongsystems.com` + password
+- LS login: `tnb@qongsystems.com` / `Qong@2024`
 - No tunnel needed — server is always accessible
+- **Do NOT add nginx `auth_basic` on LS routes** — LS handles its own login; `LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true` prevents unauthorized signups
 
 **Local dev only** (offline annotation work):
 ```bash
@@ -427,7 +442,7 @@ docker compose run --rm trainer python3 train.py
 - LS project created per P&ID drawing (named by pid_no); one project per drawing, re-sync safe
 - `LS_URL` (Docker-internal, API calls only) vs `LS_EXTERNAL_URL` (browser-facing project links) — both in `label_studio_client.py`; set `LS_EXTERNAL_URL=https://dev.qongsystems.com/ls` in production
 - `LS_API_KEY`: env var in `.env` — **must be named `LS_API_KEY`** (not `LABEL_STUDIO_API_KEY`); must be a user API token, not a JWT refresh token
-- **LS legacy token auth**: LS 1.23+ disables legacy API tokens by default. If 401s appear, enable via Django: `JWTSettings.legacy_api_tokens_enabled = True; settings.save()`
+- **LS legacy token auth**: LS 1.23+ disables legacy API tokens by default. If 401s appear, enable via Django shell (`sudo docker compose exec label-studio python3 manage.py shell`): `from jwt_auth.models import JWTSettings; s = JWTSettings.objects.get_or_create(id=1)[0]; s.legacy_api_tokens_enabled = True; s.save()` — use `jwt_auth.models` (NOT `core.models`, which doesn't exist in LS 1.23)
 - **Auto-sync**: After every pipeline job, `_auto_sync_to_label_studio()` in `pipeline_runner.py` runs automatically — no manual button needed
 - **`WEBAPP_BASE_URL` env var**: Tile image URL base for LS sync. Set to `https://dev.qongsystems.com` in `.env` on GCP so LS container can load tile images via the public domain.
 - **`push_tiles` response**: LS `/api/projects/{id}/import` returns a dict `{"task_count": N, ...}` — use `data.get("task_count", ...)`, not `len(data)` (which counts dict keys, not tasks)
