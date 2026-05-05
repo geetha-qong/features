@@ -94,7 +94,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 
 ## Webapp Features (production at https://dev.theqong.com)
 
-- Login/register (JWT cookie auth). Admin: `admin / Qong@2024`
+- Login/register (JWT cookie auth). Admin: `admin` (see memory for current password)
 - **Roles (3-tier)**: `super_admin` (all jobs + admin menu), `annotator` (/annotate queue), `user` (own jobs only)
 - Public `/register` creates inactive account (`is_active=False`) — super_admin approves at `/admin/users`
 - Admin-created users (via `/admin/users` modal) are active immediately
@@ -339,7 +339,7 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 ## Annotation Sessions
 
 **Team annotation**: use https://dev.qongsystems.com/ls/ (GCP, always on, HTTPS)
-- LS login: `tnb@qongsystems.com` / `Qong@2024`
+- LS login: `tnb@qongsystems.com` / `teNZmvlCg3GDcl99`
 - No tunnel needed — server is always accessible
 - **Do NOT add nginx `auth_basic` on LS routes** — LS handles its own login; `LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true` prevents unauthorized signups
 
