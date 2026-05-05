@@ -14,7 +14,7 @@ jobs:
           host: 34.124.148.51
           username: maahedev
           key: ${{ secrets.GCP_SSH_KEY }}
-          fingerprint: SHA256:wnAobyaNrnCAThUA2I7iBdiOGsSsXZlaxATUL/btxiw
+          fingerprint: "SHA256:wnAobyaNrnCAThUA2I7iBdiOGsSsXZlaxATUL/btxiw"
           script: |
             set -e
             cd /app/qong_poc
