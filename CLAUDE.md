@@ -119,17 +119,42 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - Default model: `google/gemini-2.0-flash-001` (fast); override via `OPENROUTER_MODEL`
 - Temp files → `tmp/` per job in `job_outputs/{job_id}/tmp/` (never commit)
 
-## Deployment (Production)
+## Deployment (Production — Hetzner, legacy)
 
-- Server: `root@157.180.20.168` (Ubuntu 24.04, aaPanel)
+- Server: `root@157.180.20.168` (Ubuntu 24.04, aaPanel) — still serving `main` branch at https://dev.theqong.com
 - App: FastAPI + uvicorn, port 8001, systemd `qong_poc`
 - Nginx: `/www/server/panel/vhost/nginx/dev.theqong.com.conf`
 - Code: `/www/wwwroot/qong_poc/`, auto-deploy via GitHub webhook
-- **To deploy**: `git push origin main` (webhook triggers pull + restart)
-- **After adding new pip dependencies**: webhook does NOT run pip install — SSH in and run `venv/bin/pip install -r requirements-webapp.txt` manually, then `systemctl restart qong_poc`
+- **To deploy to Hetzner**: `git push origin main` (webhook triggers pull + restart)
+- **After adding new pip dependencies**: SSH in and run `venv/bin/pip install -r requirements-webapp.txt` manually, then `systemctl restart qong_poc`
+
+## Deployment (GCP — active, feature/multi-cloud-saas)
+
+- **Live at**: https://dev.qongsystems.com
+- **VM**: `qong-dev-server`, `e2-standard-2`, zone `asia-southeast1-c`, IP `34.124.148.51`
+- **OS**: Debian 12 (bookworm), user `maahedev`
+- **Code**: `/app/qong_poc/` (branch `feature/multi-cloud-saas`)
+- **Access**: `gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="..."`
+- **Local gcloud**: installed at `/opt/homebrew/share/google-cloud-sdk/bin/gcloud`; add to PATH: `export PATH=/opt/homebrew/share/google-cloud-sdk/bin:"$PATH"`; auth: `theqongglobal@gmail.com`; project: `project-7555468d-d13a-482e-9ae`
+- **All docker commands need `sudo`** on GCP VM: `sudo docker compose ...`
+- **Deploy key**: `~/.ssh/id_ed25519_qong_product` on VM; SSH alias `qong-product` in `~/.ssh/config`
+- **SSL**: Let's Encrypt cert via certbot standalone; `/etc/letsencrypt/live/dev.qongsystems.com/` mounted read-only into nginx container; auto-renews via systemd timer
+- **nginx**: ports 80 (HTTP→HTTPS redirect) + 443 (HTTPS); webapp at `/`, Label Studio at `/ls/`; `client_max_body_size 100M` required for PDF uploads
+- **GCP Firewall rules**: `qong-allow-http-https` (tcp:80,443), `qong-allow-web` (tcp:8000,9000,9001) — tag `qong-server` on VM
+- **LS_API_KEY**: set in `/app/qong_poc/.env` after logging into Label Studio; restart `web` + `cpu-worker` after setting
+
+### GCP — To redeploy after code changes:
+```bash
+gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="cd /app/qong_poc && git pull && sudo docker compose build web cpu-worker && sudo docker compose up -d web cpu-worker && sudo docker compose restart nginx"
+```
+
+### GCP — After nginx restart, always restart nginx one more time if 502:
+Rebuilt containers get new IPs; nginx caches old IP → 502. Fix: `sudo docker compose restart nginx`
+
+## Repo
 - **Repo**: `Qong-Systems/qong_product` (migrated from `Winn-Projects/qong_poc` in Apr 2026)
 - SSH alias for Qong-Systems GitHub (local): `qongsystems`
-- SSH alias for Qong-Systems GitHub (server deploy key): `qong-product` (key: `~/.ssh/id_ed25519_qong_product` on server)
+- SSH alias for Qong-Systems GitHub (GCP VM deploy key): `qong-product` (key: `~/.ssh/id_ed25519_qong_product` on VM)
 - SSH alias for Winn-Projects GitHub (legacy, local only): `winn-projects`
 
 ## DB Schema Notes
@@ -179,6 +204,14 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 6. **Starlette 1.0.0 broke TemplateResponse**: `TypeError: unhashable type: 'dict'` on every page load. Fix: pin `fastapi>=0.111.0,<0.115.0` and `starlette>=0.37.0,<0.41.0` in `requirements-webapp.txt`.
 7. **`requests` missing from requirements-webapp.txt**: `label_studio_client.py` uses it — must include `requests>=2.31.0`.
 8. **PDF inline viewing**: `FileResponse` forces download. Use `starlette.responses.Response` with `media_type="application/pdf"` and `Content-Disposition: inline; filename="..."` to open in browser tab.
+
+## Postgres Compatibility Fixes (applied 2026-05-05 for GCP deployment)
+
+9. **`psycopg2-binary` missing**: Not in `requirements-webapp.txt` — Postgres connection fails at startup. Added: `psycopg2-binary>=2.9.9`
+10. **`AUTOINCREMENT` is SQLite-only**: Raw SQL `CREATE TABLE ... INTEGER PRIMARY KEY AUTOINCREMENT` fails on Postgres. Fix: removed raw SQL table creation from `run_migrations()`; replaced with `from webapp import models; Base.metadata.create_all(engine)` — dialect-agnostic, idempotent.
+11. **Boolean seed values**: Postgres `billing_plans.is_active` is `BOOLEAN` — inserting `1`/`0` raises `DatatypeMismatch`. Use `TRUE`/`FALSE` in seed SQL.
+12. **RQ `Connection` removed**: `from rq import Connection` fails on rq>=1.16. Fix in `workers/cpu_worker.py`: `Worker(queues=[Queue("cpu", connection=conn)], connection=conn)` — no `with Connection(conn):` wrapper needed.
+13. **nginx 502 after container rebuild**: Rebuilt containers get new Docker IPs; nginx caches the old one → 502. Always `sudo docker compose restart nginx` after rebuilding `web`.
 
 ## Correction Rules (verified by engineer, MUK-62-1-15-1004)
 
@@ -267,7 +300,7 @@ Pipeline Stage 5c generates a ZIP of per-instrument HTML spec forms alongside th
 ### Original five services in `docker-compose.yml`:
 - `web` — FastAPI webapp (port 8000)
 - `label-studio` — annotation tool (port 8080); tiles mounted at `/tiles` inside container; exports land in `annotate/exports/`
-- `nginx` — reverse proxy (port 9000 + 9001); **`absolute_redirect off` is REQUIRED** in the port 9000 server block — without it nginx appends `:9000` to redirect URLs, breaking ngrok/proxy access
+- `nginx` — reverse proxy; **`absolute_redirect off` is REQUIRED** — without it nginx appends the port to redirect URLs
 - nginx LS route list on port 9000: `/ls/`, `/api/`, `/static/`, `/react-app/`, `/media/`, `/data/`, `/user/`, `/projects/`, `/tasks/`, `/dm/`, `/organization/` — all proxied to LS; webapp uses none of these prefixes. `/user/` block needs `proxy_redirect ~^/$ /projects/;` — LS redirects to `/` after login which would otherwise hit the webapp
 - port 9001 = direct LS fallback (local only); `LS_EXTERNAL_URL` defaults to `http://localhost:9001`
 - `label-studio-mcp` — Label Studio MCP server (port 8090)
@@ -288,25 +321,20 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 - After export: unzip into `datasets/pid_valves/`; drawings 1002–1005 → train/, drawing 1001 (9 tiles) → val/
 - **Login**: `tnb@qongsystems.com` / `Qong@2024`
 
-## Starting an Annotation Session (sharing with team)
+## Annotation Sessions
 
+**Team annotation**: use https://dev.qongsystems.com/ls/ (GCP, always on, HTTPS)
+- Basic auth gate: `qong` / `Qong@LS2024` (browser prompt)
+- LS login: `tnb@qongsystems.com` + password
+- No tunnel needed — server is always accessible
+
+**Local dev only** (offline annotation work):
 ```bash
 ./annotate/start_annotation_session.sh
 ```
+- Starts label-studio + web locally; LS at `http://localhost:8080` or `http://localhost:9000/ls/`
+- `WEBAPP_BASE_URL=http://localhost:8000` — tile images served from local web container
 
-This script:
-1. Runs `caffeinate -i` to prevent Mac sleep
-2. Starts `web`, `label-studio`, and `nginx` Docker containers
-3. Starts `ngrok http 9000` → single tunnel covers both services
-
-- Port 9000 serves both webapp AND Label Studio via nginx — use this for ngrok: `ngrok http 9000`
-- Port 9001 is direct LS fallback (no prefix, local only); `LS_EXTERNAL_URL` defaults to `http://localhost:9001`
-- nginx config: `nginx/nginx.conf` — two server blocks (9000 + 9001); LS SPA paths (`/api/`, `/static/`, `/react-app/`, `/media/`, `/data/`) routed to LS on port 9000
-- Screen lock is fine; Mac **must not sleep** (caffeinate handles this)
-- ngrok URL changes on every restart — share fresh URL each session
-- Team login: `tnb@qongsystems.com` / `Qong@2024`
-- Local URLs: webapp `http://localhost:8000`, Label Studio `http://localhost:8080`, combined `http://localhost:9000`
-- ngrok installed at `/opt/homebrew/bin/ngrok`, auth token already configured
 - **Known 500 bug**: if `organization.created_by` is null after login, fix with:
   ```bash
   docker compose exec label-studio bash -c "cd /label-studio/label_studio && python3 -c \"
@@ -397,14 +425,14 @@ docker compose run --rm trainer python3 train.py
 - `/jobs/{id}/tiles/{filename}` — serves tile PNGs so Label Studio can load images via URL; uses `get_job_dir(job)` with legacy fallback
 - `webapp/label_studio_client.py` — LS REST API client; configured via `LS_URL` + `LS_API_KEY` env vars
 - LS project created per P&ID drawing (named by pid_no); one project per drawing, re-sync safe
-- `LS_URL` (Docker-internal, API calls only) vs `LS_EXTERNAL_URL` (browser-facing project links, default `http://localhost:9001`) — both in `label_studio_client.py`; override `LS_EXTERNAL_URL` in web service env when deploying behind ngrok or a domain
+- `LS_URL` (Docker-internal, API calls only) vs `LS_EXTERNAL_URL` (browser-facing project links) — both in `label_studio_client.py`; set `LS_EXTERNAL_URL=https://dev.qongsystems.com/ls` in production
 - `LS_API_KEY`: env var in `.env` — **must be named `LS_API_KEY`** (not `LABEL_STUDIO_API_KEY`); must be a user API token, not a JWT refresh token
 - **LS legacy token auth**: LS 1.23+ disables legacy API tokens by default. If 401s appear, enable via Django: `JWTSettings.legacy_api_tokens_enabled = True; settings.save()`
 - **Auto-sync**: After every pipeline job, `_auto_sync_to_label_studio()` in `pipeline_runner.py` runs automatically — no manual button needed
-- **`WEBAPP_BASE_URL` env var**: Tile image URL base for LS sync. Default `http://web:8000` (Docker-internal). Set to ngrok URL during team annotation sessions so LS container can load tile images.
+- **`WEBAPP_BASE_URL` env var**: Tile image URL base for LS sync. Set to `https://dev.qongsystems.com` in `.env` on GCP so LS container can load tile images via the public domain.
 - **`push_tiles` response**: LS `/api/projects/{id}/import` returns a dict `{"task_count": N, ...}` — use `data.get("task_count", ...)`, not `len(data)` (which counts dict keys, not tasks)
 - **Re-sync deletes stale tasks first**: `delete_all_tasks(project_id)` is called before `push_tiles()` in the sync endpoint — prevents duplicate tasks with stale/broken image URLs
-- **Must sync via public URL**: tile image URLs use `request.base_url` from the sync HTTP request; always trigger Re-sync from ngrok/public URL (not localhost) so LS can load images externally
+- **Must sync via public URL**: tile image URLs use `request.base_url` from the sync HTTP request; always trigger Re-sync from the public domain (https://dev.qongsystems.com) so LS container can load images
 
 ## Non-Standard Tag Format P&IDs
 

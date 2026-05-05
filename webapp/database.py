@@ -27,6 +27,7 @@ def run_migrations():
         ("users", "credits_remaining", "INTEGER DEFAULT 10"),
         ("users", "tier", "TEXT DEFAULT 'trial'"),
         ("users", "organization", "TEXT"),
+        ("jobs", "original_filename", "TEXT"),
     ]
     with engine.connect() as conn:
         for table, column, col_type in new_columns:
@@ -36,53 +37,9 @@ def run_migrations():
             except Exception:
                 pass  # column already exists
 
-    # Create new SaaS tables (idempotent)
-    new_tables_sql = [
-        """CREATE TABLE IF NOT EXISTS api_keys (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL REFERENCES users(id),
-            name TEXT NOT NULL,
-            key_prefix TEXT NOT NULL,
-            key_hash TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_used_at TIMESTAMP,
-            revoked_at TIMESTAMP
-        )""",
-        """CREATE TABLE IF NOT EXISTS credit_transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL REFERENCES users(id),
-            delta INTEGER NOT NULL,
-            balance_after INTEGER NOT NULL,
-            reason TEXT NOT NULL,
-            job_id INTEGER REFERENCES jobs(id),
-            meta TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""",
-        """CREATE TABLE IF NOT EXISTS billing_plans (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            credits INTEGER NOT NULL,
-            price_usd_cents INTEGER NOT NULL,
-            is_active INTEGER DEFAULT 1,
-            stripe_price_id TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""",
-        """CREATE TABLE IF NOT EXISTS user_feedback (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER REFERENCES users(id),
-            category TEXT NOT NULL,
-            subject TEXT NOT NULL,
-            message TEXT NOT NULL,
-            page_url TEXT,
-            status TEXT DEFAULT 'new',
-            admin_notes TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )""",
-    ]
-    with engine.connect() as conn:
-        for sql in new_tables_sql:
-            conn.execute(text(sql))
-            conn.commit()
+    # Create new SaaS tables via SQLAlchemy ORM (dialect-agnostic — works on SQLite + Postgres)
+    from webapp import models  # noqa: F401 — registers tables on Base.metadata
+    Base.metadata.create_all(engine)
 
     # Seed default billing plans if none exist
     with engine.connect() as conn:
@@ -90,10 +47,10 @@ def run_migrations():
         if count == 0:
             conn.execute(text("""
                 INSERT INTO billing_plans (name, credits, price_usd_cents, is_active) VALUES
-                ('Trial', 10, 0, 1),
-                ('Starter', 100, 1900, 1),
-                ('Pro', 1000, 14900, 1),
-                ('Enterprise', 0, 0, 0)
+                ('Trial', 10, 0, TRUE),
+                ('Starter', 100, 1900, TRUE),
+                ('Pro', 1000, 14900, TRUE),
+                ('Enterprise', 0, 0, FALSE)
             """))
             conn.commit()
 

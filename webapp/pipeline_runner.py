@@ -122,8 +122,7 @@ def _auto_sync_to_label_studio(job, job_dir: Path, db) -> None:
         tile_files = sorted((job_dir / "tmp").glob("tile_p*_r*_c*.png"))
         if not tile_files:
             return
-        # Use WEBAPP_BASE_URL env var (set to ngrok URL when sharing externally,
-        # defaults to internal Docker URL so LS container can always reach tiles)
+        # Use WEBAPP_BASE_URL env var (set to public domain on GCP, defaults to internal Docker URL)
         base_url = os.environ.get("WEBAPP_BASE_URL", "http://web:8000").rstrip("/")
         tile_urls = [f"{base_url}/jobs/{job.id}/tiles/{f.name}" for f in tile_files]
         project_id = job.ls_project_id or ls.get_or_create_project(job.pid_no or f"job-{job.id}")

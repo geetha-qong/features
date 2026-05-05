@@ -43,20 +43,23 @@ services:
     environment:
       - LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
       - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/tiles
-      - LABEL_STUDIO_CSRF_TRUSTED_ORIGINS=https://*.ngrok-free.app,https://*.ngrok.io
-      - FORCE_SCRIPT_NAME=/ls
+      - LABEL_STUDIO_CSRF_TRUSTED_ORIGINS=https://dev.qongsystems.com
+      - LABEL_STUDIO_HOST=https://dev.qongsystems.com/ls
+      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
     restart: unless-stopped
 
-  # ── Nginx reverse proxy (combines webapp + Label Studio on one port) ────────
-  # Exposes port 9000: / → webapp (8000), /ls/ → Label Studio (8080)
-  # Use this single port for ngrok: ngrok http 9000
+  # ── Nginx reverse proxy ────────────────────────────────────────────────────
+  # Production: https://dev.qongsystems.com (GCP, ports 80/443 with SSL)
+  # Local dev override: use docker-compose.override.yml to swap ports to 9000/9001
   nginx:
     image: nginx:alpine
     ports:
-      - "9000:9000"   # webapp
-      - "9001:9001"   # Label Studio
+      - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/ls_htpasswd:/etc/nginx/ls_htpasswd:ro
     depends_on:
       - web
       - label-studio
