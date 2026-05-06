@@ -37,7 +37,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./annotate/ls_data:/label-studio/data      # persistent DB + media
+      - ls_data:/label-studio/data                 # named volume — survives deploys, not tracked by git
       - ./annotate/tiles:/tiles:ro                 # P&ID tiles (read-only)
       - ./annotate/exports:/label-studio/exports   # exported annotations land here
     environment:
@@ -46,6 +46,10 @@ services:
       - LABEL_STUDIO_CSRF_TRUSTED_ORIGINS=https://dev.qongsystems.com
       - LABEL_STUDIO_HOST=https://dev.qongsystems.com/ls
       - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
+      - DJANGO_DB=default
+      - POSTGRESQLURL=postgresql://qong:qong@postgres:5432/label_studio
+    depends_on:
+      - postgres
     restart: unless-stopped
 
   # ── Nginx reverse proxy ────────────────────────────────────────────────────
@@ -208,3 +212,4 @@ volumes:
   webapp_db:
   minio_data:
   postgres_data:
+  ls_data:

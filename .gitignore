@@ -8,6 +8,7 @@ job_outputs/
 
 # Database
 *.db
+annotate/ls_data/
 
 # Python
 __pycache__/
