@@ -1,7 +1,8 @@
 """FastAPI application entry point."""
 from pathlib import Path
+import time
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from webapp.database import Base, engine, run_migrations, SessionLocal
@@ -73,6 +74,21 @@ app.include_router(feedback.router)
 app.include_router(admin_router.router)
 app.include_router(account_router.router)
 app.include_router(api_v1_router.router)
+
+
+@app.get("/healthz")
+async def healthz():
+    """Health check — used by uptime monitors and restore scripts."""
+    status = {"status": "ok", "timestamp": int(time.time())}
+    try:
+        db = SessionLocal()
+        db.execute(__import__("sqlalchemy").text("SELECT 1"))
+        db.close()
+        status["db"] = "ok"
+    except Exception as e:
+        status["db"] = f"error: {e}"
+        status["status"] = "degraded"
+    return JSONResponse(status, status_code=200 if status["status"] == "ok" else 503)
 
 
 @app.get("/")
