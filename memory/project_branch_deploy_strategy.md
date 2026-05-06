@@ -6,7 +6,7 @@ type: project
 
 Two-environment strategy:
 
-- `dev` branch → **dev.qongsystems.com** (GCP VM `qong-dev-server`, 34.124.148.51) — auto-deploys on every push to `dev`
+- `dev` branch → **dev.qongsystems.com** (GCP VM `qong-dev-server`, 34.126.93.103) — auto-deploys on every push to `dev`
 - `main` branch → **app.qongsystems.com** (production, not yet live) — will be set up when ready for launch
 
 **Why:** Keeps dev and prod environments fully isolated; team can push to dev freely without touching prod.

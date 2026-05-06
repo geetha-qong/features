@@ -498,10 +498,9 @@ All intermediate files go in `job_outputs/{id}/tmp/` — never commit. Also neve
 
 Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 
-**Phases complete**: A1 (S3 adapter + MinIO), A2 (Postgres + RQ), A3 (GCP VM live, data migrated), A4 (GPU worker on Windows — deps, model, ONNX session, Redis all verified), A6 (/healthz, nightly pg_dump→GCS, restore script), B1–B2 (credits ledger + pre-flight), B3–B4 (admin panel v2 + account pages), B5 (REST API v1)
+**Phases complete**: A1 (S3 adapter + MinIO), A2 (Postgres + RQ), A3 (GCP VM live, data migrated), A4 (GPU worker on Windows — deps, model, ONNX session, Redis all verified), A5 (GPU callback endpoint + LS pre-annotations), A6 (/healthz, nightly pg_dump→GCS, restore script), B1–B2 (credits ledger + pre-flight), B3–B4 (admin panel v2 + account pages), B5 (REST API v1)
 
 **Phases pending**:
-- A5 — Pre-annotations: push YOLO predictions to Label Studio after GPU inference (needs callback endpoint)
 - B6/B7 — Stripe Checkout (deferred until 5+ paying customers)
 
 **A6 details**:
@@ -513,26 +512,14 @@ Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 
 Full architecture plan: `sparkling-exploring-blum.md` in Claude plans folder.
 
-## Phase A5 — Pre-Annotations (NEXT PHASE)
+## Phase A5 — Pre-Annotations (COMPLETE, 2026-05-06)
 
-GPU worker POSTs detections back to GCP webapp → webapp stores them → auto-pushes as LS pre-annotations.
+GPU worker POSTs detections → webapp stores JSON → auto-pushes as LS pre-annotations.
 
-**Build in `webapp/routers/api_v1.py`**:
-```python
-@router.post("/jobs/{job_id}/gpu-result")
-# Auth: Bearer API key (any active key) OR internal CALLBACK_SECRET in .env
-# Body: {"job_id": int, "detections": [{"valve_tag": str, "line_number": str|null,
-#         "actuator": str, "yolo_class": str, "yolo_conf": float, "bbox_tile": [...], ...}]}
-# Action: store detections JSON on job row, call push_predictions() to LS
-# Returns: 200 {"stored": N} or 404 if job not found
-```
-
-**Build in `webapp/label_studio_client.py`**:
-- `push_predictions(project_id, detections)` — push YOLO detections as LS pre-annotations
-- POST to `/api/projects/{id}/import` with `[{"data": {"image": url}, "annotations": [{"result": [...]}]}]`
-- Each detection → `{"type": "rectanglelabels", "value": {"x": %, "y": %, "width": %, "height": %, "labels": [yolo_class]}, "from_name": "label", "to_name": "image"}`
-
-**DB**: add `gpu_detections` JSON column on `jobs` table via `run_migrations()` in `database.py`
+- `POST /api/v1/jobs/{job_id}/gpu-result` (`webapp/routers/api_v1.py`) — auth via `_get_api_user`; stores `job.gpu_detections` (JSON); calls `push_predictions()` if `job.ls_project_id` set; returns `{"stored": N, "ls_predictions_posted": N}`
+- `push_predictions(project_id, detections, job_dir)` (`label_studio_client.py`) — gets LS tasks for project, matches by `tile_p{page}_r{row}_c{col}` in task image URL, opens tile files for exact dims (2000×2000 fallback), POSTs to `/api/predictions/` with `model_version="gpu-worker-v1"`
+- `job.gpu_detections` TEXT column — JSON list of detection dicts; added via `run_migrations()`
+- Detection dict fields: `valve_tag`, `line_number`, `actuator`, `yolo_class`, `yolo_conf`, `tile_row`, `tile_col`, `tile_page`, `tile_x0`, `tile_y0`, `bbox_tile` ([x1,y1,x2,y2] in tile pixels), `source`
 
 ## Phase A4 — GPU Worker (COMPLETE, 2026-05-06)
 

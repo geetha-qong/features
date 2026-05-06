@@ -22,6 +22,7 @@ def run_migrations():
         ("jobs", "ls_synced", "INTEGER DEFAULT 0"),
         ("jobs", "output_inst_index_path", "TEXT"),
         ("jobs", "output_inst_datasheet_path", "TEXT"),
+        ("jobs", "gpu_detections", "TEXT"),
         ("users", "role", "TEXT DEFAULT 'user'"),
         ("users", "is_active", "INTEGER DEFAULT 1"),
         ("users", "credits_remaining", "INTEGER DEFAULT 10"),

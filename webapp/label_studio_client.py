@@ -1,6 +1,9 @@
 """Label Studio API client — push P&ID tiles as annotation tasks."""
 import os
-from typing import Optional
+import re
+from collections import defaultdict
+from pathlib import Path
+from typing import List, Optional
 import requests
 
 LS_URL = os.environ.get("LS_URL", "http://localhost:8080").rstrip("/")
@@ -91,6 +94,95 @@ def push_tiles(project_id: int, tile_urls: list) -> int:
             return data.get("task_count", len(tile_urls)) if isinstance(data, dict) else len(data)
     except Exception as e:
         print(f"[label_studio] push_tiles error: {e}")
+    return 0
+
+
+_TILE_RE = re.compile(r'tile_p(\d+)_r(\d+)_c(\d+)')
+
+
+def push_predictions(project_id: int, detections: List[dict], job_dir: Path) -> int:
+    """Push GPU worker detections as pre-annotation predictions to LS tasks.
+
+    Matches each detection to the correct task by parsing tile coordinates from the
+    task image URL, then POSTs a prediction with percentage-based bbox coordinates.
+    Returns the number of predictions successfully posted.
+    """
+    if not is_configured() or not project_id:
+        return 0
+    try:
+        resp = requests.get(
+            f"{LS_URL}/api/tasks/?project={project_id}&page_size=500",
+            headers=_headers(), timeout=15,
+        )
+        if resp.status_code != 200:
+            return 0
+        payload = resp.json()
+        tasks = payload.get("tasks", payload) if isinstance(payload, dict) else payload
+
+        # (page, row, col) → task_id
+        task_map: dict = {}
+        for task in tasks:
+            url = task.get("data", {}).get("image", "")
+            m = _TILE_RE.search(url)
+            if m:
+                task_map[(int(m.group(1)), int(m.group(2)), int(m.group(3)))] = task["id"]
+
+        # Group detections by tile
+        by_tile: dict = defaultdict(list)
+        for det in detections:
+            key = (det.get("tile_page", 0), det.get("tile_row", 0), det.get("tile_col", 0))
+            by_tile[key].append(det)
+
+        posted = 0
+        for (page, row, col), tile_dets in by_tile.items():
+            task_id = task_map.get((page, row, col))
+            if not task_id:
+                continue
+
+            tile_path = job_dir / "tmp" / f"tile_p{page}_r{row}_c{col}.png"
+            if tile_path.exists():
+                from PIL import Image as _Image
+                with _Image.open(tile_path) as im:
+                    img_w, img_h = im.size
+            else:
+                img_w, img_h = 2000, 2000  # fallback; percentages still valid
+
+            result = []
+            for det in tile_dets:
+                bbox = det.get("bbox_tile", [])
+                if len(bbox) < 4:
+                    continue
+                x1, y1, x2, y2 = bbox
+                result.append({
+                    "type": "rectanglelabels",
+                    "from_name": "label",
+                    "to_name": "image",
+                    "original_width": img_w,
+                    "original_height": img_h,
+                    "value": {
+                        "x": x1 / img_w * 100,
+                        "y": y1 / img_h * 100,
+                        "width": (x2 - x1) / img_w * 100,
+                        "height": (y2 - y1) / img_h * 100,
+                        "rotation": 0,
+                        "rectanglelabels": [det.get("yolo_class", "valve_gen")],
+                    },
+                })
+
+            if not result:
+                continue
+
+            pred = requests.post(
+                f"{LS_URL}/api/predictions/",
+                headers=_headers(),
+                json={"task": task_id, "model_version": "gpu-worker-v1", "result": result},
+                timeout=15,
+            )
+            if pred.status_code in (200, 201):
+                posted += 1
+        return posted
+    except Exception as e:
+        print(f"[label_studio] push_predictions error: {e}")
     return 0
 
 

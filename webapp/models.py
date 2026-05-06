@@ -40,6 +40,7 @@ class Job(Base):
     ls_synced = Column(Boolean, default=False)        # True once tiles pushed to LS
     output_inst_index_path = Column(String, nullable=True)   # instrumentation_index.csv
     output_inst_datasheet_path = Column(String, nullable=True)  # instrument_datasheets.zip
+    gpu_detections = Column(Text, nullable=True)              # JSON list from GPU worker callback
 
 
 class ValveRow(Base):

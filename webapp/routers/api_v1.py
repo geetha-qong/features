@@ -2,6 +2,7 @@
 
 Auth: Bearer qk_... (API key) OR cookie JWT — both accepted on every endpoint.
 """
+import json
 import shutil
 import threading
 import uuid
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 from webapp import credits as credits_module
 from webapp import models
 from webapp.auth import get_user_from_api_key, get_current_user
-from webapp.config import JOB_OUTPUT_DIR, get_user_upload_dir
+from webapp.config import JOB_OUTPUT_DIR, get_job_dir, get_user_upload_dir
 from webapp.database import get_db
 from webapp.pipeline_runner import run_pipeline_for_job
 
@@ -210,3 +211,41 @@ async def api_account(
         "credits_remaining": credits_module.get_balance(current_user),
         "tier": current_user.tier or "trial",
     }
+
+
+# ── POST /api/v1/jobs/{id}/gpu-result ─────────────────────────────────────────
+
+@router.post("/jobs/{job_id}/gpu-result")
+async def api_gpu_result(
+    job_id: int,
+    request: Request,
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+):
+    """Receive YOLO+OCR detection results from the Windows GPU worker.
+
+    Body: {"job_id": int, "detections": [...]}
+    Stores detections on the job row; pushes predictions to Label Studio if configured.
+    Returns: {"stored": N, "ls_predictions_posted": N}
+    """
+    body = await request.json()
+    detections = body.get("detections", [])
+
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != current_user.id and current_user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    job.gpu_detections = json.dumps(detections)
+    db.commit()
+
+    ls_pushed = 0
+    if job.ls_project_id:
+        from webapp import label_studio_client as ls
+        ls_pushed = ls.push_predictions(job.ls_project_id, detections, get_job_dir(job))
+
+    return JSONResponse(
+        status_code=200,
+        content={"stored": len(detections), "ls_predictions_posted": ls_pushed},
+    )
