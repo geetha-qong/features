@@ -3,10 +3,13 @@
 Auth: Bearer qk_... (API key) OR cookie JWT — both accepted on every endpoint.
 """
 import json
+import os
 import shutil
 import threading
 import uuid
 from datetime import datetime
+
+_GPU_CALLBACK_SECRET = os.environ.get("GPU_CALLBACK_SECRET", "")
 
 import fitz  # PyMuPDF — page count for credit pre-flight
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -219,22 +222,41 @@ async def api_account(
 async def api_gpu_result(
     job_id: int,
     request: Request,
-    current_user: models.User = Depends(_get_api_user),
     db: Session = Depends(get_db),
 ):
     """Receive YOLO+OCR detection results from the Windows GPU worker.
 
+    Auth: GPU_CALLBACK_SECRET (shared secret, set via .env) OR normal Bearer API key.
     Body: {"job_id": int, "detections": [...]}
     Stores detections on the job row; pushes predictions to Label Studio if configured.
     Returns: {"stored": N, "ls_predictions_posted": N}
     """
+    # Accept GPU_CALLBACK_SECRET as a trusted alternative to per-user API keys.
+    # (API keys are stored hashed — we can't reconstruct them for the worker payload.)
+    auth_header = request.headers.get("Authorization", "")
+    bearer = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
+    trusted = bool(_GPU_CALLBACK_SECRET and bearer == _GPU_CALLBACK_SECRET)
+
+    current_user = None
+    if not trusted:
+        current_user = await get_user_from_api_key(request, db)
+        if not current_user:
+            try:
+                current_user = get_current_user(request, db)
+            except HTTPException:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Provide GPU_CALLBACK_SECRET or a valid API key",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
     body = await request.json()
     detections = body.get("detections", [])
 
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.user_id != current_user.id and current_user.role != "super_admin":
+    if current_user and job.user_id != current_user.id and current_user.role != "super_admin":
         raise HTTPException(status_code=403, detail="Access denied")
 
     job.gpu_detections = json.dumps(detections)

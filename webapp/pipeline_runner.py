@@ -112,6 +112,9 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
     # Auto-sync tiles to Label Studio if configured
     _auto_sync_to_label_studio(job, job_dir, db)
 
+    # Dispatch YOLO inference to Windows GPU worker if configured
+    _dispatch_gpu_job(job, job_dir)
+
 
 def _auto_sync_to_label_studio(job, job_dir: Path, db) -> None:
     """Push job tiles to Label Studio automatically after pipeline completes."""
@@ -135,6 +138,55 @@ def _auto_sync_to_label_studio(job, job_dir: Path, db) -> None:
         print(f"[label_studio] Auto-synced {pushed} tiles for job {job.id} → project {project_id}")
     except Exception as e:
         print(f"[label_studio] Auto-sync error for job {job.id}: {e}")
+
+
+def _dispatch_gpu_job(job, job_dir: Path) -> None:
+    """Enqueue YOLO inference on the GPU RQ queue after tiles are generated.
+
+    Requires GPU_CALLBACK_SECRET and GPU queue reachable (Tailscale Redis).
+    No-ops silently if not configured — CPU pipeline result is unaffected.
+    """
+    import re
+    callback_secret = os.environ.get("GPU_CALLBACK_SECRET", "")
+    if not callback_secret:
+        return
+
+    tile_files = sorted((job_dir / "tmp").glob("tile_p*_r*_c*.png"))
+    if not tile_files:
+        return
+
+    base_url = os.environ.get("WEBAPP_BASE_URL", "http://web:8000").rstrip("/")
+    _tile_re = re.compile(r'tile_p(\d+)_r(\d+)_c(\d+)\.png')
+    tile_infos = []
+    for f in tile_files:
+        m = _tile_re.match(f.name)
+        if not m:
+            continue
+        tile_infos.append({
+            "url": f"{base_url}/jobs/{job.id}/tiles/{f.name}",
+            "row": int(m.group(2)),
+            "col": int(m.group(3)),
+            "page": int(m.group(1)),
+            "x0": 0, "y0": 0,
+        })
+
+    if not tile_infos:
+        return
+
+    try:
+        from webapp.queue import get_gpu_queue
+        get_gpu_queue().enqueue(
+            "worker.run_inference_job",
+            job_id=job.id,
+            pid_no=job.pid_no or f"job-{job.id}",
+            tile_infos=tile_infos,
+            callback_url=f"{base_url}/api/v1/jobs/{job.id}/gpu-result",
+            api_key=callback_secret,
+            job_timeout=1800,
+        )
+        print(f"[gpu] Dispatched job {job.id} ({len(tile_infos)} tiles)")
+    except Exception as e:
+        print(f"[gpu] Dispatch error for job {job.id}: {e}")
 
 
 def _ingest_csv(job_id: int, csv_path: str, pid_no_override: str, db: Session, include_control_valves: bool = True) -> None:

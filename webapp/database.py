@@ -30,13 +30,15 @@ def run_migrations():
         ("users", "organization", "TEXT"),
         ("jobs", "original_filename", "TEXT"),
     ]
-    with engine.connect() as conn:
-        for table, column, col_type in new_columns:
-            try:
+    # Use a fresh connection per column — on Postgres a failed ALTER leaves the
+    # connection in aborted state, silently breaking every subsequent ALTER.
+    for table, column, col_type in new_columns:
+        try:
+            with engine.connect() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
                 conn.commit()
-            except Exception:
-                pass  # column already exists
+        except Exception:
+            pass  # column already exists
 
     # Create new SaaS tables via SQLAlchemy ORM (dialect-agnostic — works on SQLite + Postgres)
     from webapp import models  # noqa: F401 — registers tables on Base.metadata
