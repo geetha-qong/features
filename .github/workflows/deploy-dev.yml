@@ -31,7 +31,7 @@ jobs:
           cd /app/qong_poc
           git fetch origin dev
           git checkout dev
-          git pull origin dev
+          git reset --hard origin/dev
           sudo docker compose build web cpu-worker
           sudo docker compose up -d web cpu-worker
           sudo docker compose restart nginx
