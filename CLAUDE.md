@@ -498,11 +498,10 @@ All intermediate files go in `job_outputs/{id}/tmp/` — never commit. Also neve
 
 Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 
-**Phases complete**: A1 (S3 adapter + MinIO), A2 (Postgres + RQ), A3 (GCP VM live, data migrated), A6 (/healthz, nightly pg_dump→GCS, restore script), B1–B2 (credits ledger + pre-flight), B3–B4 (admin panel v2 + account pages), B5 (REST API v1)
+**Phases complete**: A1 (S3 adapter + MinIO), A2 (Postgres + RQ), A3 (GCP VM live, data migrated), A4 (GPU worker on Windows — deps, model, ONNX session, Redis all verified), A6 (/healthz, nightly pg_dump→GCS, restore script), B1–B2 (credits ledger + pre-flight), B3–B4 (admin panel v2 + account pages), B5 (REST API v1)
 
 **Phases pending**:
-- A4 — GPU worker on Windows box (in progress — see below)
-- A5 — Pre-annotations: push YOLO predictions to Label Studio after GPU inference
+- A5 — Pre-annotations: push YOLO predictions to Label Studio after GPU inference (needs callback endpoint)
 - B6/B7 — Stripe Checkout (deferred until 5+ paying customers)
 
 **A6 details**:
@@ -514,7 +513,7 @@ Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 
 Full architecture plan: `sparkling-exploring-blum.md` in Claude plans folder.
 
-## Phase A4 — GPU Worker (in progress, 2026-05-06)
+## Phase A4 — GPU Worker (COMPLETE, 2026-05-06)
 
 **Tailscale network**:
 - GCP VM (`qong-dev-server`): Tailscale IP `100.127.190.88`
@@ -528,27 +527,54 @@ Full architecture plan: `sparkling-exploring-blum.md` in Claude plans folder.
 - After any docker-compose.yml port change: `sudo docker compose up -d --force-recreate redis`
 
 **GPU worker repo** (`Qong-Systems/qong_poc_gpu` — separate repo, NOT in qong_product):
-- Clone: `git clone https://github.com/Qong-Systems/qong_poc_gpu.git C:\qong_gpu`
+- Clone: `git clone https://github.com/Qong-Systems/qong_poc_gpu.git`
 - `worker.py` — RQ worker consuming `gpu` queue; auto-deletes all tile files after each job
 - `inference/engine.py` — YOLO ONNX + PaddleOCR, zero imports from main repo
-- `requirements.txt` — minimal: rq, redis, onnxruntime-gpu, paddleocr, requests
-- `setup/install_windows.ps1` — one-shot NSSM service installer
+- `requirements.txt` — minimal: rq, redis, onnxruntime-gpu, paddleocr==2.9.1, requests
 - Local path on dev machine: `/Users/maahedev/allcode/experiments/qong/qong-gpu-worker/`
 
-**ONNX model on GCS**: `gs://qong-backups/models/best_v1.onnx` (43 MB, uploaded 2026-05-06)
-- Worker auto-downloads to `models/best.onnx` on first run if not cached
-- To push a new model version: `gcloud storage cp models/best.onnx gs://qong-backups/models/best_v2.onnx`
+**Windows setup (completed 2026-05-06)**:
+- Python: `C:\Program Files\Python311\python.exe` (3.11.9)
+- Worker dir: `C:\Users\qongsystems\qong-poc-gpu\`
+- ONNX model: `C:\Users\qongsystems\qong-poc-gpu\models\best.onnx` (45 MB)
+- `.env`: `REDIS_URL=redis://100.127.190.88:6379/0`, `MODEL_PATH=models/best.onnx`
+- PaddleOCR models cached in `C:\Users\qongsystems\.paddleocr\whl\`
+- To start: `cd C:\Users\qongsystems\qong-poc-gpu && "C:\Program Files\Python311\python.exe" worker.py`
+
+**ONNX on Windows**: `onnxruntime-gpu 1.25.1` installed; currently uses CPU (CUDA 12 + cuDNN 9 not yet installed)
+- Providers available: `TensorrtExecutionProvider, CUDAExecutionProvider, CPUExecutionProvider`
+- Falls back to CPU silently — inference works, just slower
+
+**paddleocr version pinning**: always use `paddleocr==2.9.1` on Windows
+- paddleocr 3.x pulls in `paddlex → modelscope + huggingface_hub + pandas` — these CDNs stall for hours on Windows
+- paddleocr 2.9.1 installs entirely from PyPI; all deps download in 5-10 min
+- API change: 2.x uses `.ocr(path, cls=True)` returning `[[[bbox,(text,conf)],...]]`; 3.x uses `.predict(path)` returning dicts
+- engine.py uses 2.x API — do not upgrade paddleocr without updating engine.py
+
+**Windows pip install patterns**:
+- Install in stages: core packages first (rq, redis, onnxruntime-gpu, numpy, Pillow, paddlepaddle), then paddleocr separately
+- Use `--timeout 30 --retries 3` flags to avoid silent stalls on slow CDNs
+- If pip stalls (same last line for 5+ min with file size not growing): `taskkill /PID <pid> /F`, retry
+- `winget` does NOT work over SSH (requires desktop session) — use `Invoke-WebRequest` + silent installers
+
+**SSH to Windows via GCP jump**:
+```bash
+gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="sshpass -p '123456' ssh -o StrictHostKeyChecking=no qongsystems@100.91.199.103 'YOUR_COMMAND'"
+```
+- File copy: SCP to GCP VM first (`gcloud compute scp`), then `sshpass scp` to Windows
+- For Python scripts: SCP the .py file, then run `"C:\Program Files\Python311\python.exe" C:\path\to\script.py`
+- Inline Python `-c` with complex strings fails due to nested quoting — always write to a file first
 
 **Security design**:
 - Windows box has ONLY `REDIS_URL` — no MinIO/DB/GCS credentials
 - Tiles passed as presigned URLs (1-hour expiry, job-specific) — Windows cannot access other jobs' files
 - `tempfile.TemporaryDirectory` in `run_inference_job()` guarantees all tile files deleted after every job, even on crash
-- No cross-job data leakage possible
 
 **Windows SSH** (enable with one command as Administrator):
 ```powershell
 Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Start-Service sshd; Set-Service -Name sshd -StartupType Automatic; New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
 ```
+- Password auth disabled by default — also run: `Add-Content "C:\ProgramData\ssh\sshd_config" "\nPasswordAuthentication yes"; Restart-Service sshd`
 
 ## GitHub — Org Separation
 
