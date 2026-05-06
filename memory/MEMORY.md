@@ -10,6 +10,9 @@ Live at: https://dev.qongsystems.com
 - `dev` — active development; auto-deploys to **dev.qongsystems.com** on every push
 - `feature/multi-cloud-saas` — superseded by `dev` (all phases A1-A3, B1-B5 merged)
 
+## GitHub
+- [GitHub org separation — never use Winn-Projects for Qong work](feedback_github_orgs.md) — gh CLI is tarunhere/Winn-Projects; Qong-Systems repos need manual creation or separate token
+
 ## Key Files
 - `pipeline.py` — orchestrator (one-line swap: `from extractor` → `from detector` for offline)
 - `pdf_to_tiles.py` → `extractor.py` → `parser.py` → `corrections.py` → `validator.py`
@@ -50,7 +53,7 @@ Live at: https://dev.qongsystems.com
 - Local app: `OPENROUTER_API_KEY=... python3 -m uvicorn webapp.main:app --port 8000 --reload`
 
 ## Deployment
-- **Dev**: `dev` branch → auto-deploy to `dev.qongsystems.com` (GCP VM `qong-dev-server`, `asia-southeast1-c`, IP `34.124.148.51`) via GitHub Actions
+- **Dev**: `dev` branch → auto-deploy to `dev.qongsystems.com` (GCP VM `qong-dev-server`, `asia-southeast1-c`, IP `34.126.93.103`) via GitHub Actions
 - **Prod (future)**: `main` branch → `app.qongsystems.com` (separate GCP setup, not yet live)
 - **Legacy**: `root@157.180.20.168` (Hetzner, still serving `main` branch at https://dev.theqong.com — old domain)
 - GCP VM user: `maahedev`; code at `/app/qong_poc/`; all docker needs `sudo`

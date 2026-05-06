@@ -494,14 +494,14 @@ Some customer P&IDs use tags like `VB25`, `VB40 2090`, `VBPP40` — no `AreaCode
 
 All intermediate files go in `job_outputs/{id}/tmp/` — never commit. Also never commit `webapp.db`, `uploads/`, `job_outputs/`.
 
-## Multi-Cloud Migration (in progress on feature/multi-cloud-saas)
+## Multi-Cloud Migration (in progress on dev branch)
 
 Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 
 **Phases complete**: A1 (S3 adapter + MinIO), A2 (Postgres + RQ), A3 (GCP VM live, data migrated), A6 (/healthz, nightly pg_dump→GCS, restore script), B1–B2 (credits ledger + pre-flight), B3–B4 (admin panel v2 + account pages), B5 (REST API v1)
 
 **Phases pending**:
-- A4 — GPU worker on Windows box (Docker + NVIDIA + Tailscale)
+- A4 — GPU worker on Windows box (in progress — see below)
 - A5 — Pre-annotations: push YOLO predictions to Label Studio after GPU inference
 - B6/B7 — Stripe Checkout (deferred until 5+ paying customers)
 
@@ -513,3 +513,46 @@ Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 - **Nightly backup**: GitHub Actions SSHs into VM → runs `scripts/backup.sh` using same `GSP_DEV_SSH_KEY` secret
 
 Full architecture plan: `sparkling-exploring-blum.md` in Claude plans folder.
+
+## Phase A4 — GPU Worker (in progress, 2026-05-06)
+
+**Tailscale network**:
+- GCP VM (`qong-dev-server`): Tailscale IP `100.127.190.88`
+- Windows GPU box (`desktop-6o56u39`): Tailscale IP `100.91.199.103`, username `qongsystems`
+- Mac (`devs-macbook-pro`): Tailscale IP `100.81.161.115`
+- GCP→Windows latency: ~65ms via direct peer; `sudo tailscale ping 100.91.199.103` to verify
+
+**Redis on Tailscale**:
+- Redis bound to BOTH `127.0.0.1:6379` (Docker internal) AND `100.127.190.88:6379` (Tailscale)
+- Windows GPU worker connects via `REDIS_URL=redis://100.127.190.88:6379/0`
+- After any docker-compose.yml port change: `sudo docker compose up -d --force-recreate redis`
+
+**GPU worker repo** (`Qong-Systems/qong_poc_gpu` — separate repo, NOT in qong_product):
+- Clone: `git clone https://github.com/Qong-Systems/qong_poc_gpu.git C:\qong_gpu`
+- `worker.py` — RQ worker consuming `gpu` queue; auto-deletes all tile files after each job
+- `inference/engine.py` — YOLO ONNX + PaddleOCR, zero imports from main repo
+- `requirements.txt` — minimal: rq, redis, onnxruntime-gpu, paddleocr, requests
+- `setup/install_windows.ps1` — one-shot NSSM service installer
+- Local path on dev machine: `/Users/maahedev/allcode/experiments/qong/qong-gpu-worker/`
+
+**ONNX model on GCS**: `gs://qong-backups/models/best_v1.onnx` (43 MB, uploaded 2026-05-06)
+- Worker auto-downloads to `models/best.onnx` on first run if not cached
+- To push a new model version: `gcloud storage cp models/best.onnx gs://qong-backups/models/best_v2.onnx`
+
+**Security design**:
+- Windows box has ONLY `REDIS_URL` — no MinIO/DB/GCS credentials
+- Tiles passed as presigned URLs (1-hour expiry, job-specific) — Windows cannot access other jobs' files
+- `tempfile.TemporaryDirectory` in `run_inference_job()` guarantees all tile files deleted after every job, even on crash
+- No cross-job data leakage possible
+
+**Windows SSH** (enable with one command as Administrator):
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Start-Service sshd; Set-Service -Name sshd -StartupType Automatic; New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
+```
+
+## GitHub — Org Separation
+
+- **`gh` CLI is authenticated as `tarunhere`** — admin of `Winn-Projects` only; cannot create repos in `Qong-Systems`
+- **`git push` to Qong-Systems** works via SSH alias `qongsystems` (key: `~/.ssh/id_qongsystems`)
+- **To create a new Qong-Systems repo**: ask user to create it manually on GitHub, then push: `git remote add origin git@qongsystems:Qong-Systems/<repo>.git && git push -u origin main`
+- **NEVER create a Qong-Systems repo under Winn-Projects** — completely different org/domain
