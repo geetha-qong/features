@@ -4,10 +4,25 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <h4 class="mb-0">Label Studio — Annotation Sync</h4>
-  {% if ls_configured %}
-  <a href="{{ ls_url }}" target="_blank" class="btn btn-outline-primary btn-sm">Open Label Studio ↗</a>
-  {% endif %}
+  <div class="d-flex gap-2">
+    {% if ls_configured %}
+    <form method="post" action="/admin/label-studio/sync-labels">
+      <button type="submit" class="btn btn-outline-warning btn-sm"
+              title="Copy label config from project 1 to all other projects">
+        Sync Labels to All Projects
+      </button>
+    </form>
+    <a href="{{ ls_url }}" target="_blank" class="btn btn-outline-primary btn-sm">Open Label Studio ↗</a>
+    {% endif %}
+  </div>
 </div>
+
+{% if request.query_params.get('labels_synced') %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+  Label config synced to {{ request.query_params.get('labels_synced') }} project(s).
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
 
 {% if not ls_configured %}
 <div class="alert alert-warning">

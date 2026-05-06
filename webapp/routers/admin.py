@@ -192,6 +192,23 @@ async def admin_label_studio(
     )
 
 
+@router.post("/admin/label-studio/sync-labels")
+async def admin_sync_label_configs(
+    request: Request,
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Copy label config from project 1 (source of truth) to all other LS projects."""
+    if not ls.is_configured():
+        raise HTTPException(status_code=400, detail="LS_API_KEY not configured")
+    result = ls.sync_all_label_configs(source_project_id=1)
+    updated_count = len(result.get("updated", []))
+    return RedirectResponse(
+        url=f"/admin/label-studio?labels_synced={updated_count}",
+        status_code=303,
+    )
+
+
 @router.post("/admin/label-studio/sync/{job_id}")
 async def admin_sync_job(
     job_id: int,

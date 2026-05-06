@@ -24,6 +24,14 @@ LABEL_CONFIG = """<View>
     <Label value="actuator_motor"      background="#FFB347"/>
     <Label value="actuator_pneumatic"  background="#87CEEB"/>
     <Label value="actuator_solenoid"   background="#F0E68C"/>
+    <Label value="inst_field"          background="#FFA39E"/>
+    <Label value="interlock"           background="#D4380D"/>
+    <Label value="DCS"                 background="#FFC069"/>
+    <Label value="PLC"                 background="#AD8B00"/>
+    <Label value="Motor"               background="#D3F261"/>
+    <Label value="Pump/Dwg Pump"       background="#389E0D"/>
+    <Label value="inst_field-R"        background="#5CDBD3"/>
+    <Label value="interlock-R"         background="#096DD9"/>
   </RectangleLabels>
 </View>"""
 
@@ -95,6 +103,45 @@ def push_tiles(project_id: int, tile_urls: list) -> int:
     except Exception as e:
         print(f"[label_studio] push_tiles error: {e}")
     return 0
+
+
+def sync_all_label_configs(source_project_id: int = 1) -> dict:
+    """Copy the label config from source_project_id to every other project.
+
+    Returns {"updated": [...], "skipped": [...], "failed": [...]}
+    """
+    if not is_configured():
+        return {"updated": [], "skipped": [], "failed": []}
+    try:
+        src = requests.get(f"{LS_URL}/api/projects/{source_project_id}/", headers=_headers(), timeout=10)
+        if src.status_code != 200:
+            return {"updated": [], "skipped": [], "failed": [f"source project {source_project_id} not found"]}
+        label_config = src.json()["label_config"]
+
+        all_projects = []
+        url = f"{LS_URL}/api/projects/?page_size=100"
+        while url:
+            r = requests.get(url, headers=_headers(), timeout=10)
+            data = r.json()
+            all_projects.extend(data.get("results", []))
+            url = data.get("next")
+
+        updated, skipped, failed = [], [], []
+        for p in all_projects:
+            if p["id"] == source_project_id or p.get("label_config") == label_config:
+                skipped.append(p["id"])
+                continue
+            r = requests.patch(
+                f"{LS_URL}/api/projects/{p['id']}/",
+                headers=_headers(),
+                json={"label_config": label_config},
+                timeout=10,
+            )
+            (updated if r.status_code in (200, 201) else failed).append(p["id"])
+        return {"updated": updated, "skipped": skipped, "failed": failed}
+    except Exception as e:
+        print(f"[label_studio] sync_all_label_configs error: {e}")
+        return {"updated": [], "skipped": [], "failed": [str(e)]}
 
 
 _TILE_RE = re.compile(r'tile_p(\d+)_r(\d+)_c(\d+)')
