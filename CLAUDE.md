@@ -95,7 +95,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 ## Webapp Features (production at https://dev.theqong.com)
 
 - Login/register (JWT cookie auth). Admin: `admin` (see memory for current password)
-- **Roles (3-tier)**: `super_admin` (all jobs + admin menu), `annotator` (/annotate queue), `user` (own jobs only)
+- **Roles (3-tier)**: `super_admin` (all jobs + admin menu), `annotator` (all jobs visible + /annotate queue, no admin panel), `user` (own jobs only)
 - Public `/register` creates inactive account (`is_active=False`) — super_admin approves at `/admin/users`
 - Admin-created users (via `/admin/users` modal) are active immediately
 - First-ever registered user auto-promoted to super_admin; existing `admin` account promoted on startup
@@ -108,7 +108,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - Auto-extract Drawing No. from title block (bottom-right 40%×22% crop)
 - **Per-user file storage**: uploads → `uploads/{user_id}/`, job outputs → `job_outputs/{user_id}/{job_id}/`
   - `get_job_dir(job)` in `config.py` — checks new path first, falls back to legacy `job_outputs/{job_id}/`
-- **Super admin sees all jobs**: `_can_access_job(job, user)` in `jobs.py` — owner OR super_admin can view/download/rerun
+- **Super admin + annotator see all jobs**: `_can_access_job(job, user)` in `jobs.py` — owner OR super_admin OR annotator can view/download/rerun; dashboard shows User column for both
 - **Instrumentation Index download**: `/jobs/{id}/download-inst-index` endpoint; button shown on job detail when ready
 
 ## Environment

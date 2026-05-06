@@ -45,3 +45,7 @@ annotate/tiles/
 
 # YOLO dataset images (regenerated from job_outputs)
 datasets/pid_valves/images/
+
+# Playwright session data
+.playwright-mcp/
+themes/screenshots/
