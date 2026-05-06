@@ -341,7 +341,10 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 ## Annotation Sessions
 
 **Team annotation**: use https://dev.qongsystems.com/ls/ (GCP, always on, HTTPS)
-- LS login: `tnb@qongsystems.com` / `teNZmvlCg3GDcl99`
+- LS login: `tnb@qongsystems.com` / `Qong@2024` (also: `admin@qong.com`, `g.sm@qongsystems.com`, `vg@qongsystems.com` — all `Qong@2024`)
+- LS DB: **Postgres** (`label_studio` database, same Postgres container as webapp) — data is in named Docker volume `ls_data`, survives `git reset --hard` deploys
+- LS uses `POSTGRE_*` env vars (NOT `POSTGRESQLURL` or `DATABASE_URL`) — see docker-compose.yml label-studio service
+- To reset any LS password: `sudo docker compose exec -T label-studio python3 /label-studio/label_studio/manage.py shell -c "from users.models import User; u=User.objects.get(email='EMAIL'); u.set_password('NEW'); u.save()"`
 - No tunnel needed — server is always accessible
 - **Do NOT add nginx `auth_basic` on LS routes** — LS handles its own login; `LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true` prevents unauthorized signups
 
