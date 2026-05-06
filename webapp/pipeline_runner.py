@@ -177,11 +177,13 @@ def _dispatch_gpu_job(job, job_dir: Path) -> None:
         from webapp.queue import get_gpu_queue
         get_gpu_queue().enqueue(
             "worker.run_inference_job",
-            job_id=job.id,
-            pid_no=job.pid_no or f"job-{job.id}",
-            tile_infos=tile_infos,
-            callback_url=f"{base_url}/api/v1/jobs/{job.id}/gpu-result",
-            api_key=callback_secret,
+            kwargs={
+                "job_id": job.id,
+                "pid_no": job.pid_no or f"job-{job.id}",
+                "tile_infos": tile_infos,
+                "callback_url": f"{base_url}/api/v1/jobs/{job.id}/gpu-result",
+                "api_key": callback_secret,
+            },
             job_timeout=1800,
         )
         print(f"[gpu] Dispatched job {job.id} ({len(tile_infos)} tiles)")
