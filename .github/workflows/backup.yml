@@ -15,11 +15,11 @@ jobs:
           ssh-private-key: ${{ secrets.GSP_DEV_SSH_KEY }}
 
       - name: Add GCP VM to known hosts
-        run: ssh-keyscan -t ed25519 34.124.148.51 >> ~/.ssh/known_hosts
+        run: ssh-keyscan -t ed25519 34.126.93.103 >> ~/.ssh/known_hosts
 
       - name: Run backup on GCP VM
         run: |
-          ssh maahedev@34.124.148.51 << 'ENDSSH'
+          ssh maahedev@34.126.93.103 << 'ENDSSH'
           set -e
           bash /app/qong_poc/scripts/backup.sh
           ENDSSH
