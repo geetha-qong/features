@@ -177,6 +177,7 @@ services:
     image: redis:7-alpine
     ports:
       - "127.0.0.1:6379:6379"
+      - "100.127.190.88:6379:6379"   # Tailscale — GPU worker on Windows reads this
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
