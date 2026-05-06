@@ -133,7 +133,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - **Live at**: https://dev.qongsystems.com
 - **VM**: `qong-dev-server`, `e2-standard-2`, zone `asia-southeast1-c`, IP `34.126.93.103` (static, reserved — won't change on stop/start)
 - **DNS**: `dev.qongsystems.com` A record managed on GoDaddy (ns53/ns54.domaincontrol.com) — update A record there if IP ever changes
-- **VM OAuth scopes**: set to `cloud-platform` (required for `gsutil` in backup.sh); updated 2026-05-05 via `gcloud compute instances set-service-account --scopes=cloud-platform`
+- **VM OAuth scopes**: set to `cloud-platform`; updated 2026-05-05. **NOTE: `gsutil` has a credentials bug on this VM despite correct scopes — always use `gcloud storage` instead.** `backup.sh` and `restore.sh` already use `gcloud storage`.
 - **OS**: Debian 12 (bookworm), user `maahedev`
 - **Code**: `/app/qong_poc/` (branch `dev`)
 - **Auto-deploy**: every push to `dev` branch triggers GitHub Actions → SSH → `git reset --hard origin/dev` + `docker compose build/up` (workflow: `.github/workflows/deploy-dev.yml`; GitHub secret name: `GSP_DEV_SSH_KEY`; uses `webfactory/ssh-agent@v0.9.0` — appleboy/ssh-action silently drops the key)
@@ -355,15 +355,22 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 - Starts label-studio + web locally; LS at `http://localhost:8080` or `http://localhost:9000/ls/`
 - `WEBAPP_BASE_URL=http://localhost:8000` — tile images served from local web container
 
-- **Known 500 bug**: if `organization.created_by` is null after login, fix with:
+- **One-time fresh-instance setup** (required after any new Postgres LS DB):
+  1. Fix 500 error (`organization.created_by = NULL`):
   ```bash
-  docker compose exec label-studio bash -c "cd /label-studio/label_studio && python3 -c \"
-  import django, os, sys; sys.path.insert(0, '.'); os.environ['DJANGO_SETTINGS_MODULE'] = 'core.settings.label_studio'; django.setup()
+  sudo docker compose exec -T label-studio python3 /label-studio/label_studio/manage.py shell -c "
   from users.models import User; from organizations.models import Organization
   u = User.objects.get(email='tnb@qongsystems.com'); org = Organization.objects.get(id=1)
-  org.created_by = u; org.save(); print('Fixed')
-  \""
+  org.created_by = u; org.save(); print('Fixed')"
   ```
+  2. Enable legacy API tokens:
+  ```bash
+  sudo docker compose exec -T label-studio python3 /label-studio/label_studio/manage.py shell -c "
+  from jwt_auth.models import JWTSettings; from organizations.models import Organization
+  org = Organization.objects.get(id=1); s = JWTSettings.objects.get_or_create(organization=org)[0]
+  s.legacy_api_tokens_enabled = True; s.save(); print('Enabled')"
+  ```
+  3. Get new API token, update `.env` `LS_API_KEY=...`, restart `web` + `cpu-worker`
 
 ## Training Lessons Learned (do NOT repeat these mistakes)
 
@@ -447,7 +454,7 @@ docker compose run --rm trainer python3 train.py
 - LS project created per P&ID drawing (named by pid_no); one project per drawing, re-sync safe
 - `LS_URL` (Docker-internal, API calls only) vs `LS_EXTERNAL_URL` (browser-facing project links) — both in `label_studio_client.py`; set `LS_EXTERNAL_URL=https://dev.qongsystems.com/ls` in production
 - `LS_API_KEY`: env var in `.env` — **must be named `LS_API_KEY`** (not `LABEL_STUDIO_API_KEY`); must be a user API token, not a JWT refresh token
-- **LS legacy token auth**: LS 1.23+ disables legacy API tokens by default. If 401s appear, enable via Django shell (`sudo docker compose exec label-studio python3 manage.py shell`): `from jwt_auth.models import JWTSettings; s = JWTSettings.objects.get_or_create(id=1)[0]; s.legacy_api_tokens_enabled = True; s.save()` — use `jwt_auth.models` (NOT `core.models`, which doesn't exist in LS 1.23)
+- **LS legacy token auth**: LS 1.23+ disables legacy API tokens by default. If 401s appear, enable via Django shell (`sudo docker compose exec label-studio python3 manage.py shell`): `from jwt_auth.models import JWTSettings; from organizations.models import Organization; org = Organization.objects.get(id=1); s = JWTSettings.objects.get_or_create(organization=org)[0]; s.legacy_api_tokens_enabled = True; s.save()` — **must use `organization=org` key, NOT `id=1`** (raises FieldError in LS 1.23). Use `jwt_auth.models` (NOT `core.models`)
 - **Auto-sync**: After every pipeline job, `_auto_sync_to_label_studio()` in `pipeline_runner.py` runs automatically — no manual button needed
 - **`WEBAPP_BASE_URL` env var**: Tile image URL base for LS sync. Set to `https://dev.qongsystems.com` in `.env` on GCP so LS container can load tile images via the public domain.
 - **`push_tiles` response**: LS `/api/projects/{id}/import` returns a dict `{"task_count": N, ...}` — use `data.get("task_count", ...)`, not `len(data)` (which counts dict keys, not tasks)

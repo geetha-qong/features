@@ -1,11 +1,10 @@
-version: "3.9"
 services:
 
   # ── Production webapp (FastAPI) ────────────────────────────────────────────
   web:
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./uploads:/app/uploads
       - ./job_outputs:/app/job_outputs
@@ -35,7 +34,7 @@ services:
   label-studio:
     image: heartexlabs/label-studio:latest
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ls_data:/label-studio/data                 # named volume — survives deploys, not tracked by git
       - ./annotate/tiles:/tiles:ro                 # P&ID tiles (read-only)
@@ -81,7 +80,7 @@ services:
       context: .
       dockerfile: Dockerfile.mcp
     ports:
-      - "8090:8000"
+      - "127.0.0.1:8090:8000"
     environment:
       - LABEL_STUDIO_URL=http://label-studio:8080
       - LABEL_STUDIO_API_KEY=${LS_API_KEY}
@@ -127,8 +126,8 @@ services:
   minio:
     image: minio/minio:latest
     ports:
-      - "9100:9000"   # S3 API — set STORAGE_ENDPOINT_URL=http://localhost:9100
-      - "9101:9001"   # MinIO web console
+      - "127.0.0.1:9100:9000"   # S3 API — set STORAGE_ENDPOINT_URL=http://localhost:9100
+      - "127.0.0.1:9101:9001"   # MinIO web console (localhost only — not public)
     environment:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin
@@ -151,8 +150,7 @@ services:
     entrypoint: >
       /bin/sh -c "
         mc alias set local http://minio:9000 minioadmin minioadmin &&
-        mc mb -p local/qong-local &&
-        mc anonymous set download local/qong-local || true
+        mc mb -p local/qong-local || true
       "
     restart: "no"
 
@@ -160,7 +158,7 @@ services:
   postgres:
     image: postgres:16-alpine
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       - POSTGRES_USER=qong
       - POSTGRES_PASSWORD=qong
@@ -178,7 +176,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
