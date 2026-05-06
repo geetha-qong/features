@@ -131,7 +131,9 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 ## Deployment (GCP — active, dev branch)
 
 - **Live at**: https://dev.qongsystems.com
-- **VM**: `qong-dev-server`, `e2-standard-2`, zone `asia-southeast1-c`, IP `34.124.148.51`
+- **VM**: `qong-dev-server`, `e2-standard-2`, zone `asia-southeast1-c`, IP `34.126.93.103` (static, reserved — won't change on stop/start)
+- **DNS**: `dev.qongsystems.com` A record managed on GoDaddy (ns53/ns54.domaincontrol.com) — update A record there if IP ever changes
+- **VM OAuth scopes**: set to `cloud-platform` (required for `gsutil` in backup.sh); updated 2026-05-05 via `gcloud compute instances set-service-account --scopes=cloud-platform`
 - **OS**: Debian 12 (bookworm), user `maahedev`
 - **Code**: `/app/qong_poc/` (branch `dev`)
 - **Auto-deploy**: every push to `dev` branch triggers GitHub Actions → SSH → `git reset --hard origin/dev` + `docker compose build/up` (workflow: `.github/workflows/deploy-dev.yml`; GitHub secret name: `GSP_DEV_SSH_KEY`; uses `webfactory/ssh-agent@v0.9.0` — appleboy/ssh-action silently drops the key)
