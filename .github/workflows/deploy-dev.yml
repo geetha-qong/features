@@ -10,16 +10,16 @@ jobs:
     steps:
       - name: Check secret exists
         run: |
-          if [ -z "${{ secrets.GCP_SSH_KEY }}" ]; then
+          if [ -z "${{ secrets.GSP_DEV_SSH_KEY }}" ]; then
             echo "GCP_SSH_KEY is EMPTY — secret not found or wrong name"
           else
-            echo "GCP_SSH_KEY is SET (length: $(echo -n '${{ secrets.GCP_SSH_KEY }}' | wc -c) chars)"
+            echo "GCP_SSH_KEY is SET (length: $(echo -n '${{ secrets.GSP_DEV_SSH_KEY }}' | wc -c) chars)"
           fi
 
       - name: Load SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          ssh-private-key: ${{ secrets.GCP_SSH_KEY }}
+          ssh-private-key: ${{ secrets.GSP_DEV_SSH_KEY }}
 
       - name: Add GCP VM to known hosts
         run: ssh-keyscan -t ed25519 34.124.148.51 >> ~/.ssh/known_hosts
