@@ -155,7 +155,8 @@ def _dispatch_gpu_job(job, job_dir: Path) -> None:
     if not tile_files:
         return
 
-    base_url = os.environ.get("WEBAPP_BASE_URL", "http://web:8000").rstrip("/")
+    # GPU worker reaches the webapp via Tailscale (not the public domain)
+    base_url = os.environ.get("GPU_INTERNAL_BASE_URL", "http://100.127.190.88:8000").rstrip("/")
     _tile_re = re.compile(r'tile_p(\d+)_r(\d+)_c(\d+)\.png')
     tile_infos = []
     for f in tile_files:
