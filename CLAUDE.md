@@ -134,7 +134,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - **VM**: `qong-dev-server`, `e2-standard-2`, zone `asia-southeast1-c`, IP `34.124.148.51`
 - **OS**: Debian 12 (bookworm), user `maahedev`
 - **Code**: `/app/qong_poc/` (branch `dev`)
-- **Auto-deploy**: every push to `dev` branch triggers GitHub Actions → SSH → `git pull` + `docker compose build/up` (workflow: `.github/workflows/deploy-dev.yml`; requires `GCP_SSH_KEY` secret in repo settings)
+- **Auto-deploy**: every push to `dev` branch triggers GitHub Actions → SSH → `git reset --hard origin/dev` + `docker compose build/up` (workflow: `.github/workflows/deploy-dev.yml`; GitHub secret name: `GSP_DEV_SSH_KEY`; uses `webfactory/ssh-agent@v0.9.0` — appleboy/ssh-action silently drops the key)
 - **Access**: `gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="..."`
 - **Local gcloud**: installed at `/opt/homebrew/share/google-cloud-sdk/bin/gcloud`; add to PATH: `export PATH=/opt/homebrew/share/google-cloud-sdk/bin:"$PATH"`; auth: `theqongglobal@gmail.com`; project: `project-7555468d-d13a-482e-9ae`
 - **All docker commands need `sudo`** on GCP VM: `sudo docker compose ...`
@@ -472,14 +472,18 @@ All intermediate files go in `job_outputs/{id}/tmp/` — never commit. Also neve
 
 Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 
-**Phases complete**: A1 (S3 adapter + MinIO), A2 (Postgres + RQ), B1–B2 (credits ledger + pre-flight), B3–B4 (admin panel v2 + account pages), B5 (REST API v1)
+**Phases complete**: A1 (S3 adapter + MinIO), A2 (Postgres + RQ), A3 (GCP VM live, data migrated), A6 (/healthz, nightly pg_dump→GCS, restore script), B1–B2 (credits ledger + pre-flight), B3–B4 (admin panel v2 + account pages), B5 (REST API v1)
 
 **Phases pending**:
-- A3 — GCP VM provisioning, DNS cutover (blocked: needs GCP VM IP + bucket name)
 - A4 — GPU worker on Windows box (Docker + NVIDIA + Tailscale)
 - A5 — Pre-annotations: push YOLO predictions to Label Studio after GPU inference
-- A6 — Backups (`/healthz`, nightly `pg_dump → S3` cron)
 - B6/B7 — Stripe Checkout (deferred until 5+ paying customers)
-- Missing files: `compose/compose.cloud.yml`, `compose/compose.gpu.yml`, `deploy/migrate_prod_data.py`
+
+**A6 details**:
+- `scripts/backup.sh` — pg_dump + `gsutil rsync uploads/ job_outputs/` → `gs://qong-backups`; 30-day retention on pg_dumps
+- `scripts/restore.sh` — full server rebuild from GCS backup in <10 min
+- `.github/workflows/backup.yml` — runs 02:00 IST daily via `schedule:`; manual trigger via `workflow_dispatch` in Actions UI
+- **GCS bucket**: `gs://qong-backups` (asia-southeast1); VM service account needs `roles/storage.objectAdmin`
+- **Nightly backup**: GitHub Actions SSHs into VM → runs `scripts/backup.sh` using same `GSP_DEV_SSH_KEY` secret
 
 Full architecture plan: `sparkling-exploring-blum.md` in Claude plans folder.
