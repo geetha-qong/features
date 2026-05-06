@@ -142,7 +142,8 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - **All docker commands need `sudo`** on GCP VM: `sudo docker compose ...`
 - **Deploy key**: `~/.ssh/id_ed25519_qong_product` on VM; SSH alias `qong-product` in `~/.ssh/config`
 - **SSL**: Let's Encrypt cert via certbot standalone; `/etc/letsencrypt/live/dev.qongsystems.com/` mounted read-only into nginx container; auto-renews via systemd timer
-- **nginx**: ports 80 (HTTP→HTTPS redirect) + 443 (HTTPS); webapp at `/`, Label Studio at `/ls/`; `client_max_body_size 100M` required for PDF uploads
+- **nginx**: ports 80 (HTTP→HTTPS redirect) + 443 (HTTPS); webapp at `/`, Label Studio at `/ls/`; `client_max_body_size 100M` required for PDF uploads; security headers (X-Frame-Options, HSTS, nosniff, Referrer-Policy) and rate limiting (5r/m `/login`, 10r/m `/api/v1/jobs`) are intentional — do not remove
+- **GitHub Actions workflow IPs**: both `deploy-dev.yml` and `backup.yml` use `34.126.93.103` — if VM IP ever changes, update both files
 - **GCP Firewall rules**: `qong-allow-http-https` (tcp:80,443), `qong-allow-web` (tcp:8000,9000,9001) — tag `qong-server` on VM
 - **LS_API_KEY**: set in `/app/qong_poc/.env` after logging into Label Studio; restart `web` + `cpu-worker` after setting
 
@@ -457,9 +458,14 @@ docker compose run --rm trainer python3 train.py
 - **LS legacy token auth**: LS 1.23+ disables legacy API tokens by default. If 401s appear, enable via Django shell (`sudo docker compose exec label-studio python3 manage.py shell`): `from jwt_auth.models import JWTSettings; from organizations.models import Organization; org = Organization.objects.get(id=1); s = JWTSettings.objects.get_or_create(organization=org)[0]; s.legacy_api_tokens_enabled = True; s.save()` — **must use `organization=org` key, NOT `id=1`** (raises FieldError in LS 1.23). Use `jwt_auth.models` (NOT `core.models`)
 - **Auto-sync**: After every pipeline job, `_auto_sync_to_label_studio()` in `pipeline_runner.py` runs automatically — no manual button needed
 - **`WEBAPP_BASE_URL` env var**: Tile image URL base for LS sync. Set to `https://dev.qongsystems.com` in `.env` on GCP so LS container can load tile images via the public domain.
+- **`push_tiles` signature**: `push_tiles(project_id, tile_urls: list)` takes **raw URL strings** — the function wraps them as `{"data": {"image": url}}` internally. Do NOT pre-wrap.
 - **`push_tiles` response**: LS `/api/projects/{id}/import` returns a dict `{"task_count": N, ...}` — use `data.get("task_count", ...)`, not `len(data)` (which counts dict keys, not tasks)
+- **LS project stats cache**: `num_tasks_with_annotations` in project stats may show 0 right after import (async update); verify via `/api/tasks/{id}/annotations/` endpoint instead
+- **Annotation import with tasks**: pass `[{"data": {"image": url}, "annotations": [{"result": [...]}]}]` to `/api/projects/{id}/import` to import tasks + annotations in one call
 - **Re-sync deletes stale tasks first**: `delete_all_tasks(project_id)` is called before `push_tiles()` in the sync endpoint — prevents duplicate tasks with stale/broken image URLs
 - **Must sync via public URL**: tile image URLs use `request.base_url` from the sync HTTP request; always trigger Re-sync from the public domain (https://dev.qongsystems.com) so LS container can load images
+- **GCP LS current state**: 24 projects covering all 39 jobs; "PID Training - All Valves" (project 7) has 45 tasks + 45 annotations migrated from local LS
+- **Local LS SQLite table names**: `project`, `task`, `task_completion` (NOT `projects_project`/`tasks_task` — those are a different LS schema version)
 
 ## Non-Standard Tag Format P&IDs
 
@@ -475,6 +481,14 @@ Some customer P&IDs use tags like `VB25`, `VB40 2090`, `VBPP40` — no `AreaCode
 - TAG_RE: `(?<!\d)(\d{2})-([A-Z]{2,4})-(\d{6})(?!\d)` — exact 6-digit serial, no leading-digit leakage
 - Benchmark (2 drawings): 73.3% recall (44/60), up from 53.4% baseline
 - Annotated PDF named after source drawing: `INPUT-MUK-..._annotated.pdf` (not timestamped CSV name)
+
+## Server Security (GCP VM — applied 2026-05-06)
+
+- **All internal ports bound to `127.0.0.1`** in docker-compose.yml — postgres (5432), redis (6379), minio (9100/9101), web (8000), label-studio (8080) are NOT reachable from the internet
+- **GCP firewall**: only `qong-allow-http-https` (80/443) and `default-allow-ssh` (22) remain; `qong-allow-web` and `default-allow-rdp` were deleted — do NOT recreate them
+- **`.env` permissions**: `chmod 600 /app/qong_poc/.env` — must stay 600; re-apply after any manual file copy
+- **After port binding changes in docker-compose.yml**: use `--force-recreate` — plain `up -d` won't rebind already-running containers
+- **MinIO bucket**: anonymous download removed — use `storage.presigned_url()` for download links; never run `mc anonymous set download` again
 
 ## Temporary Files
 
@@ -492,7 +506,7 @@ Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 - B6/B7 — Stripe Checkout (deferred until 5+ paying customers)
 
 **A6 details**:
-- `scripts/backup.sh` — pg_dump + `gsutil rsync uploads/ job_outputs/` → `gs://qong-backups`; 30-day retention on pg_dumps
+- `scripts/backup.sh` — pg_dump + `gcloud storage rsync uploads/ job_outputs/` → `gs://qong-backups`; 30-day retention on pg_dumps
 - `scripts/restore.sh` — full server rebuild from GCS backup in <10 min
 - `.github/workflows/backup.yml` — runs 02:00 IST daily via `schedule:`; manual trigger via `workflow_dispatch` in Actions UI
 - **GCS bucket**: `gs://qong-backups` (asia-southeast1); VM service account needs `roles/storage.objectAdmin`
