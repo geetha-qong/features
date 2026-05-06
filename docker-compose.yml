@@ -47,7 +47,11 @@ services:
       - LABEL_STUDIO_HOST=https://dev.qongsystems.com/ls
       - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
       - DJANGO_DB=default
-      - POSTGRESQLURL=postgresql://qong:qong@postgres:5432/label_studio
+      - POSTGRE_HOST=postgres
+      - POSTGRE_PORT=5432
+      - POSTGRE_USER=qong
+      - POSTGRE_PASSWORD=qong
+      - POSTGRE_NAME=label_studio
     depends_on:
       - postgres
     restart: unless-stopped
