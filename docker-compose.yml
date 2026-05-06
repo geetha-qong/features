@@ -50,7 +50,7 @@ services:
       - POSTGRE_HOST=postgres
       - POSTGRE_PORT=5432
       - POSTGRE_USER=qong
-      - POSTGRE_PASSWORD=qong
+      - POSTGRE_PASSWORD=${POSTGRES_PASSWORD:-qong}
       - POSTGRE_NAME=label_studio
     depends_on:
       - postgres
