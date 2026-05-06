@@ -513,6 +513,27 @@ Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 
 Full architecture plan: `sparkling-exploring-blum.md` in Claude plans folder.
 
+## Phase A5 — Pre-Annotations (NEXT PHASE)
+
+GPU worker POSTs detections back to GCP webapp → webapp stores them → auto-pushes as LS pre-annotations.
+
+**Build in `webapp/routers/api_v1.py`**:
+```python
+@router.post("/jobs/{job_id}/gpu-result")
+# Auth: Bearer API key (any active key) OR internal CALLBACK_SECRET in .env
+# Body: {"job_id": int, "detections": [{"valve_tag": str, "line_number": str|null,
+#         "actuator": str, "yolo_class": str, "yolo_conf": float, "bbox_tile": [...], ...}]}
+# Action: store detections JSON on job row, call push_predictions() to LS
+# Returns: 200 {"stored": N} or 404 if job not found
+```
+
+**Build in `webapp/label_studio_client.py`**:
+- `push_predictions(project_id, detections)` — push YOLO detections as LS pre-annotations
+- POST to `/api/projects/{id}/import` with `[{"data": {"image": url}, "annotations": [{"result": [...]}]}]`
+- Each detection → `{"type": "rectanglelabels", "value": {"x": %, "y": %, "width": %, "height": %, "labels": [yolo_class]}, "from_name": "label", "to_name": "image"}`
+
+**DB**: add `gpu_detections` JSON column on `jobs` table via `run_migrations()` in `database.py`
+
 ## Phase A4 — GPU Worker (COMPLETE, 2026-05-06)
 
 **Tailscale network**:
@@ -557,7 +578,7 @@ Full architecture plan: `sparkling-exploring-blum.md` in Claude plans folder.
 - If pip stalls (same last line for 5+ min with file size not growing): `taskkill /PID <pid> /F`, retry
 - `winget` does NOT work over SSH (requires desktop session) — use `Invoke-WebRequest` + silent installers
 
-**SSH to Windows via GCP jump**:
+**SSH to Windows via GCP jump** (`sshpass` already installed on GCP VM — no setup needed):
 ```bash
 gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="sshpass -p '123456' ssh -o StrictHostKeyChecking=no qongsystems@100.91.199.103 'YOUR_COMMAND'"
 ```
@@ -569,6 +590,15 @@ gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="sshpass -
 - Windows box has ONLY `REDIS_URL` — no MinIO/DB/GCS credentials
 - Tiles passed as presigned URLs (1-hour expiry, job-specific) — Windows cannot access other jobs' files
 - `tempfile.TemporaryDirectory` in `run_inference_job()` guarantees all tile files deleted after every job, even on crash
+
+**NSSM service (TODO — worker currently started manually)**:
+```powershell
+# Download nssm.exe to C:\nssm\, then:
+nssm install QongGpuWorker "C:\Program Files\Python311\python.exe" "worker.py"
+nssm set QongGpuWorker AppDirectory "C:\Users\qongsystems\qong-poc-gpu"
+nssm start QongGpuWorker
+# Verify: nssm status QongGpuWorker
+```
 
 **Windows SSH** (enable with one command as Administrator):
 ```powershell
