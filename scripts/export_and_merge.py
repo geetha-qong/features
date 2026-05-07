@@ -91,49 +91,22 @@ def _headers():
 
 
 def export_project_yolo(project_id: int) -> Path:
-    """Export LS project as YOLO ZIP, return local path to ZIP."""
+    """Export LS project as YOLO ZIP using direct export endpoint."""
     print(f"\nExporting project {project_id}...")
 
-    # Trigger export
-    r = requests.post(
-        f"{LS_URL}/api/projects/{project_id}/exports/",
-        headers=_headers(),
-        json={"export_type": "YOLO"},
-        timeout=60,
-    )
-    if r.status_code not in (200, 201):
-        sys.exit(f"Export trigger failed ({r.status_code}): {r.text[:200]}")
-
-    export_data = r.json()
-    export_id = export_data.get("id")
-
-    # Poll until ready
-    for _ in range(60):
-        time.sleep(3)
-        status_r = requests.get(
-            f"{LS_URL}/api/projects/{project_id}/exports/{export_id}/",
-            headers=_headers(),
-            timeout=15,
-        )
-        if status_r.status_code == 200:
-            sd = status_r.json()
-            if sd.get("status") == "completed":
-                break
-            if sd.get("status") == "failed":
-                sys.exit(f"Export failed: {sd}")
-        print(f"  waiting... status={sd.get('status','?')}")
-    else:
-        sys.exit("Export timed out after 3 minutes")
-
-    # Download
-    dl_url = f"{LS_URL}/api/projects/{project_id}/exports/{export_id}/download/"
-    dl_r = requests.get(dl_url, headers=_headers(), timeout=120, stream=True)
-    if dl_r.status_code != 200:
-        sys.exit(f"Download failed ({dl_r.status_code})")
-
     out_zip = Path(f"/tmp/ls_export_proj{project_id}.zip")
+    r = requests.get(
+        f"{LS_URL}/api/projects/{project_id}/export",
+        headers=_headers(),
+        params={"exportType": "YOLO"},
+        timeout=120,
+        stream=True,
+    )
+    if r.status_code != 200:
+        sys.exit(f"Export failed ({r.status_code}): {r.text[:200]}")
+
     with open(out_zip, "wb") as f:
-        for chunk in dl_r.iter_content(chunk_size=65536):
+        for chunk in r.iter_content(chunk_size=65536):
             f.write(chunk)
     print(f"  Downloaded: {out_zip} ({out_zip.stat().st_size // 1024} KB)")
     return out_zip
