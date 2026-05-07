@@ -141,14 +141,60 @@ def remap_label_file(content: str, ls_idx_to_canonical: Dict[int, int]) -> str:
     return "\n".join(lines_out) + ("\n" if lines_out else "")
 
 
-def process_export_zip(zip_path: Path) -> tuple:
-    """Extract YOLO ZIP, remap indices, write into dataset. Returns (images, labels) counts."""
+def get_task_image_urls(project_id: int) -> Dict[int, str]:
+    """Return {task_id: image_url} for all tasks in a project."""
+    urls = {}
+    page = 1
+    while True:
+        r = requests.get(
+            f"{LS_URL}/api/tasks/?project={project_id}&page_size=200&page={page}",
+            headers=_headers(), timeout=20,
+        )
+        if r.status_code != 200:
+            break
+        data = r.json()
+        tasks = data.get("tasks", data) if isinstance(data, dict) else data
+        if not tasks:
+            break
+        for t in tasks:
+            img_url = t.get("data", {}).get("image", "")
+            if img_url:
+                urls[t["id"]] = img_url
+        if len(tasks) < 200:
+            break
+        page += 1
+    return urls
+
+
+def download_tile_image(url: str, dest: Path) -> bool:
+    """Download tile from webapp (rewrite public URL → localhost:8000)."""
+    import re as _re
+    fetch_url = url
+    if url.startswith("/"):
+        fetch_url = f"{LS_URL}{url}"
+    elif any(h in url for h in ("dev.qongsystems.com", "localhost", "web:")):
+        fetch_url = _re.sub(r"https?://[^/]+", "http://localhost:8000", url)
+    try:
+        r = requests.get(fetch_url, timeout=30)
+        if r.status_code == 200:
+            dest.write_bytes(r.content)
+            return True
+        print(f"    Image download failed ({r.status_code}): {fetch_url}")
+    except Exception as e:
+        print(f"    Image download error: {e}")
+    return False
+
+
+def process_export_zip(zip_path: Path, project_id: int) -> tuple:
+    """Extract YOLO ZIP, remap indices, download images, write into dataset."""
     images_added = labels_added = 0
+
+    # Pre-fetch task → image URL mapping so we can download matching images
+    task_image_urls = get_task_image_urls(project_id)
 
     with zipfile.ZipFile(zip_path) as zf:
         names = zf.namelist()
 
-        # Find notes.json for class mapping
         notes_file = next((n for n in names if "notes.json" in n), None)
         if not notes_file:
             sys.exit(f"notes.json not found in {zip_path}")
@@ -157,7 +203,6 @@ def process_export_zip(zip_path: Path) -> tuple:
         ls_class_map = get_ls_class_map(notes)
         print(f"  LS class map: {ls_class_map}")
 
-        # Build LS index → canonical index mapping
         ls_idx_to_canonical: Dict[int, int] = {}
         unknown = []
         for ls_idx, ls_name in ls_class_map.items():
@@ -171,25 +216,48 @@ def process_export_zip(zip_path: Path) -> tuple:
             print(f"  WARNING: unmapped LS classes (will be dropped): {unknown}")
         print(f"  Index remap: {ls_idx_to_canonical}")
 
-        # Process images and labels
         for name in names:
             if name.endswith(("notes.json", "classes.txt", "/")):
                 continue
 
-            data = zf.read(name)
             filename = Path(name).name
 
-            if any(name.endswith(ext) for ext in (".jpg", ".jpeg", ".png")):
-                dest = TRAIN_IMG / filename
-                dest.write_bytes(data)
-                images_added += 1
-
-            elif name.endswith(".txt") and filename != "classes.txt":
-                content = data.decode("utf-8")
+            if name.endswith(".txt") and filename != "classes.txt":
+                content = zf.read(name).decode("utf-8")
                 remapped = remap_label_file(content, ls_idx_to_canonical)
-                dest = TRAIN_LBL / filename
-                dest.write_text(remapped)
+                dest_lbl = TRAIN_LBL / filename
+                dest_lbl.write_text(remapped)
                 labels_added += 1
+
+                # Download the matching image — label stem = "{task_id}__{tile_name}"
+                stem = Path(filename).stem          # e.g. "abc123__tile_p0_r0_c0"
+                dest_img = TRAIN_IMG / f"{stem}.png"
+                if dest_img.exists():
+                    continue  # already have it
+
+                # Extract task_id from stem prefix before "__"
+                if "__" in stem:
+                    # LS uses truncated UUID prefixes; match against known task IDs
+                    prefix = stem.split("__")[0]
+                    matched_id = None
+                    for task_id, img_url in task_image_urls.items():
+                        # LS label stem uses first 8 chars of task UUID or task id
+                        if str(task_id) in stem or stem.startswith(str(task_id)):
+                            matched_id = task_id
+                            break
+                    if matched_id is None:
+                        # Try substring match on tile name part
+                        tile_part = stem.split("__", 1)[-1]  # e.g. "tile_p0_r0_c0"
+                        for task_id, img_url in task_image_urls.items():
+                            if tile_part in img_url:
+                                matched_id = task_id
+                                break
+
+                    if matched_id and matched_id in task_image_urls:
+                        if download_tile_image(task_image_urls[matched_id], dest_img):
+                            images_added += 1
+                        else:
+                            print(f"    Could not download image for {filename}")
 
     return images_added, labels_added
 
@@ -240,7 +308,7 @@ def main():
     total_img = total_lbl = 0
     for proj_id in EXPORT_PROJECTS:
         zip_path = export_project_yolo(proj_id)
-        imgs, lbls = process_export_zip(zip_path)
+        imgs, lbls = process_export_zip(zip_path, proj_id)
         print(f"  Project {proj_id}: added {imgs} images, {lbls} label files")
         total_img += imgs
         total_lbl += lbls
