@@ -20,18 +20,50 @@ CONF_THRESH = 0.25
 IOU_THRESH = 0.45
 
 CLASS_NAMES = [
-    "actuator_motor", "actuator_pneu", "actuator_sol",
-    "valve_bf", "valve_bv", "valve_ck", "valve_cv",
-    "valve_db", "valve_gen", "valve_gl",
+    "actuator_motor",      # 0
+    "actuator_pneu",       # 1
+    "actuator_sol",        # 2
+    "valve_bf",            # 3
+    "valve_bv",            # 4
+    "valve_ck",            # 5
+    "valve_cv",            # 6
+    "valve_db",            # 7
+    "valve_gen",           # 8
+    "valve_gl",            # 9
+    "inst_field",          # 10
+    "DCS",                 # 11
+    "PLC",                 # 12
+    "interlock",           # 13
+    "interlock-R",         # 14
+    "inst_field-R",        # 15
+    "Pump_Dwg_Pump",       # 16
+    "Motor",               # 17
+    "valve_3way_relief",   # 18
+    "valve_ncbv",          # 19
+    "valve_relief_safety", # 20
+    "valve_pnuectrl",      # 21
 ]
 
 # YOLO class → valve type code (None = infer from nearby OCR text)
 CLASS_TO_TYPE: Dict[str, Optional[str]] = {
     "valve_bf": "BF", "valve_bv": "BV", "valve_ck": "CK",
     "valve_cv": "CV", "valve_db": "DB", "valve_gen": None, "valve_gl": "GL",
+    "valve_3way_relief": "SV", "valve_ncbv": "BV",
+    "valve_relief_safety": "SV", "valve_pnuectrl": "PV",
 }
 ACTUATOR_CLASSES = {"actuator_motor": "M", "actuator_pneu": "P", "actuator_sol": "SL"}
 VALVE_CLASSES = set(CLASS_TO_TYPE.keys())
+
+# Instrument bubble classes → LOCATION value (per Ebara/Ronesans legend)
+INSTRUMENT_CLASSES = {"inst_field", "DCS", "PLC", "interlock", "interlock-R", "inst_field-R"}
+LOCATION_FROM_YOLO_CLASS: Dict[str, str] = {
+    "inst_field":   "FIELD",
+    "inst_field-R": "FIELD",
+    "DCS":          "DCS",
+    "PLC":          "PLC",
+    "interlock":    "ESD",
+    "interlock-R":  "ESD",
+}
 
 # Known valve type codes — used to filter OCR tags from instrument tags (FIT, LIT, XZT, etc.)
 VALVE_TYPE_CODES = {
@@ -523,6 +555,142 @@ def extract_drawing_number(pdf_path: str, tmp_dir: str = "tmp") -> str:
     except Exception as e:
         print(f"  API fallback failed: {e}")
         return "UNKNOWN"
+
+
+def _extract_inst_tags_from_ocr(ocr_texts: List[Dict]) -> List[Tuple[str, float, float]]:
+    """
+    Find instrument tags (format YY-XX-NNNNN, e.g. 01-PT-01017) in OCR results.
+    Uses the same row-clustering approach as _extract_tags_from_tile but with
+    a tag pattern that targets instrument bubbles, not valve serials.
+    """
+    from instrument_parser import TYPE_MAP
+
+    if not ocr_texts:
+        return []
+
+    INST_TAG_RE = re.compile(r'(\d{1,3}(?:-\d{1,3})?)-([A-Z]{2,5})-(\d{3,6})([A-Z]{1,2})?')
+
+    sorted_texts = sorted(ocr_texts, key=lambda t: (t["cy"], t["cx"]))
+    rows: List[List[Dict]] = []
+    current = [sorted_texts[0]]
+    for t in sorted_texts[1:]:
+        if abs(t["cy"] - current[-1]["cy"]) <= 40:
+            current.append(t)
+        else:
+            rows.append(sorted(current, key=lambda x: x["cx"]))
+            current = [t]
+    if current:
+        rows.append(sorted(current, key=lambda x: x["cx"]))
+
+    found: List[Tuple[str, float, float]] = []
+    seen = set()
+    for row in rows:
+        for start in range(len(row)):
+            for end in range(start + 1, min(start + 5, len(row) + 1)):
+                group = row[start:end]
+                combined = "".join(t["text"] for t in group).upper().replace(" ", "")
+                m = INST_TAG_RE.search(combined)
+                if not m:
+                    continue
+                type_code = m.group(2)
+                if type_code in VALVE_TYPE_CODES or type_code not in TYPE_MAP:
+                    continue
+                suffix = m.group(4) or ""
+                tag = f"{m.group(1)}-{type_code}-{m.group(3)}{suffix}"
+                if tag in seen:
+                    break
+                seen.add(tag)
+                cx = sum(t["cx"] for t in group) / len(group)
+                cy = sum(t["cy"] for t in group) / len(group)
+                found.append((tag, cx, cy))
+                break
+    return found
+
+
+def extract_instruments(tiles: List[Dict], drawing_description: str = "", model: str = None) -> List[Dict]:
+    """
+    Offline instrument extraction across all tiles.
+    YOLO finds instrument bubbles → OCR reads tag → returns raw dicts shaped
+    identically to the API path (extractor.extract_instruments).
+    """
+    from instrument_parser import default_power_signal, TYPE_MAP
+
+    print(f"\n  --- Offline instrument extraction: YOLO + OCR ---")
+    all_instruments: List[Dict] = []
+
+    for i, tile in enumerate(tiles):
+        print(f"  [{i+1}/{len(tiles)}] Tile r{tile['row']}c{tile['col']}...")
+        try:
+            img = Image.open(tile["path"]).convert("RGB")
+            orig_w, orig_h = img.size
+            inp, scale, pad_x, pad_y = _preprocess(img)
+            session = _get_session()
+            output = session.run(None, {session.get_inputs()[0].name: inp})[0]
+            detections = _decode(output, scale, pad_x, pad_y, orig_w, orig_h)
+
+            inst_dets = [d for d in detections if d["class_name"] in INSTRUMENT_CLASSES]
+            print(f"    YOLO: {len(inst_dets)} instrument bubbles")
+            if not inst_dets:
+                continue
+
+            ocr_texts = _run_ocr(tile["path"])
+            tile_x0 = tile.get("x0", 0)
+            tile_y0 = tile.get("y0", 0)
+
+            # Tile-wide OCR scan for instrument tags (handles fragmented tokens)
+            tag_hits = _extract_inst_tags_from_ocr(ocr_texts)
+
+            for det in inst_dets:
+                # Find nearest OCR-discovered tag to this bubble
+                best_tag, best_d = None, 200.0
+                for tag, tcx, tcy in tag_hits:
+                    d = _dist(det["cx"], det["cy"], tcx, tcy)
+                    if d < best_d:
+                        best_d, best_tag = d, tag
+
+                # Fallback: targeted crop OCR around the bubble
+                if not best_tag:
+                    crop_texts = _targeted_crop_ocr(
+                        tile["path"], det["cx"], det["cy"], tile_x0, tile_y0,
+                        crop_size=300,
+                    )
+                    crop_hits = _extract_inst_tags_from_ocr(crop_texts)
+                    if crop_hits:
+                        best_tag = crop_hits[0][0]
+
+                if not best_tag:
+                    continue  # cannot identify this bubble
+
+                # Type code → instrument type description + defaults
+                type_code = best_tag.split("-")[-2] if best_tag.count("-") >= 2 else ""
+                type_desc = TYPE_MAP.get(type_code, type_code)
+                power, signal = default_power_signal(type_code)
+
+                line_number = _find_line_near(
+                    {"cx": det["cx"], "cy": det["cy"]}, ocr_texts, radius=500,
+                )
+                location = LOCATION_FROM_YOLO_CLASS.get(det["class_name"], "FIELD")
+
+                all_instruments.append({
+                    "tag_number": best_tag,
+                    "instrument_type_description": type_desc,
+                    "tag_service": "TBD",  # offline path can't infer service from drawing topology
+                    "line_number": line_number or "NA",
+                    "equipment_number": "NA",
+                    "location": location,
+                    "power_supply": power,
+                    "signal_voltage_level": signal,
+                    "tile_row": tile["row"],
+                    "tile_col": tile["col"],
+                    "yolo_class": det["class_name"],
+                    "yolo_conf": round(det["conf"], 3),
+                })
+                print(f"      {best_tag:25s}  loc={location:8s}  line={line_number or '—'}")
+        except Exception as e:
+            print(f"    ERROR: {e}")
+
+    print(f"\n  Offline instrument extraction complete: {len(all_instruments)} detections")
+    return all_instruments
 
 
 def _save_raw(data: List[Dict], path: str) -> None:
