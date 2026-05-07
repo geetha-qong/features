@@ -1,4 +1,5 @@
 """Super-admin routes (/admin/*) and annotator landing page (/annotate)."""
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -11,9 +12,11 @@ from webapp.auth import get_current_user, hash_password, require_super_admin
 from webapp.database import get_db
 from webapp.jinja import templates
 from webapp import label_studio_client as ls
-from webapp.config import JOB_OUTPUT_DIR, get_job_dir
+from webapp.config import JOB_OUTPUT_DIR, MIN_PASSWORD_LENGTH, get_job_dir
 
 router = APIRouter()
+
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 
 
 # ── Annotator landing page ────────────────────────────────────────────────────
@@ -74,14 +77,23 @@ async def admin_create_user(
     current_user: models.User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
-    if db.query(models.User).filter(models.User.username == username).first():
+    username = (username or "").strip()
+    error = None
+    if not _USERNAME_RE.match(username):
+        error = "Username must be 3-32 chars, letters/digits/._- only."
+    elif len(password) < MIN_PASSWORD_LENGTH:
+        error = f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+    elif db.query(models.User).filter(models.User.username == username).first():
+        error = f"Username '{username}' already taken"
+
+    if error:
         users = db.query(models.User).order_by(models.User.created_at).all()
         return templates.TemplateResponse(
             "admin/users.html",
-            {"request": request, "user": current_user, "users": users,
-             "error": f"Username '{username}' already taken"},
+            {"request": request, "user": current_user, "users": users, "error": error},
             status_code=400,
         )
+
     if role not in ("user", "annotator", "super_admin"):
         role = "user"
     new_user = models.User(

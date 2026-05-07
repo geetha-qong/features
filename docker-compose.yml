@@ -20,8 +20,8 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - STORAGE_ENDPOINT_URL=${STORAGE_ENDPOINT_URL:-http://minio:9000}
       - STORAGE_BUCKET=${STORAGE_BUCKET:-qong-local}
-      - STORAGE_ACCESS_KEY=${STORAGE_ACCESS_KEY:-minioadmin}
-      - STORAGE_SECRET_KEY=${STORAGE_SECRET_KEY:-minioadmin}
+      - STORAGE_ACCESS_KEY=${STORAGE_ACCESS_KEY}
+      - STORAGE_SECRET_KEY=${STORAGE_SECRET_KEY}
       - STORAGE_REGION=${STORAGE_REGION:-us-east-1}
       - GPU_CALLBACK_SECRET=${GPU_CALLBACK_SECRET}
       - WEBAPP_BASE_URL=${WEBAPP_BASE_URL:-https://dev.qongsystems.com}
@@ -53,7 +53,7 @@ services:
       - POSTGRE_HOST=postgres
       - POSTGRE_PORT=5432
       - POSTGRE_USER=qong
-      - POSTGRE_PASSWORD=${POSTGRES_PASSWORD:-qong}
+      - POSTGRE_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRE_NAME=label_studio
     depends_on:
       - postgres
@@ -126,15 +126,15 @@ services:
   # ── MinIO (S3-compatible local object storage) ────────────────────────────
   # API:     http://localhost:9100  (mapped from container :9000)
   # Console: http://localhost:9101  (mapped from container :9001)
-  # Credentials: minioadmin / minioadmin
+  # Credentials: required from .env (MINIO_ROOT_USER, MINIO_ROOT_PASSWORD)
   minio:
     image: minio/minio:latest
     ports:
       - "127.0.0.1:9100:9000"   # S3 API — set STORAGE_ENDPOINT_URL=http://localhost:9100
       - "127.0.0.1:9101:9001"   # MinIO web console (localhost only — not public)
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -151,9 +151,12 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
     entrypoint: >
       /bin/sh -c "
-        mc alias set local http://minio:9000 minioadmin minioadmin &&
+        mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\" &&
         mc mb -p local/qong-local || true
       "
     restart: "no"
@@ -165,7 +168,7 @@ services:
       - "127.0.0.1:5432:5432"
     environment:
       - POSTGRES_USER=qong
-      - POSTGRES_PASSWORD=qong
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=qong
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -177,16 +180,21 @@ services:
     restart: unless-stopped
 
   # ── Redis (job queue broker) ──────────────────────────────────────────────
+  # Authentication is REQUIRED: REDIS_PASSWORD must be set in .env.
+  # All clients must use REDIS_URL=redis://:<password>@host:6379/0
   redis:
     image: redis:7-alpine
     ports:
       - "127.0.0.1:6379:6379"
       - "100.127.190.88:6379:6379"   # Tailscale — GPU worker on Windows reads this
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "sh", "-c", "redis-cli -a \"$$REDIS_PASSWORD\" ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     restart: unless-stopped
 
   # ── CPU RQ worker (runs pipeline.py jobs from the 'cpu' queue) ───────────────────
@@ -203,8 +211,8 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - STORAGE_ENDPOINT_URL=${STORAGE_ENDPOINT_URL:-http://minio:9000}
       - STORAGE_BUCKET=${STORAGE_BUCKET:-qong-local}
-      - STORAGE_ACCESS_KEY=${STORAGE_ACCESS_KEY:-minioadmin}
-      - STORAGE_SECRET_KEY=${STORAGE_SECRET_KEY:-minioadmin}
+      - STORAGE_ACCESS_KEY=${STORAGE_ACCESS_KEY}
+      - STORAGE_SECRET_KEY=${STORAGE_SECRET_KEY}
       - STORAGE_REGION=${STORAGE_REGION:-us-east-1}
       - LS_API_KEY=${LS_API_KEY}
       - LS_URL=http://label-studio:8080

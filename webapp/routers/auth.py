@@ -1,14 +1,29 @@
 """Auth routes: /login, /register (public with approval), /logout."""
+import re
+
 from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from webapp import models
 from webapp.auth import create_access_token, get_current_user, hash_password, verify_password
+from webapp.config import COOKIE_SECURE, MIN_PASSWORD_LENGTH
 from webapp.database import get_db
 from webapp.jinja import templates
 
 router = APIRouter()
+
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
+
+
+def _set_auth_cookie(response, token):
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite="lax",
+    )
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -38,7 +53,7 @@ async def login(
         )
     token = create_access_token({"sub": user.username})
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
-    response.set_cookie(key="access_token", value=token, httponly=True, samesite="lax")
+    _set_auth_cookie(response, token)
     return response
 
 
@@ -63,6 +78,20 @@ async def register(
         current_user = get_current_user(request, db)
     except Exception:
         current_user = None
+
+    username = (username or "").strip()
+    if not _USERNAME_RE.match(username):
+        return templates.TemplateResponse(
+            "register.html",
+            {"request": request, "error": "Username must be 3-32 chars, letters/digits/._- only", "user": current_user},
+            status_code=400,
+        )
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return templates.TemplateResponse(
+            "register.html",
+            {"request": request, "error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters", "user": current_user},
+            status_code=400,
+        )
 
     if db.query(models.User).filter(models.User.username == username).first():
         return templates.TemplateResponse(
@@ -104,7 +133,7 @@ async def register(
     if is_first_user:
         new_token = create_access_token({"sub": user.username})
         response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
-        response.set_cookie(key="access_token", value=new_token, httponly=True, samesite="lax")
+        _set_auth_cookie(response, new_token)
         return response
 
     # Self-registered: show pending approval message

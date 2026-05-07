@@ -1,12 +1,27 @@
 """App configuration — reads from environment variables."""
 import os
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY: str = os.environ.get("SECRET_KEY", "change-me-in-production-please")
+_SECRET_FALLBACK = "change-me-in-production-please"
+SECRET_KEY: str = os.environ.get("SECRET_KEY", _SECRET_FALLBACK)
+if SECRET_KEY == _SECRET_FALLBACK or len(SECRET_KEY) < 32:
+    sys.stderr.write(
+        "FATAL: SECRET_KEY env var missing or shorter than 32 chars. "
+        "Generate one with: python3 -c 'import secrets; print(secrets.token_hex(32))'\n"
+    )
+    sys.exit(1)
+
 ALGORITHM: str = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8  # 8 hours
+
+# Cookie security: set to "0" only for local HTTP dev
+COOKIE_SECURE: bool = os.environ.get("COOKIE_SECURE", "1") != "0"
+
+# Password / username policy
+MIN_PASSWORD_LENGTH: int = int(os.environ.get("MIN_PASSWORD_LENGTH", "8"))
 
 UPLOAD_DIR: Path = BASE_DIR / "uploads"
 JOB_OUTPUT_DIR: Path = BASE_DIR / "job_outputs"
