@@ -39,7 +39,7 @@ _HERE = Path(__file__).resolve().parent.parent
 MODEL_PATH = os.environ.get("MODEL_PATH", str(_HERE / "models" / "best.onnx"))
 
 IMGSZ = 1280
-CONF_THRESH = 0.25
+CONF_THRESH = 0.15
 IOU_THRESH = 0.45
 MODEL_VERSION = "yolo-v1-7"
 
@@ -67,6 +67,13 @@ CLASS_NAMES = [
     "valve_relief_safety", # 20
     "valve_pnuectrl",      # 21
 ]
+
+# Map canonical class names → LS label config names where they differ
+_LS_LABEL_NAME = {
+    "actuator_pneu":  "actuator_pneumatic",
+    "actuator_sol":   "actuator_solenoid",
+    "Pump_Dwg_Pump":  "Pump/Dwg Pump",
+}
 
 # ── YOLO inference (same logic as detector.py) ─────────────────────────────────
 
@@ -220,7 +227,7 @@ def post_prediction(task_id: int, detections: List[Dict]) -> bool:
                 "width": (det["x2"] - det["x1"]) / iw * 100,
                 "height": (det["y2"] - det["y1"]) / ih * 100,
                 "rotation": 0,
-                "rectanglelabels": [det["class_name"]],
+                "rectanglelabels": [_LS_LABEL_NAME.get(det["class_name"], det["class_name"])],
             },
             "score": det["conf"],
         })

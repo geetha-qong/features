@@ -25,7 +25,7 @@ import requests
 LS_URL = os.environ.get("LS_URL", "http://localhost:8080").rstrip("/")
 LS_API_KEY = os.environ.get("LS_API_KEY", "")
 
-EXPORT_PROJECTS = [1, 3, 4, 5, 6]  # fully annotated projects
+EXPORT_PROJECTS = [1, 3, 4, 5, 6, 11, 12, 13, 14]  # fully annotated projects
 
 _HERE = Path(__file__).resolve().parent.parent
 DATASET_DIR = _HERE / "datasets" / "pid_valves"
