@@ -12,13 +12,16 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
+from typing import Optional
 from openai import OpenAI
 from dotenv import load_dotenv
 from prompts import (
     SYSTEM_PROMPT, USER_PROMPT_TEMPLATE,
     SECOND_PASS_SYSTEM, SECOND_PASS_USER_TEMPLATE,
 )
-from instrument_prompts import INST_SYSTEM_PROMPT, INST_USER_TEMPLATE
+from instrument_prompts import (
+    INST_SYSTEM_PROMPT, INST_USER_TEMPLATE, EQUIPMENT_CONTEXT_PROMPT,
+)
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -312,25 +315,97 @@ def extract_all_tiles(tiles: list, model: str = DEFAULT_MODEL, save_raw: bool = 
     return all_valves
 
 
+def _full_page_path_for(tile: dict) -> Optional[str]:
+    """Derive the full-page render path from a tile dict (saved by pdf_to_tiles)."""
+    p = Path(tile["path"])
+    candidate = p.parent / f"page_{tile.get('page', 0)}_full.png"
+    return str(candidate) if candidate.exists() else None
+
+
+def extract_equipment_context(full_page_image: str, model: str = DEFAULT_MODEL) -> list:
+    """
+    Pre-pass: ask Vision for {equipment_tag, equipment_name} list from a full-page render.
+    Used to feed TAG SERVICE construction in the per-tile instrument pass.
+    """
+    if not full_page_image or not Path(full_page_image).exists():
+        return []
+    client = get_client()
+    try:
+        img_b64 = image_to_base64(full_page_image)
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=1024,
+            messages=[
+                {"role": "system", "content": EQUIPMENT_CONTEXT_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+                        {"type": "text", "text": "Extract the equipment list from this P&ID drawing."},
+                    ],
+                },
+            ],
+        )
+        raw_text = response.choices[0].message.content or ""
+        items = extract_json_array(raw_text)
+        cleaned = []
+        for item in items:
+            tag = (item.get("equipment_tag") or "").strip()
+            name = (item.get("equipment_name") or "").strip()
+            if tag and name:
+                cleaned.append({"equipment_tag": tag, "equipment_name": name})
+        return cleaned
+    except Exception as e:
+        print(f"    [equipment-context] ERROR: {e}")
+        return []
+
+
+def _format_equipment_context(items: list) -> str:
+    if not items:
+        return "  (no equipment context available)"
+    lines = []
+    for it in items:
+        lines.append(f"  {it['equipment_tag']:<20} = {it['equipment_name']}")
+    return "\n".join(lines)
+
+
 def extract_instruments(tiles: list, drawing_description: str = "", model: str = DEFAULT_MODEL) -> list:
     """
-    Single-pass instrument extraction across all tiles.
-    Finds all instrument bubbles (PT, TT, FT, PDT, LT, FCV, XV, ZT, etc.) — NOT valves.
-    Returns list of raw instrument dicts.
+    Single-pass instrument extraction across all tiles, preceded by a per-page
+    equipment-context pre-pass. Finds all instrument bubbles (PT, TT, FT, PDT,
+    LT, FCV, XV, ZT, etc.) — NOT valves. Returns list of raw instrument dicts.
     """
     client = get_client()
     desc = drawing_description or DRAWING_DESCRIPTION
     all_instruments = []
 
-    print(f"\n  --- Instrument Pass: bubble extraction ({model}) ---")
+    # Pre-pass: equipment context per page (cached so tiles on the same page reuse it)
+    print(f"\n  --- Instrument pre-pass: equipment context ({model}) ---")
+    equipment_context_by_page: dict = {}
+    seen_pages = set()
+    for tile in tiles:
+        page = tile.get("page", 0)
+        if page in seen_pages:
+            continue
+        seen_pages.add(page)
+        full_path = _full_page_path_for(tile)
+        items = extract_equipment_context(full_path, model=model) if full_path else []
+        equipment_context_by_page[page] = items
+        print(f"  page {page}: {len(items)} equipment items extracted")
+
+    print(f"\n  --- Instrument pass: bubble extraction ({model}) ---")
     for i, tile in enumerate(tiles):
         print(f"  [{i+1}/{len(tiles)}] Tile r{tile['row']}c{tile['col']}...")
         try:
             img_b64 = image_to_base64(tile["path"])
+            equipment_context = _format_equipment_context(
+                equipment_context_by_page.get(tile.get("page", 0), [])
+            )
             user_text = INST_USER_TEMPLATE.format(
                 drawing_description=desc,
                 row=tile["row"],
                 col=tile["col"],
+                equipment_context=equipment_context,
             )
             response = client.chat.completions.create(
                 model=model,
@@ -353,7 +428,7 @@ def extract_instruments(tiles: list, drawing_description: str = "", model: str =
                 inst["tile_col"] = tile["col"]
             print(f"    {len(instruments)} instruments found")
             for inst in instruments:
-                print(f"      {inst.get('tag_number', '?'):30s}  sys={inst.get('system', '?')}")
+                print(f"      {inst.get('tag_number', '?'):30s}  loc={inst.get('location', '?')}")
             all_instruments.extend(instruments)
         except Exception as e:
             print(f"    ERROR: {e}")
