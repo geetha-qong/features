@@ -41,12 +41,31 @@ MODEL_PATH = os.environ.get("MODEL_PATH", str(_HERE / "models" / "best.onnx"))
 IMGSZ = 1280
 CONF_THRESH = 0.25
 IOU_THRESH = 0.45
-MODEL_VERSION = "yolo-v1-6"
+MODEL_VERSION = "yolo-v1-7"
 
 CLASS_NAMES = [
-    "actuator_motor", "actuator_pneu", "actuator_sol",
-    "valve_bf", "valve_bv", "valve_ck", "valve_cv",
-    "valve_db", "valve_gen", "valve_gl",
+    "actuator_motor",      # 0
+    "actuator_pneu",       # 1
+    "actuator_sol",        # 2
+    "valve_bf",            # 3
+    "valve_bv",            # 4
+    "valve_ck",            # 5
+    "valve_cv",            # 6
+    "valve_db",            # 7
+    "valve_gen",           # 8
+    "valve_gl",            # 9
+    "inst_field",          # 10
+    "DCS",                 # 11
+    "PLC",                 # 12
+    "interlock",           # 13
+    "interlock-R",         # 14
+    "inst_field-R",        # 15
+    "Pump_Dwg_Pump",       # 16
+    "Motor",               # 17
+    "valve_3way_relief",   # 18
+    "valve_ncbv",          # 19
+    "valve_relief_safety", # 20
+    "valve_pnuectrl",      # 21
 ]
 
 # ── YOLO inference (same logic as detector.py) ─────────────────────────────────

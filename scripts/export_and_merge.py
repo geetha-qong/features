@@ -25,7 +25,7 @@ import requests
 LS_URL = os.environ.get("LS_URL", "http://localhost:8080").rstrip("/")
 LS_API_KEY = os.environ.get("LS_API_KEY", "")
 
-EXPORT_PROJECTS = [1, 3]  # fully annotated projects
+EXPORT_PROJECTS = [1, 3, 4, 5, 6]  # fully annotated projects
 
 _HERE = Path(__file__).resolve().parent.parent
 DATASET_DIR = _HERE / "datasets" / "pid_valves"
@@ -52,7 +52,10 @@ CANONICAL_CLASSES = [
     "inst_field-R",       # 15  ← new
     "Pump_Dwg_Pump",      # 16  ← new (slash/space replaced for filesystem safety)
     "Motor",              # 17  ← new
-    "valve_3way_relief",  # 18  ← new
+    "valve_3way_relief",  # 18
+    "valve_ncbv",         # 19
+    "valve_relief_safety",# 20
+    "valve_pnuectrl",     # 21
 ]
 
 # LS label name → canonical index (handles name differences)
@@ -79,10 +82,10 @@ LS_NAME_TO_IDX: Dict[str, int] = {
     "Pump_Dwg_Pump": 16,
     "Motor": 17,
     "valve_3way_relief": 18,
-    # future classes (project 25 etc.) — add here when ready
     "valve_ncbv": 19,
     "valve_relief_safety": 20,
     "valve_pnuectrl": 21,
+    "valve_pneuctrl": 21,      # spelling variant in project 6
 }
 
 

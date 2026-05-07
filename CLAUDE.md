@@ -398,13 +398,16 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 - Run: `runs/detect/pid_valves_v1-5/` — 50 epochs, mAP50 = **0.511**
 - Training set: 36 images, 389 labels
 
-### Training Results (pid_valves_v1-6) — CURRENT BEST (2026-05-07)
-- Run: `runs/detect/pid_valves_v1-6/` — 50 epochs, mAP50 = **0.855** at epoch 30 (up from 0.511 ✅)
-- Training set: 44 images, 510 labels (added 9 tiles + 121 labels from MUK-61 drawing)
-- ONNX exported to `runs/detect/pid_valves_v1-6/weights/best.onnx` (45 MB) and deployed to Windows GPU worker
-- Key fix: corrected nc=13→10 in data.yaml (instrument class indices were corrupting training)
-- To retrain: `python3 train.py` (always start fresh from `yolov8s.pt`; ~17 min on M3 Pro)
-- To export: `python3 train.py --export runs/detect/<run_name>/weights/best.pt`
+### Training Results (pid_valves_v1-6) — SUPERSEDED
+- Run: `runs/detect/pid_valves_v1-6/` — 50 epochs, mAP50 = **0.855** at epoch 30, nc=10, 44 images
+
+### Training Results (pid_valves v1-7) — CURRENT BEST (2026-05-07)
+- Run: `C:\Users\qongsystems\qong-poc-gpu\runs\detect\pid_valves\` on Windows GPU (RTX 2000 Ada)
+- 92 epochs (early stop patience=30), mAP50 = **0.897** at epoch 61 (up from 0.855 ✅)
+- Training set: 99 images (44 MUK + 55 from LS projects 1,3,4,5,6), nc=22
+- ONNX (45MB) auto-exported by `train_gpu.py` → `models/best.onnx` on Windows; worker PID 11048
+- **ALL training must run on Windows GPU** — never on MacBook (user directive)
+- To retrain: run `scripts/export_and_merge.py` on GCP → scp tar.gz to Windows → run `train_gpu.py`
 
 ### Docker Trainer (for reference / CI)
 ```bash
