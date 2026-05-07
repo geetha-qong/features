@@ -233,7 +233,7 @@ def download_image(url: str, dest: str) -> bool:
             fetch_url = f"{LS_URL}{url}"
         elif "dev.qongsystems.com" in url or "localhost" in url:
             import re as _re
-            fetch_url = _re.sub(r"https?://[^/]+", "http://web:8000", url)
+            fetch_url = _re.sub(r"https?://[^/]+", "http://localhost:8000", url)
 
         r = requests.get(fetch_url, timeout=30)
         if r.status_code == 200:
