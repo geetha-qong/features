@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Extract a **Valve List** from scanned P&ID drawings (PDFs) and output a structured CSV.
 Target: **≥90% recall** on valve identification.
 
-**Current status**: Production webapp live at https://dev.theqong.com
+**Current status**: Production webapp live at https://dev.qongsystems.com
 **Next phase**: Replace API with own offline model (see `OWN_SYSTEM_DESIGN.md`)
 
 ## Branches
@@ -19,6 +19,18 @@ Target: **≥90% recall** on valve identification.
 ## Docker-First Rule
 
 **NEVER install any service or tool directly on the local Mac.** All services (nginx, databases, annotation tools, etc.) must be added as Docker containers in `docker-compose.yml`. This ensures the compose file can be pushed to production as-is.
+
+## Quick Start (local dev)
+
+```bash
+docker compose up -d                                           # start all services
+docker compose logs -f web                                     # tail webapp logs
+docker compose exec web python3 -m pytest tests/unit/ -v      # run unit tests
+```
+
+- Webapp: http://localhost:8000
+- Label Studio (direct): http://localhost:9001
+- Label Studio (via nginx): http://localhost:9000/ls/
 
 ## CRITICAL: Two-Mode Architecture — Do NOT Mix
 
@@ -83,7 +95,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - `webapp/` — FastAPI web app (upload → job queue → results → download)
 - `OWN_SYSTEM_DESIGN.md` — full design doc for offline YOLO+PaddleOCR system
 
-## SaaS Features (on feature/multi-cloud-saas, not yet on main)
+## SaaS Features (merged to dev branch)
 
 - **Credits ledger**: every balance change via `webapp/credits.py` — never UPDATE `credits_remaining` directly; always via `grant/deduct/refund`. Invariant: `SUM(delta) == credits_remaining` per user.
 - **API keys**: `qk_<32-hex>` format; stored hashed (pbkdf2_sha256). Full key shown once via `?new_key=` URL param after creation. `key_prefix` = first 8 chars for lookup.
@@ -92,7 +104,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - **REST API v1**: `POST /api/v1/jobs`, `GET /api/v1/jobs/{id}`, `GET /api/v1/account` — auth via `Authorization: Bearer qk_...` OR cookie JWT; returns 401 (not 303 redirect) on failure
 - **Pre-flight credit check**: `fitz.open(pdf).page_count` for page count → deduct before enqueue; `pipeline_runner.py` refunds on failure
 
-## Webapp Features (production at https://dev.theqong.com)
+## Webapp Features (production at https://dev.qongsystems.com)
 
 - Login/register (JWT cookie auth). Admin: `admin` (see memory for current password)
 - **Roles (3-tier)**: `super_admin` (all jobs + admin menu), `annotator` (all jobs visible + /annotate queue, no admin panel), `user` (own jobs only)
@@ -110,6 +122,7 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
   - `get_job_dir(job)` in `config.py` — checks new path first, falls back to legacy `job_outputs/{job_id}/`
 - **Super admin + annotator see all jobs**: `_can_access_job(job, user)` in `jobs.py` — owner OR super_admin OR annotator can view/download/rerun; dashboard shows User column for both
 - **Instrumentation Index download**: `/jobs/{id}/download-inst-index` endpoint; button shown on job detail when ready
+- **Serving PDFs inline**: use `starlette.responses.Response` with `media_type="application/pdf"` and `Content-Disposition: inline; filename="..."` — `FileResponse` forces a download instead
 
 ## Environment
 
@@ -118,15 +131,6 @@ PDF → pdf_to_tiles.py → 9 PNG tiles (3×3, 25% overlap)
 - OpenRouter API: `OPENROUTER_API_KEY` env var required (not Anthropic directly)
 - Default model: `google/gemini-2.0-flash-001` (fast); override via `OPENROUTER_MODEL`
 - Temp files → `tmp/` per job in `job_outputs/{job_id}/tmp/` (never commit)
-
-## Deployment (Production — Hetzner, legacy)
-
-- Server: `root@157.180.20.168` (Ubuntu 24.04, aaPanel) — still serving `main` branch at https://dev.theqong.com
-- App: FastAPI + uvicorn, port 8001, systemd `qong_poc`
-- Nginx: `/www/server/panel/vhost/nginx/dev.theqong.com.conf`
-- Code: `/www/wwwroot/qong_poc/`, auto-deploy via GitHub webhook
-- **To deploy to Hetzner**: `git push origin main` (webhook triggers pull + restart)
-- **After adding new pip dependencies**: SSH in and run `venv/bin/pip install -r requirements-webapp.txt` manually, then `systemctl restart qong_poc`
 
 ## Deployment (GCP — active, dev branch)
 
@@ -175,13 +179,13 @@ Rebuilt containers get new IPs; nginx caches old IP → 502. Fix: `sudo docker c
 
 ## DB Schema Notes
 
-### New tables (feature/multi-cloud-saas, defined as SQLAlchemy models in models.py)
+### New tables (defined as SQLAlchemy models in models.py)
 - `api_keys` — `id, user_id, name, key_prefix(8), key_hash, created_at, last_used_at, revoked_at`
 - `credit_transactions` — ledger: `id, user_id, delta(signed), balance_after, reason, job_id, meta(JSON), created_at`
 - `billing_plans` — `id, name, credits, price_usd_cents, is_active, stripe_price_id, created_at`
 - `user_feedback` — `id, user_id(nullable for anon), category, subject, message, page_url, status, admin_notes, created_at`
 
-### New user columns (feature/multi-cloud-saas)
+### New user columns
 - `credits_remaining INTEGER DEFAULT 10`, `tier VARCHAR DEFAULT 'trial'`, `organization VARCHAR`
 
 ### SQLite (main branch / local dev fallback)
@@ -196,38 +200,17 @@ Rebuilt containers get new IPs; nginx caches old IP → 502. Fix: `sudo docker c
 - Job columns added: `output_inst_index_path` (Str) — path to instrumentation_index.csv when generated
 - Job columns added: `output_inst_datasheet_path` (Str) — path to instrument_datasheets.zip when generated
 
-## Admin / Password Reset (production server)
+## Admin / Password Reset
 
 - App uses **pbkdf2_sha256** (NOT bcrypt): `CryptContext(schemes=["pbkdf2_sha256"])` in `webapp/auth.py`
-- To reset a password directly in SQLite (e.g. after DB migration):
+- To reset a password on GCP (Postgres):
   ```bash
-  cd /www/wwwroot/qong_poc && venv/bin/python3 -c "
-  from passlib.context import CryptContext; import sqlite3
-  h = CryptContext(schemes=['pbkdf2_sha256']).hash('Qong@2024')
-  c = sqlite3.connect('data/webapp.db'); c.execute('UPDATE users SET password_hash=? WHERE username=?', (h,'admin')); c.commit()
-  "
+  gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="cd /app/qong_poc && sudo docker compose exec -T web python3 -c \"
+  from webapp.database import SessionLocal; from webapp import models, auth
+  db=SessionLocal(); u=db.query(models.User).filter_by(username='admin').first()
+  u.password_hash=auth.pwd_context.hash('NEW_PASSWORD'); db.commit(); print('reset')\""
   ```
 - Instrumentation Index / Datasheets buttons only appear on job detail when `output_inst_index_path` is set — old jobs need a **Re-run** to generate them
-
-## Critical Bug Fixes (already applied)
-
-1. **Corrections not applying**: `pipeline_runner.py` passes `input.pdf` as path →
-   `drawing_stem` was always `"input"`. Fixed: pass `original_filename` through to `pipeline.run()`.
-2. **DB valve size NOT DEFINED**: Parser now auto-assigns size=`"2"` for DB category.
-3. **P&ID No truncated**: Title block prompt updated to capture full revision suffix (e.g. `24C7-D`).
-4. **Jinja2 template path**: Use `Path(__file__).parent.parent / "templates"` (absolute) in all 3 router files.
-5. **Stale processing jobs**: Reset to `failed` on app startup.
-6. **Starlette 1.0.0 broke TemplateResponse**: `TypeError: unhashable type: 'dict'` on every page load. Fix: pin `fastapi>=0.111.0,<0.115.0` and `starlette>=0.37.0,<0.41.0` in `requirements-webapp.txt`.
-7. **`requests` missing from requirements-webapp.txt**: `label_studio_client.py` uses it — must include `requests>=2.31.0`.
-8. **PDF inline viewing**: `FileResponse` forces download. Use `starlette.responses.Response` with `media_type="application/pdf"` and `Content-Disposition: inline; filename="..."` to open in browser tab.
-
-## Postgres Compatibility Fixes (applied 2026-05-05 for GCP deployment)
-
-9. **`psycopg2-binary` missing**: Not in `requirements-webapp.txt` — Postgres connection fails at startup. Added: `psycopg2-binary>=2.9.9`
-10. **`AUTOINCREMENT` is SQLite-only**: Raw SQL `CREATE TABLE ... INTEGER PRIMARY KEY AUTOINCREMENT` fails on Postgres. Fix: removed raw SQL table creation from `run_migrations()`; replaced with `from webapp import models; Base.metadata.create_all(engine)` — dialect-agnostic, idempotent.
-11. **Boolean seed values**: Postgres `billing_plans.is_active` is `BOOLEAN` — inserting `1`/`0` raises `DatatypeMismatch`. Use `TRUE`/`FALSE` in seed SQL.
-12. **RQ `Connection` removed**: `from rq import Connection` fails on rq>=1.16. Fix in `workers/cpu_worker.py`: `Worker(queues=[Queue("cpu", connection=conn)], connection=conn)` — no `with Connection(conn):` wrapper needed.
-13. **nginx 502 after container rebuild**: Rebuilt containers get new Docker IPs; nginx caches the old one → 502. Always `sudo docker compose restart nginx` after rebuilding `web`.
 
 ## Correction Rules (verified by engineer, MUK-62-1-15-1004)
 
@@ -285,7 +268,7 @@ Pipeline Stage 5c generates a ZIP of per-instrument HTML spec forms alongside th
 - Download endpoint: `/jobs/{id}/download-inst-datasheets` → ZIP served as `instrument_datasheets_{pid_no}.zip`
 - Button shown on job detail page when `output_inst_datasheet_path` is set
 
-## New Modules (feature/multi-cloud-saas)
+## New Modules
 
 - `webapp/storage.py` — S3 adapter (`put_file`, `get_file`, `presigned_url`, `list`, `exists`, `delete`); singleton via `get_storage()`
 - `webapp/queue.py` — RQ wiring: `cpu_q = Queue("cpu", ...)`, `gpu_q = Queue("gpu", ...)`
@@ -306,7 +289,7 @@ Pipeline Stage 5c generates a ZIP of per-instrument HTML spec forms alongside th
 
 ## Docker Services
 
-### Additional services (feature/multi-cloud-saas, in docker-compose.yml)
+### Additional services (in docker-compose.yml)
 - `postgres` — Postgres 16; `DATABASE_URL=postgresql://...`; named volume `postgres_data`
 - `redis` — Redis 7 for RQ job queue; `REDIS_URL=redis://redis:6379/0`
 - `minio` — S3-compatible local storage; `STORAGE_ENDPOINT_URL=http://minio:9000`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`
@@ -334,7 +317,7 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 ## Annotation Status (feature/own-system branch)
 
 - 45 tiles ready in `annotate/tiles/` (exported from 5 P&IDs)
-- `datasets/pid_valves/` folder structure exists but `images/train|val/` and `labels/train|val/` are **empty** — annotations not yet done
+- `datasets/pid_valves/` — 45 annotated tiles in `images/train/` + `labels/train/`; 9 in `val/`; training v1-5 complete (mAP50=0.511; see Training Results section)
 - Label Studio data: `annotate/ls_data/` (persistent DB + media); exports → `annotate/exports/` (YOLO ZIP)
 - After export: unzip into `datasets/pid_valves/`; drawings 1002–1005 → train/, drawing 1001 (9 tiles) → val/
 - **Login**: `tnb@qongsystems.com` / `Qong@2024`
@@ -385,6 +368,11 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 - `path: /app/datasets/pid_valves` was Docker-only — breaks on host
 - Correct value: `path: datasets/pid_valves` — relative to cwd, works both in Docker (WORKDIR=/app) and on host (project root)
 - Current value is correct; do not change it back to an absolute path
+
+### data.yaml nc Must Match Actual Label Files
+- **nc must equal the highest class index + 1 in your label files** — extra classes silently shift all indices and corrupt training (no error is raised)
+- Verify before training: `awk '{print $1}' datasets/pid_valves/labels/train/*.txt | sort -n | uniq -c | tail -5` (max index = nc - 1)
+- Current nc=10 (indices 0-9); instrument classes removed from data.yaml until annotation for them starts — add back only when label files actually use those indices
 
 ### MPS Training (Apple Silicon)
 - MPS is available via `torch.backends.mps.is_available()` — use `device="mps"` in `model.train()`
@@ -496,7 +484,7 @@ All intermediate files go in `job_outputs/{id}/tmp/` — never commit. Also neve
 
 ## Multi-Cloud Migration (in progress on dev branch)
 
-Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
+Architecture upgrade: SQLite + threads → GCP (Postgres + Redis + RQ + GCS).
 
 **Phases complete**: A1 (S3 adapter + MinIO), A2 (Postgres + RQ), A3 (GCP VM live, data migrated), A4 (GPU worker on Windows — deps, model, ONNX session, Redis all verified), A5 (GPU callback endpoint + LS pre-annotations), A6 (/healthz, nightly pg_dump→GCS, restore script), B1–B2 (credits ledger + pre-flight), B3–B4 (admin panel v2 + account pages), B5 (REST API v1)
 
@@ -513,6 +501,8 @@ Moving from Hetzner (SQLite + threads) → GCP (Postgres + Redis + RQ + GCS).
 Full architecture plan: `sparkling-exploring-blum.md` in Claude plans folder.
 
 ## Phase A5 — Pre-Annotations (COMPLETE, 2026-05-06)
+
+**End-to-end verified 2026-05-06**: job 1 (MUK-62-1-15-1003, 9 tiles) → 85 detections → 9 LS predictions posted (model_version `gpu-worker-v1`).
 
 GPU worker POSTs detections → webapp stores JSON → auto-pushes as LS pre-annotations.
 
@@ -537,8 +527,8 @@ GPU worker POSTs detections → webapp stores JSON → auto-pushes as LS pre-ann
 **GPU worker repo** (`Qong-Systems/qong_poc_gpu` — separate repo, NOT in qong_product):
 - Clone: `git clone https://github.com/Qong-Systems/qong_poc_gpu.git`
 - `worker.py` — RQ worker consuming `gpu` queue; auto-deletes all tile files after each job
-- `inference/engine.py` — YOLO ONNX + PaddleOCR, zero imports from main repo
-- `requirements.txt` — minimal: rq, redis, onnxruntime-gpu, paddleocr==2.9.1, requests
+- `inference/engine.py` — YOLO ONNX + EasyOCR (replaced PaddleOCR 2026-05-06), zero imports from main repo
+- `requirements.txt` — minimal: rq, redis, onnxruntime-gpu, easyocr, requests
 - Local path on dev machine: `/Users/maahedev/allcode/experiments/qong/qong-gpu-worker/`
 
 **Windows setup (completed 2026-05-06)**:
@@ -547,17 +537,31 @@ GPU worker POSTs detections → webapp stores JSON → auto-pushes as LS pre-ann
 - ONNX model: `C:\Users\qongsystems\qong-poc-gpu\models\best.onnx` (45 MB)
 - `.env`: `REDIS_URL=redis://100.127.190.88:6379/0`, `MODEL_PATH=models/best.onnx`
 - PaddleOCR models cached in `C:\Users\qongsystems\.paddleocr\whl\`
-- To start: `cd C:\Users\qongsystems\qong-poc-gpu && "C:\Program Files\Python311\python.exe" worker.py`
+- To start: `cd C:\Users\qongsystems\qong-poc-gpu && "C:\Program Files\Python311\python.exe" -X utf8 worker.py`
+- **`-X utf8` is required** — EasyOCR progress bar crashes with cp1252 encoding over SSH without it
+- Auto-start: Task Scheduler task `QongGpuWorker` runs `start_worker.bat` at ONLOGON (uses `-X utf8`)
 
 **ONNX on Windows**: `onnxruntime-gpu 1.25.1` installed; currently uses CPU (CUDA 12 + cuDNN 9 not yet installed)
 - Providers available: `TensorrtExecutionProvider, CUDAExecutionProvider, CPUExecutionProvider`
 - Falls back to CPU silently — inference works, just slower
 
-**paddleocr version pinning**: always use `paddleocr==2.9.1` on Windows
-- paddleocr 3.x pulls in `paddlex → modelscope + huggingface_hub + pandas` — these CDNs stall for hours on Windows
-- paddleocr 2.9.1 installs entirely from PyPI; all deps download in 5-10 min
-- API change: 2.x uses `.ocr(path, cls=True)` returning `[[[bbox,(text,conf)],...]]`; 3.x uses `.predict(path)` returning dicts
-- engine.py uses 2.x API — do not upgrade paddleocr without updating engine.py
+**CUDA install (no full toolkit needed — use redist ZIPs)**:
+Download 3 packages (~2GB total), extract DLLs to `C:\Users\qongsystems\qong-poc-gpu\cuda_dlls\`, add `os.add_dll_directory(dll_dir)` in worker.py before `import onnxruntime`:
+- cudart (~20MB): `developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-12.6.77-archive.zip`
+- cublas (~400MB): `developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-12.6.3.3-archive.zip`
+- cuDNN (~1.5GB): `developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/cudnn-windows-x86_64-9.5.1.17_cuda12-archive.zip`
+- After extracting: `python -X utf8 -c "import onnxruntime; print(onnxruntime.get_available_providers())"` should show `CUDAExecutionProvider` before `CPUExecutionProvider`
+
+**PaddleOCR first-run model download**: On fresh Windows install, `en_PP-OCRv3_det_infer.tar` (~3910 chunks) and `en_PP-OCRv4_rec_infer.tar` (~10000 chunks) download to `C:\WINDOWS\system32\config\systemprofile\.paddleocr\whl\`. Takes ~2-3 min; subsequent runs use cache.
+
+**EasyOCR on Windows (replaces PaddleOCR — 2026-05-06)**: `easyocr==1.7.2` + PyTorch backend; avoids PaddleOCR's fatal oneDNN/fused_conv2d crash on Intel CPUs (that error was NOT safe to ignore — it caused 0 text detections).
+- API: `reader.readtext(path)` → `[(bbox, text, conf)]`; bbox = `[[x1,y1],[x2,y1],[x2,y2],[x1,y2]]` (quadrilateral — take min/max xs/ys for axis-aligned rect)
+- EasyOCR reads hyphens in valve tags as underscores — `_OCR_SUBS` in `engine.py` includes `(r'(\d{2})_([A-Z]{2,4})_(\d{6})', r'\1-\2-\3')`
+- EasyOCR first run downloads ~200MB models to `C:\WINDOWS\system32\config\systemprofile\.EasyOCR\`; cached for subsequent runs
+
+**Transient urllib3 pool pollution (SimpleWorker)**: If a prior job in the same SimpleWorker process left a 60s `ConnectTimeout`, the next job may get "connection refused" partway through tile downloads. Caused by polluted urllib3 connection pool state. Fix: ensure worker is idle between jobs; restart worker if stuck.
+
+**PaddleOCR (replaced — historical context only)**: was `paddleocr==2.9.1` (2.x API: `.ocr(path, cls=True)` → `[[[bbox,(text,conf)],...]]`); abandoned due to fatal `fused_conv2d` oneDNN crash producing 0 OCR results on Windows Intel CPUs. Do not re-add it.
 
 **Windows pip install patterns**:
 - Install in stages: core packages first (rq, redis, onnxruntime-gpu, numpy, Pillow, paddlepaddle), then paddleocr separately
@@ -578,14 +582,10 @@ gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="sshpass -
 - Tiles passed as presigned URLs (1-hour expiry, job-specific) — Windows cannot access other jobs' files
 - `tempfile.TemporaryDirectory` in `run_inference_job()` guarantees all tile files deleted after every job, even on crash
 
-**NSSM service (TODO — worker currently started manually)**:
-```powershell
-# Download nssm.exe to C:\nssm\, then:
-nssm install QongGpuWorker "C:\Program Files\Python311\python.exe" "worker.py"
-nssm set QongGpuWorker AppDirectory "C:\Users\qongsystems\qong-poc-gpu"
-nssm start QongGpuWorker
-# Verify: nssm status QongGpuWorker
-```
+**Auto-start via Task Scheduler (DONE — NSSM not needed)**:
+- Task Scheduler task `QongGpuWorker` runs `start_worker.bat` at ONLOGON for `qongsystems` user
+- `start_worker.bat`: `"C:\Program Files\Python311\python.exe" -X utf8 worker.py >> logs\worker.log 2>&1`
+- `launch_worker.py`: starts detached process via `subprocess.Popen([python, '-X', 'utf8', 'worker.py'], creationflags=0x08)` (DETACHED_PROCESS — survives SSH disconnect)
 
 **Windows SSH** (enable with one command as Administrator):
 ```powershell
