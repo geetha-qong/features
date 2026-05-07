@@ -243,12 +243,92 @@ def _norm(value: Optional[str], fallback: str) -> str:
     return s
 
 
+def _measured_var(type_code: str) -> str:
+    """Return the variable a type code measures (PRESS / TEMP / FLOW / ...)."""
+    if type_code in {"PT", "PG", "PI", "PIT", "PIK", "PIC", "PS"}:
+        return "PRESS"
+    if type_code in {"PDT", "PDIT", "PDI"}:
+        return "DIFF PRESS"
+    if type_code in {"TT", "TIT", "TI", "TE", "TG", "TZE", "TZI", "TZT"}:
+        return "TEMP"
+    if type_code == "TW":
+        return "THERMOWELL"
+    if type_code in {"FT", "FIT", "FI", "FE"}:
+        return "FLOW"
+    if type_code in {"FCV", "FY"}:
+        return "FLOW CONTROL"
+    if type_code in {"LT", "LIT", "LI", "LG", "LS"}:
+        return "LEVEL"
+    if type_code in {"ZT", "ZI"}:
+        return "POSITION"
+    if type_code in {"ZE", "VXE", "VYE", "VXT", "VYT", "VE"}:
+        return "VIBRATION"
+    if type_code in {"ST", "SE", "SI", "SIC"}:
+        return "SPEED"
+    if type_code in {"KE", "KT"}:
+        return "KEY PHASOR"
+    if type_code in {"XV", "XYV", "XZSO", "XZSC"}:
+        return "VALVE"
+    if type_code in {"XPG"}:
+        return "VOL TANK PRESS"
+    if type_code in {"XPSV", "PSV"}:
+        return "RELIEF VALVE"
+    if type_code == "SG":
+        return "SIGHT GLASS"
+    if type_code == "FO":
+        return "ORIFICE"
+    return ""
+
+
+# Fluid-code prefix → service hint (line numbers like "1.1/2"-LO-01-101405-S15WN-N"
+# use the second token to identify the fluid system).
+_FLUID_HINT = {
+    "LO": "LUBE OIL",
+    "PR": "PROCESS",
+    "N2": "NITROGEN",
+    "H2": "DRY GAS SEAL",
+    "IA": "INSTRUMENT AIR",
+    "BA": "BREATHING AIR",
+    "PA": "PLANT AIR",
+    "SA": "SERVICE AIR",
+    "FW": "FRESHWATER",
+    "CW": "COOLING WATER",
+    "ST": "STEAM",
+    "FG": "FUEL GAS",
+    "VG": "VENT GAS",
+}
+
+
+def _fallback_tag_service(line_no: str, type_code: str, equipment_no: str) -> str:
+    """Best-effort service descriptor when Vision returns TBD.
+
+    Returns "TBD" only if we have nothing meaningful — never pretend to know
+    the equipment/section if we don't.
+    """
+    var = _measured_var(type_code)
+    if not line_no or line_no in ("NA", "TBD"):
+        return "TBD"
+
+    # Parse fluid code from line: <size>"-<FLUID>-<unit>-<seq>-<class>-<insul>
+    parts = line_no.upper().replace('"', '').split("-")
+    fluid = parts[1] if len(parts) >= 2 else ""
+    hint = _FLUID_HINT.get(fluid, "")
+
+    if hint and var:
+        return f"{hint} {var}"
+    if hint:
+        return hint
+    if var:
+        return var
+    return "TBD"
+
+
 def build_instrument_row(raw: dict, pid_no: str = "") -> Optional[InstrumentRow]:
     """
     Build an InstrumentRow from a raw extraction dict.
     Raw keys consumed: tag_number, instrument_type_description, tag_service,
                        line_number, equipment_number, location,
-                       power_supply, signal_voltage_level
+                       power_supply, signal_voltage_level, pid_no
     """
     tag = (raw.get("tag_number") or "").strip()
     parsed = parse_instrument_tag(tag)
@@ -259,17 +339,26 @@ def build_instrument_row(raw: dict, pid_no: str = "") -> Optional[InstrumentRow]
     type_desc_default = TYPE_MAP.get(type_code, type_code)
     power_default, signal_default = default_power_signal(type_code)
 
+    line_no = _norm(raw.get("line_number"), "NA")
+    equipment_no = _norm(raw.get("equipment_number"), "NA")
+
+    # Vision-supplied tag_service first; fall back to fluid-hint heuristic.
+    vision_service = _norm(raw.get("tag_service"), "TBD")
+    tag_service = vision_service if vision_service != "TBD" else \
+        _fallback_tag_service(line_no, type_code, equipment_no)
+
     return InstrumentRow(
         tag_number=tag,
         instrument_type_description=_norm(raw.get("instrument_type_description"), type_desc_default),
-        tag_service=_norm(raw.get("tag_service"), "TBD"),
-        line_number=_norm(raw.get("line_number"), "NA"),
-        equipment_no=_norm(raw.get("equipment_number"), "NA"),
+        tag_service=tag_service,
+        line_number=line_no,
+        equipment_no=equipment_no,
         vlv_fail="NA",
         power_supply=_norm(raw.get("power_supply"), power_default),
         signal_voltage_level=_norm(raw.get("signal_voltage_level"), signal_default),
         location=_norm(raw.get("location"), "FIELD" if power_default != "TBD" else "TBD"),
-        pid_no=pid_no,
+        # Per-page pid_no from raw dict wins over the function-level fallback
+        pid_no=_norm(raw.get("pid_no"), pid_no),
     )
 
 

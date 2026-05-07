@@ -322,13 +322,14 @@ def _full_page_path_for(tile: dict) -> Optional[str]:
     return str(candidate) if candidate.exists() else None
 
 
-def extract_equipment_context(full_page_image: str, model: str = DEFAULT_MODEL) -> list:
+def extract_equipment_context(full_page_image: str, model: str = DEFAULT_MODEL) -> dict:
     """
-    Pre-pass: ask Vision for {equipment_tag, equipment_name} list from a full-page render.
-    Used to feed TAG SERVICE construction in the per-tile instrument pass.
+    Pre-pass: ask Vision for the page's contractor doc number AND the equipment
+    list. Returns {"pid_no": str, "equipment": list}. Used to feed TAG SERVICE
+    construction and per-page P&ID stamping in the instrument pass.
     """
     if not full_page_image or not Path(full_page_image).exists():
-        return []
+        return {"pid_no": "", "equipment": []}
     client = get_client()
     try:
         img_b64 = image_to_base64(full_page_image)
@@ -341,23 +342,55 @@ def extract_equipment_context(full_page_image: str, model: str = DEFAULT_MODEL) 
                     "role": "user",
                     "content": [
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_b64}"}},
-                        {"type": "text", "text": "Extract the equipment list from this P&ID drawing."},
+                        {"type": "text", "text": "Read this P&ID page and return the JSON object as specified."},
                     ],
                 },
             ],
         )
         raw_text = response.choices[0].message.content or ""
-        items = extract_json_array(raw_text)
-        cleaned = []
-        for item in items:
+        # The prompt asks for a single JSON object, but be tolerant if it
+        # returns a list-wrapped or markdown-fenced version.
+        obj = _extract_json_object(raw_text) or {}
+        pid_no = (obj.get("pid_no") or "").strip()
+        if pid_no.upper() == "UNKNOWN":
+            pid_no = ""
+        cleaned_eq = []
+        for item in obj.get("equipment", []) or []:
             tag = (item.get("equipment_tag") or "").strip()
             name = (item.get("equipment_name") or "").strip()
             if tag and name:
-                cleaned.append({"equipment_tag": tag, "equipment_name": name})
-        return cleaned
+                cleaned_eq.append({"equipment_tag": tag, "equipment_name": name})
+        return {"pid_no": pid_no, "equipment": cleaned_eq}
     except Exception as e:
         print(f"    [equipment-context] ERROR: {e}")
-        return []
+        return {"pid_no": "", "equipment": []}
+
+
+def _extract_json_object(text: str) -> Optional[dict]:
+    """Best-effort: parse the first {...} JSON object from an LLM response."""
+    if not text:
+        return None
+    # Strip markdown fences
+    s = text.strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s)
+        s = re.sub(r"\s*```$", "", s)
+    # Find the first balanced JSON object
+    start = s.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    for i in range(start, len(s)):
+        if s[i] == "{":
+            depth += 1
+        elif s[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(s[start:i + 1])
+                except Exception:
+                    return None
+    return None
 
 
 def _format_equipment_context(items: list) -> str:
@@ -379,9 +412,9 @@ def extract_instruments(tiles: list, drawing_description: str = "", model: str =
     desc = drawing_description or DRAWING_DESCRIPTION
     all_instruments = []
 
-    # Pre-pass: equipment context per page (cached so tiles on the same page reuse it)
-    print(f"\n  --- Instrument pre-pass: equipment context ({model}) ---")
-    equipment_context_by_page: dict = {}
+    # Pre-pass: per-page contractor pid_no + equipment context
+    print(f"\n  --- Instrument pre-pass: per-page pid_no + equipment ({model}) ---")
+    page_context: dict = {}  # page_idx → {"pid_no": str, "equipment": list}
     seen_pages = set()
     for tile in tiles:
         page = tile.get("page", 0)
@@ -389,18 +422,18 @@ def extract_instruments(tiles: list, drawing_description: str = "", model: str =
             continue
         seen_pages.add(page)
         full_path = _full_page_path_for(tile)
-        items = extract_equipment_context(full_path, model=model) if full_path else []
-        equipment_context_by_page[page] = items
-        print(f"  page {page}: {len(items)} equipment items extracted")
+        ctx = extract_equipment_context(full_path, model=model) if full_path else {"pid_no": "", "equipment": []}
+        page_context[page] = ctx
+        print(f"  page {page}: pid_no={ctx['pid_no'] or '?'}  equipment={len(ctx['equipment'])} items")
 
     print(f"\n  --- Instrument pass: bubble extraction ({model}) ---")
     for i, tile in enumerate(tiles):
         print(f"  [{i+1}/{len(tiles)}] Tile r{tile['row']}c{tile['col']}...")
         try:
             img_b64 = image_to_base64(tile["path"])
-            equipment_context = _format_equipment_context(
-                equipment_context_by_page.get(tile.get("page", 0), [])
-            )
+            page = tile.get("page", 0)
+            ctx = page_context.get(page, {"pid_no": "", "equipment": []})
+            equipment_context = _format_equipment_context(ctx["equipment"])
             user_text = INST_USER_TEMPLATE.format(
                 drawing_description=desc,
                 row=tile["row"],
@@ -426,6 +459,11 @@ def extract_instruments(tiles: list, drawing_description: str = "", model: str =
             for inst in instruments:
                 inst["tile_row"] = tile["row"]
                 inst["tile_col"] = tile["col"]
+                # Stamp the page-specific contractor pid_no on every detection
+                # so the parser uses the correct per-page value (deliverable expects
+                # 05011-CPP-...-0002 for page 1's instruments, ...-0003 for page 2, etc.).
+                if ctx["pid_no"]:
+                    inst["pid_no"] = ctx["pid_no"]
             print(f"    {len(instruments)} instruments found")
             for inst in instruments:
                 print(f"      {inst.get('tag_number', '?'):30s}  loc={inst.get('location', '?')}")

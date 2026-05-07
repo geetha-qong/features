@@ -13,30 +13,36 @@ the same way the legend does.
 # ── Pre-pass: equipment context ────────────────────────────────────────────────
 
 EQUIPMENT_CONTEXT_PROMPT = """\
-You are reading a P&ID drawing. Find every piece of MAJOR EQUIPMENT shown:
-  - Compressors, pumps, motors, drivers
-  - Vessels, drums, tanks, knockout pots
-  - Heat exchangers, coolers, heaters
-  - Filters, strainers (when shown as a labelled equipment block)
-  - Any item with a tag like 01-K-101, 01-C-101, 01-D-102, 01-XVTK-01502,
-    01-K-101-D001 (rundown tank), 01-KM-101 (motor), 01-K-101-GB01 (gear box)
+You are reading a single P&ID page. Extract two things:
 
-For each, return:
-  equipment_tag    — the full tag exactly as printed (e.g. "01-K-101")
-  equipment_name   — the descriptive name printed under or near the tag
-                     (e.g. "LP COMPRESSOR", "REACTOR EFFLUENT CONTACT COOLER",
-                      "AIR VOLUME TANK (ASV FIRST STAGE)")
+1. The CONTRACTOR/EMPLOYER drawing number for THIS page from the title block.
+   - Format: 05011-CPP-XX-YY-ZV-PID-NN-K-NNN-NNNN (e.g. 05011-CPP-01-00-4V-PID-01-K-101-0002)
+   - It is labeled "CONTRACTOR/EMPLOYER DOCUMENT No." or "Doc. No.:" or appears
+     in the title-block grid alongside the project/sheet number.
+   - DO NOT use the "VENDOR DOCUMENT No." — that one starts with letters like
+     "23E033..." and is irrelevant.
+   - The trailing 4 digits (e.g. 0002, 0003) are the SHEET number — they differ
+     per page, so each page produces a different value.
 
-Also include any rows from the "CUSTOMER CONNECTION LIST" or equipment data
-table on the drawing (these list every equipment with size/rating/duty).
+2. The MAJOR EQUIPMENT shown on this page:
+   - Compressors, pumps, motors, drivers
+   - Vessels, drums, tanks, knockout pots
+   - Heat exchangers, coolers, heaters
+   - Filters, strainers (when shown as a labelled equipment block)
+   - Examples of tags: 01-K-101, 01-C-101, 01-D-102, 01-XVTK-01502,
+     01-K-101-D001 (rundown tank), 01-KM-101 (motor), 01-K-101-GB01 (gear box)
 
-Output ONLY a JSON array of objects. No prose, no markdown.
-[
-  {"equipment_tag": "01-K-101", "equipment_name": "LP COMPRESSOR"},
-  {"equipment_tag": "01-C-101", "equipment_name": "REACTOR EFFLUENT CONTACT COOLER"},
-  ...
-]
-If nothing is identifiable, return [].\
+Output ONE JSON object with exactly these keys:
+{
+  "pid_no": "05011-CPP-01-00-4V-PID-01-K-101-0002",
+  "equipment": [
+    {"equipment_tag": "01-K-101", "equipment_name": "LP COMPRESSOR"},
+    {"equipment_tag": "01-C-101", "equipment_name": "REACTOR EFFLUENT CONTACT COOLER"}
+  ]
+}
+
+If you cannot read the contractor doc number, set "pid_no" to "UNKNOWN".
+If no equipment, set "equipment" to []. Output ONLY the JSON object.\
 """
 
 
@@ -112,21 +118,80 @@ tile and extract its data — NOT valves, NOT equipment.
     Keyphasor (KE, KT):
         power "24VDC", signal "mV"
 
-═══ TAG SERVICE (duty / role) ═══
-TAG SERVICE is the PHYSICAL DUTY of the instrument — what equipment, which
-side (suction / discharge / anti-surge / etc.), and what variable (PRESS /
-TEMP / FLOW / LEVEL / POSITION / VIBRATION / SPEED). Construct it as:
-  <EQUIPMENT_SHORT> <DUTY> <MEASURED_VAR>
-Examples (verified against the deliverable):
-  01-PT-01017 (PT on suction line of LP COMPRESSOR) → "LP COMP SUCTION PRESS"
-  01-PT-01040 (PT on discharge line of LP COMP)     → "LP COMP DISCHARGE PRESS"
-  01-FT-01018 (FT on LP discharge venturi)          → "LP COMP DISCHARGE FLOW"
-  01-XV-01052 (XV on LP anti-surge bypass)          → "LP COMP ANTI-SURGE VALVE"
-  01-ZT-01052 (ZT on the same XV)                   → "LP COMP ANTI-SURGE POSITION"
-  01-TT-01054 (RTD on cooler vessel)                → "REC COOLER TEMP"
-  01-LT-01501 (LT on rundown tank)                  → "RUNDOWN TANK LEVEL"
-Use the EQUIPMENT_CONTEXT block (provided in the user message) to pick the
-correct equipment short name. If you cannot determine it, return "TBD".
+═══ TAG SERVICE (duty / role) — REQUIRED, DO NOT default to TBD ═══
+TAG SERVICE is the PHYSICAL DUTY of the instrument. Construct it as:
+  <EQUIPMENT_SHORT> <SECTION> <MEASURED_VAR>
+
+Step-by-step derivation (apply ALL three):
+
+  STEP 1 — MEASURED_VAR comes from the type code (always known):
+    PT, PG, PI, PDT, PDIT, PDI, PIT, PIK, PIC  → "PRESS"  (PDT/PDIT/PDI → "DIFF PRESS")
+    TT, TIT, TI, TE, TG, TZE, TZI, TZT         → "TEMP"
+    TW                                          → "THERMOWELL"
+    FT, FIT, FI, FE                            → "FLOW"
+    FCV, FY                                     → "CONTROL VALVE"
+    LT, LIT, LI, LG, LS                         → "LEVEL"
+    ZT, ZI                                      → "POSITION"
+    ZE, VXE, VYE, VXT, VYT, VE                  → "VIBRATION"
+    ST, SE, SI, SIC                             → "SPEED"
+    KE, KT                                      → "KEY PHASOR"
+    XV, XYV, XZSO, XZSC                         → "VALVE"  (or "ANTI-SURGE VALVE" if on bypass)
+    XPG, XPSV                                   → "VOL TANK PRESS"
+    SG                                          → "SIGHT GLASS"
+    FO                                          → "RESTRICTION ORIFICE"
+
+  STEP 2 — EQUIPMENT_SHORT comes from the EQUIPMENT CONTEXT block. Look at the
+  pipe leg the bubble taps and identify which equipment it's connected to.
+  Use the SHORT FORM of the equipment name:
+    01-K-101 (LP COMPRESSOR)                     → "LP COMP"
+    01-K-101 (HP COMPRESSOR — stage 2)           → "HP COMP"
+    01-C-101 (REACTOR EFFLUENT CONTACT COOLER)   → "REC COOLER"
+    01-C-102 (INTERSTAGE CONTACT COOLER)         → "INTERSTAGE COOLER"
+    01-D-102 (DISCHARGE DRUM)                    → "DISCHARGE DRUM"
+    01-XVTK-01502 (ASV VOL TANK FIRST STAGE)     → "LP COMP VOLUME TANK"
+    01-XVTK-01503 (ASV VOL TANK SECOND STAGE)    → "HP COMP VOLUME TANK"
+    01-K-101-D001 (RUNDOWN TANK)                 → "RUNDOWN TANK"
+    01-KM-101 (MOTOR)                            → "MOTOR"
+    01-K-101-GB01 (GEAR BOX)                     → "GEAR BOX"
+  If a bubble has multiple plausible equipment, pick the one the pipe most
+  directly connects to. Drop the area code (e.g. "LP COMP" not "01-LP COMP").
+
+  STEP 3 — SECTION describes WHERE on the equipment:
+    Suction header / inlet line                  → "SUCTION"
+    Discharge header / outlet line               → "DISCHARGE"
+    Anti-surge bypass / recycle line             → "ANTI-SURGE"
+    Compressor recycle valve                     → "RECYCLE"
+    Interstage piping                             → "INTERSTAGE"
+    Cooler / shell side                           → (omit — equipment name is enough)
+    Volume tank                                   → "VOLUME TANK"
+    Lube oil header                               → "LUBE OIL HEADER"
+    Lube oil supply (DE / NDE — drive end / non-drive end)
+                                                  → "LUBE OIL SUPPLY (DE)" / "LUBE OIL SUPPLY (NDE)"
+    Lube oil return                               → "LUBE OIL RETURN (DE)" / "LUBE OIL RETURN (NDE)"
+    Seal gas / dry gas seal                       → "DRY GAS SEAL" / "SEAL GAS"
+    Balance line                                  → "BALANCE LINE"
+    Bearing / journal / thrust                    → "JNL BRG" / "THR BRG" (for TZE/VXE on motor bearings)
+    Rundown                                       → "RUNDOWN"
+    Drain                                         → "DRAIN"
+
+Verified examples (these are EXACT outputs from the deliverable; match this style):
+  01-PT-01017 on PR-01-011003 suction header   → "LP COMP SUCTION PRESS"
+  01-PG-01018 on same suction header (LGB)     → "LP COMP SUCTION PRESS"
+  01-PDT-01038 across suction strainer         → "LP COMP SUCTION DIFF PRESS"
+  01-TT-01054 on cooler                         → "REC COOLER TEMP"
+  01-PT-01040 on PR-01-011904 discharge        → "LP COMP DISCHARGE PRESS"
+  01-FE-01018 on discharge venturi              → "LP COMP DISCHARGE FLOW"
+  01-FT-01018 same venturi DP                   → "LP COMP DISCHARGE FLOW"
+  01-XV-01052 on anti-surge bypass              → "LP COMP ANTI-SURGE VALVE"
+  01-ZT-01052 positioner on the XV              → "LP COMP ANTI-SURGE POSITION"
+  01-XPG-01052 vol tank pressure                → "LP COMP VOLUME TANK PRESS"
+  01-LT-01501 rundown tank level                → "RUNDOWN TANK LEVEL"
+  01-PT-01501 lube oil header                   → "LUBE OIL HEADER PRESS"
+  01-TZE-01510A LP comp thrust bearing temp    → "LP COMP THR BRG TEMP (ACT)-A"
+  01-VXE-01501 LP comp radial vibe X (NDE)     → "LP COMP RADIAL VIBRATION (NDE)-X"
+
+ONLY return "TBD" if the bubble has no visible connection and no equipment
+context whatsoever. Default behaviour is to fill it with your best inference.
 
 ═══ FOR EACH INSTRUMENT ═══
 Return a JSON object with these fields:
