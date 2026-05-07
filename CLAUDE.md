@@ -408,6 +408,9 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 - ONNX (45MB) auto-exported by `train_gpu.py` → `models/best.onnx` on Windows; worker PID 11048
 - **ALL training must run on Windows GPU** — never on MacBook (user directive)
 - To retrain: run `scripts/export_and_merge.py` on GCP → scp tar.gz to Windows → run `train_gpu.py`
+- **Class gaps (v1-7)**: 9 of 22 classes have ZERO training instances — actuator_motor(0), actuator_pneu(1), actuator_sol(2), valve_cv(6), valve_gen(8), inst_field-R(15), valve_ncbv(19), valve_relief_safety(20), valve_pnuectrl(21). Model cannot detect these. Fix: annotate them in LS before next training run.
+- Verify class counts before training: `awk '{print $1}' datasets/pid_valves/labels/train/*.txt | sort -n | uniq -c`
+- **Domain shift**: v1-7 trained on MUK oil/gas P&IDs only. Projects using different drawing standards (e.g. WTP water treatment) will have lower recall — need those project's tiles in training data.
 
 ### Docker Trainer (for reference / CI)
 ```bash
@@ -440,6 +443,38 @@ docker compose run --rm trainer python3 train.py
 - Actuator linked to nearest valve within **150px**
 - OCR may miss or misread tags — tune radius in `_associate_text()` in `detector.py` if recall drops
 - `valve_ck` and `valve_gl` YOLO detections unreliable (mAP50 <0.05) — OCR text is the fallback
+
+## Auto-Annotation (scripts/auto_annotate_ls.py)
+
+Batch-posts YOLO pre-annotations to all unannotated LS tasks. Run on GCP:
+```bash
+# dry-run first to see counts
+sudo docker compose exec -T web python3 scripts/auto_annotate_ls.py --dry-run
+# annotate all projects
+sudo docker compose exec -T web python3 scripts/auto_annotate_ls.py
+# single project, overwrite existing predictions
+sudo docker compose exec -T web python3 scripts/auto_annotate_ls.py --project 25 --force
+```
+- **Install onnxruntime first** (not in web container by default): `sudo docker compose exec -T web pip install onnxruntime`
+- **After retraining**: copy new `best.onnx` to GCP at `/app/qong_poc/models/best.onnx`, then re-run
+- `CONF_THRESH=0.15` (low by design — better to have false positives for annotators to remove than misses)
+- `_LS_LABEL_NAME` dict in the script maps canonical class names to LS label config names (e.g. `actuator_pneu` → `actuator_pneumatic`)
+- **LS bulk task API caveat**: `/api/tasks/?project=X` bulk response shows `ann_count: 0` even for annotated tasks — always use per-task `/api/tasks/{id}/` to check actual annotations
+- Tiles with 0 YOLO detections (background/margin tiles) are silently skipped — not errors
+
+## LS Projects — Annotation Status
+
+`EXPORT_PROJECTS = [1, 3, 4, 5, 6, 11, 12, 13, 14]` in `scripts/export_and_merge.py`
+
+| LS Projects | Drawing Source | Valves | Instruments | Notes |
+|-------------|---------------|--------|-------------|-------|
+| 1, 3, 4, 5, 6 | MUK oil/gas P&IDs | ✅ | ✅ | Full annotations, in v1-7 training |
+| 11–14 | UNKNOWN-09 to UNKNOWN-13 | ✅ | ❌ | Valve-only; need DCS/PLC/interlock/inst_field annotations |
+| 25 | WS-25-WTP-01 (water treatment) | partial | ❌ | Different drawing standard; v1-7 recall is low here |
+
+- Projects 11-14 need instrument annotation (DCS, PLC, interlock, inst_field) before next training run
+- Project 25 (WTP) requires annotating from scratch — add to EXPORT_PROJECTS only after annotating
+- After completing annotations: re-run `export_and_merge.py`, then retrain on Windows GPU
 
 ## Label Studio Sync (merged to main)
 
@@ -589,6 +624,18 @@ gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="sshpass -
 - File copy: SCP to GCP VM first (`gcloud compute scp`), then `sshpass scp` to Windows
 - For Python scripts: SCP the .py file, then run `"C:\Program Files\Python311\python.exe" C:\path\to\script.py`
 - Inline Python `-c` with complex strings fails due to nested quoting — always write to a file first
+
+**CRITICAL — binary file transfer (ONNX models)**: `type C:\file | ssh ...` corrupts binary files via CRLF conversion. Symptom: ONNX runs but ALL detections collapse to one dominant class (e.g. every detection shows `valve_bf` at 0.26-0.41 conf). Use base64 encode/decode instead:
+```bash
+# On GCP VM (after sshpass retrieves base64 from Windows):
+gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="
+  sshpass -p '123456' ssh -o StrictHostKeyChecking=no qongsystems@100.91.199.103 \
+  '\"C:\\Program Files\\Python311\\python.exe\" -c \
+  \"import base64; data=open(r\\\"C:\\\\Users\\\\qongsystems\\\\qong-poc-gpu\\\\models\\\\best.onnx\\\",\\\"rb\\\").read(); print(base64.b64encode(data).decode())\"' \
+  | python3 -c \"import sys,base64; open('/tmp/best.onnx','wb').write(base64.b64decode(sys.stdin.read().strip()))\"
+"
+```
+- Verify size after copy: `ls -la /tmp/best.onnx` must match `dir C:\path\best.onnx` byte-for-byte
 
 **Security design**:
 - Windows box has ONLY `REDIS_URL` — no MinIO/DB/GCS credentials
