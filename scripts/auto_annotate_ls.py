@@ -220,18 +220,34 @@ def post_prediction(task_id: int, detections: List[Dict]) -> bool:
 
 
 def download_image(url: str, dest: str) -> bool:
-    """Download an image from URL (using LS token auth) to dest path."""
+    """Download an image from URL to dest path.
+
+    For tile images served by our webapp (https://dev.qongsystems.com/jobs/.../tiles/...),
+    rewrites the URL to use the Docker-internal address http://web:8000 so the
+    download works from inside the container without going through nginx/TLS.
+    """
     try:
-        headers = {"Authorization": f"Token {LS_API_KEY}"}
-        # If URL is relative (e.g. /data/...) prepend LS_URL
+        # Rewrite public webapp URL to Docker-internal for faster/reliable access
+        fetch_url = url
         if url.startswith("/"):
-            url = f"{LS_URL}{url}"
-        r = requests.get(url, headers=headers, timeout=30)
+            fetch_url = f"{LS_URL}{url}"
+        elif "dev.qongsystems.com" in url or "localhost" in url:
+            import re as _re
+            fetch_url = _re.sub(r"https?://[^/]+", "http://web:8000", url)
+
+        r = requests.get(fetch_url, timeout=30)
         if r.status_code == 200:
             with open(dest, "wb") as f:
                 f.write(r.content)
             return True
-        print(f"  Image download failed ({r.status_code}): {url}")
+        # Fallback: try original URL
+        if fetch_url != url:
+            r2 = requests.get(url, timeout=30)
+            if r2.status_code == 200:
+                with open(dest, "wb") as f:
+                    f.write(r2.content)
+                return True
+        print(f"  Image download failed ({r.status_code}): {fetch_url}")
     except Exception as e:
         print(f"  Image download error: {e}")
     return False
