@@ -26,6 +26,32 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 
+def run_pipeline_for_job_rq(
+    job_id: int,
+    pdf_path: str,
+    pid_no_override: str = "",
+    include_control_valves: bool = True,
+    original_filename: str = "",
+) -> None:
+    """
+    RQ-callable entrypoint: creates its own DB session and delegates to
+    run_pipeline_for_job. Used by webapp.queue cpu_q.enqueue(...).
+    """
+    from webapp.database import SessionLocal
+    db = SessionLocal()
+    try:
+        run_pipeline_for_job(
+            job_id=job_id,
+            pdf_path=pdf_path,
+            pid_no_override=pid_no_override,
+            db=db,
+            include_control_valves=include_control_valves,
+            original_filename=original_filename,
+        )
+    finally:
+        db.close()
+
+
 def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: Session, include_control_valves: bool = True, original_filename: str = "") -> None:
     """
     Called in a background thread. Runs the pipeline and updates the DB.

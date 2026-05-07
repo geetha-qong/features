@@ -5,7 +5,6 @@ Auth: Bearer qk_... (API key) OR cookie JWT — both accepted on every endpoint.
 import json
 import os
 import shutil
-import threading
 import uuid
 from datetime import datetime
 
@@ -21,7 +20,8 @@ from webapp import models
 from webapp.auth import get_user_from_api_key, get_current_user
 from webapp.config import JOB_OUTPUT_DIR, get_job_dir, get_user_upload_dir
 from webapp.database import get_db
-from webapp.pipeline_runner import run_pipeline_for_job
+from webapp.queue import get_cpu_queue
+from webapp.routers.jobs import RQ_JOB_TIMEOUT_SECONDS
 
 router = APIRouter(prefix="/api/v1", tags=["api_v1"])
 
@@ -48,24 +48,6 @@ async def _get_api_user(
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-
-def _run_in_thread(
-    job_id: int,
-    pdf_path: str,
-    pid_no_override: str,
-    include_control_valves: bool,
-    original_filename: str,
-) -> None:
-    from webapp.database import SessionLocal
-    db = SessionLocal()
-    try:
-        run_pipeline_for_job(
-            job_id, pdf_path, pid_no_override, db,
-            include_control_valves, original_filename=original_filename,
-        )
-    finally:
-        db.close()
-
 
 def _credits_consumed(db: Session, job_id: int) -> int:
     """Sum of negative credit deltas recorded for this job."""
@@ -142,18 +124,23 @@ async def api_create_job(
         current_user, page_count, reason="job_consumed", db=db, job_id=job.id
     )
 
-    # Copy PDF to per-job directory and start pipeline thread
+    # Copy PDF to per-job directory and enqueue pipeline on cpu-worker
     job_dir = JOB_OUTPUT_DIR / str(current_user.id) / str(job.id)
     job_dir.mkdir(parents=True, exist_ok=True)
     job_pdf = str(job_dir / "input.pdf")
     shutil.copy2(str(dest), job_pdf)
 
-    t = threading.Thread(
-        target=_run_in_thread,
-        args=(job.id, job_pdf, "", True, file.filename),
-        daemon=True,
+    get_cpu_queue().enqueue(
+        "webapp.pipeline_runner.run_pipeline_for_job_rq",
+        kwargs={
+            "job_id": job.id,
+            "pdf_path": job_pdf,
+            "pid_no_override": "",
+            "include_control_valves": True,
+            "original_filename": file.filename,
+        },
+        job_timeout=RQ_JOB_TIMEOUT_SECONDS,
     )
-    t.start()
 
     base = str(request.base_url).rstrip("/")
     return JSONResponse(

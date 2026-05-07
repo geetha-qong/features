@@ -70,6 +70,15 @@
 <div id="processing-msg" class="alert alert-info">
   <div class="spinner-border spinner-border-sm me-2" role="status"></div>
   Extraction in progress… this page will refresh automatically.
+  <span id="elapsed-hint" class="ms-2 text-muted small"></span>
+</div>
+<div id="stale-msg" class="alert alert-warning" style="display:none">
+  <strong>This job looks stuck.</strong>
+  It's been processing longer than expected. The worker may have crashed.
+  <form method="post" action="/jobs/{{ job.id }}/rerun" class="d-inline ms-2">
+    <input type="hidden" name="include_control_valves" value="{{ 'on' if job.include_control_valves else 'off' }}">
+    <button type="submit" class="btn btn-sm btn-warning">Re-run</button>
+  </form>
 </div>
 {% endif %}
 
@@ -199,6 +208,16 @@
       if (badge) {
         badge.textContent = data.status;
         badge.className = `badge badge-${data.status} fs-6`;
+      }
+      const hint = document.getElementById('elapsed-hint');
+      if (hint && data.elapsed_minutes != null) {
+        hint.textContent = `(${data.elapsed_minutes} min elapsed)`;
+      }
+      const staleMsg = document.getElementById('stale-msg');
+      const procMsg = document.getElementById('processing-msg');
+      if (data.is_stale && staleMsg) {
+        staleMsg.style.display = 'block';
+        if (procMsg) procMsg.style.display = 'none';
       }
       if (data.status === 'done' || data.status === 'failed') {
         clearInterval(interval);

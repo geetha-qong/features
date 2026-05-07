@@ -1,4 +1,5 @@
 """FastAPI application entry point."""
+from datetime import datetime, timedelta
 from pathlib import Path
 import time
 from fastapi import FastAPI, Request
@@ -16,22 +17,42 @@ from webapp.config import JOB_OUTPUT_DIR, get_job_dir
 Base.metadata.create_all(bind=engine)
 run_migrations()
 
+# Stuck-job cutoff: anything in 'processing' for longer than this is reaped on
+# startup. The largest jobs we've measured (12-page Ebara P&ID, 108 tiles) take
+# ~30 min — 90 minutes leaves headroom for a slower model or retry without
+# false-positives.
+STALE_JOB_CUTOFF_MINUTES = 90
+
 
 def _reset_stale_jobs() -> None:
+    """Mark jobs that were 'processing' for too long as failed.
+
+    With RQ, in-flight jobs survive web restarts (the work is on cpu-worker).
+    Only reap jobs older than the cutoff so we don't kill recently-restarted
+    work that's still legitimately running.
+    """
     from webapp import models
     db = SessionLocal()
     try:
+        cutoff = datetime.utcnow() - timedelta(minutes=STALE_JOB_CUTOFF_MINUTES)
         stale = (
             db.query(models.Job)
-            .filter(models.Job.status == "processing")
+            .filter(
+                models.Job.status == "processing",
+                models.Job.created_at < cutoff,
+            )
             .all()
         )
         for job in stale:
             job.status = "failed"
-            job.error_msg = "Job was interrupted by a server restart. Please re-run."
+            job.error_msg = (
+                f"Job exceeded {STALE_JOB_CUTOFF_MINUTES}-minute timeout — "
+                "the worker either crashed or got stuck. Please re-run."
+            )
+            job.completed_at = datetime.utcnow()
         if stale:
             db.commit()
-            print(f"[startup] Reset {len(stale)} stale job(s) to 'failed': {[j.id for j in stale]}")
+            print(f"[startup] Reaped {len(stale)} stale job(s): {[j.id for j in stale]}")
     finally:
         db.close()
 

@@ -1,7 +1,7 @@
 """Job routes: upload, detail, status poll, download."""
 import shutil
-import threading
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from typing import List
@@ -15,9 +15,16 @@ from webapp.auth import get_current_user
 from webapp.config import JOB_OUTPUT_DIR, UPLOAD_DIR, get_job_dir, get_user_upload_dir
 from webapp.database import SessionLocal, get_db
 from webapp.jinja import templates
-from webapp.pipeline_runner import run_pipeline_for_job
+from webapp.queue import get_cpu_queue
 
 router = APIRouter()
+
+# Jobs that have been "processing" longer than this are flagged as stuck in the
+# UI. The startup reaper marks anything older than 90 minutes as failed.
+STALE_HINT_MINUTES = 60
+
+# RQ job timeout — generous to fit a 12-page P&ID (~30 min) plus headroom.
+RQ_JOB_TIMEOUT_SECONDS = 60 * 90
 
 
 def _can_access_job(job, user) -> bool:
@@ -25,13 +32,20 @@ def _can_access_job(job, user) -> bool:
     return job.user_id == user.id or user.role in ("super_admin", "annotator")
 
 
-def _run_in_thread(job_id: int, pdf_path: str, pid_no_override: str, include_control_valves: bool = True, original_filename: str = ""):
-    """Run pipeline in a separate thread with its own DB session."""
-    db = SessionLocal()
-    try:
-        run_pipeline_for_job(job_id, pdf_path, pid_no_override, db, include_control_valves, original_filename=original_filename)
-    finally:
-        db.close()
+def _enqueue_pipeline(job_id: int, pdf_path: str, pid_no_override: str,
+                      include_control_valves: bool, original_filename: str) -> None:
+    """Push pipeline work onto the cpu RQ queue. Runs on cpu-worker container."""
+    get_cpu_queue().enqueue(
+        "webapp.pipeline_runner.run_pipeline_for_job_rq",
+        kwargs={
+            "job_id": job_id,
+            "pdf_path": pdf_path,
+            "pid_no_override": pid_no_override,
+            "include_control_valves": include_control_valves,
+            "original_filename": original_filename,
+        },
+        job_timeout=RQ_JOB_TIMEOUT_SECONDS,
+    )
 
 
 @router.post("/upload")
@@ -76,13 +90,13 @@ async def upload_pdf(
         job_pdf = str(job_dir / "input.pdf")
         shutil.copy2(str(dest), job_pdf)
 
-        t = threading.Thread(
-            target=_run_in_thread,
-            args=(job.id, job_pdf, pid_no_override, include_cv),
-            kwargs={"original_filename": file.filename},
-            daemon=True,
+        _enqueue_pipeline(
+            job_id=job.id,
+            pdf_path=job_pdf,
+            pid_no_override=pid_no_override,
+            include_control_valves=include_cv,
+            original_filename=file.filename,
         )
-        t.start()
         last_job_id = job.id
 
     # Single upload → go to job detail; multi → go to dashboard
@@ -134,7 +148,25 @@ async def job_status(
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job or not _can_access_job(job, current_user):
         raise HTTPException(status_code=404, detail="Job not found")
-    return JSONResponse({"status": job.status, "valve_count": job.valve_count, "error_msg": job.error_msg})
+
+    is_stale = False
+    elapsed_minutes = None
+    if job.status == "processing" and job.created_at:
+        created = job.created_at
+        if created.tzinfo is None:
+            # Stored as naive UTC by SQLAlchemy default — treat accordingly
+            created = created.replace(tzinfo=timezone.utc)
+        elapsed = datetime.now(timezone.utc) - created
+        elapsed_minutes = int(elapsed.total_seconds() // 60)
+        is_stale = elapsed_minutes >= STALE_HINT_MINUTES
+
+    return JSONResponse({
+        "status": job.status,
+        "valve_count": job.valve_count,
+        "error_msg": job.error_msg,
+        "is_stale": is_stale,
+        "elapsed_minutes": elapsed_minutes,
+    })
 
 
 @router.get("/jobs/{job_id}/pdf")
@@ -271,12 +303,12 @@ async def rerun_job(
     job.include_control_valves = (include_control_valves == "on")
     db.commit()
 
-    t = threading.Thread(
-        target=_run_in_thread,
-        args=(job.id, job_pdf, job.pid_no, job.include_control_valves),
-        kwargs={"original_filename": job.original_filename},
-        daemon=True,
+    _enqueue_pipeline(
+        job_id=job.id,
+        pdf_path=job_pdf,
+        pid_no_override=job.pid_no,
+        include_control_valves=job.include_control_valves,
+        original_filename=job.original_filename,
     )
-    t.start()
 
     return RedirectResponse(url=f"/jobs/{job_id}", status_code=303)
