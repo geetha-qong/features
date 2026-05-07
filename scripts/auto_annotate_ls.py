@@ -309,6 +309,9 @@ def process_project(project: dict, dry_run: bool, force: bool) -> tuple:
                 continue
 
             dets = run_yolo(tmp_path)
+            if not dets:
+                skipped += 1
+                continue
             if post_prediction(task_id, dets):
                 print(f"  task {task_id}: {len(dets)} detections → posted")
                 annotated += 1
