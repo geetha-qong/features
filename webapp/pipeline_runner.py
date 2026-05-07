@@ -26,6 +26,12 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 
+def _short_session():
+    """Open a transient session — used for short DB writes around the pipeline run."""
+    from webapp.database import SessionLocal
+    return SessionLocal()
+
+
 def run_pipeline_for_job_rq(
     job_id: int,
     pdf_path: str,
@@ -33,37 +39,21 @@ def run_pipeline_for_job_rq(
     include_control_valves: bool = True,
     original_filename: str = "",
 ) -> None:
+    """RQ-callable entrypoint. Manages its own short-lived DB sessions so the
+    long-running pipeline never holds a transaction open against the database.
     """
-    RQ-callable entrypoint: creates its own DB session and delegates to
-    run_pipeline_for_job. Used by webapp.queue cpu_q.enqueue(...).
-    """
-    from webapp.database import SessionLocal
-    db = SessionLocal()
+    # ── 1. Set status='processing', resolve job paths, then close the session ──
+    db = _short_session()
     try:
-        run_pipeline_for_job(
-            job_id=job_id,
-            pdf_path=pdf_path,
-            pid_no_override=pid_no_override,
-            db=db,
-            include_control_valves=include_control_valves,
-            original_filename=original_filename,
-        )
+        job = db.query(models.Job).filter(models.Job.id == job_id).first()
+        if not job:
+            return
+        job.status = "processing"
+        db.commit()
+        job_dir = get_job_dir(job)
     finally:
         db.close()
 
-
-def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: Session, include_control_valves: bool = True, original_filename: str = "") -> None:
-    """
-    Called in a background thread. Runs the pipeline and updates the DB.
-    """
-    job = db.query(models.Job).filter(models.Job.id == job_id).first()
-    if not job:
-        return
-
-    job.status = "processing"
-    db.commit()
-
-    job_dir = get_job_dir(job)
     job_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = job_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -71,75 +61,95 @@ def run_pipeline_for_job(job_id: int, pdf_path: str, pid_no_override: str, db: S
     output_inst_index = str(job_dir / "instrumentation_index.csv")
     output_inst_datasheets = str(job_dir / "instrument_datasheets.zip")
 
-    original_cwd = os.getcwd()
+    # ── 2. Run the pipeline with NO open DB session ──
     log_buffer = io.StringIO()
     start_time = time.time()
+    pipeline_error: str = ""
+    original_cwd = os.getcwd()
     try:
         with _pipeline_lock:
             os.chdir(str(job_dir))
             Path("tmp").mkdir(exist_ok=True)
-
             import importlib
             import pipeline as pl
             importlib.reload(pl)
-
             with redirect_stdout(log_buffer):
-                pl.run(pdf_path=pdf_path, output_path=output_csv, inst_output_path=output_inst_index, datasheet_zip_path=output_inst_datasheets, original_filename=original_filename)
-
-    except Exception as exc:
-        os.chdir(original_cwd)
-        job.status = "failed"
-        job.error_msg = traceback.format_exc()
-        job.processing_time = round(time.time() - start_time, 1)
-        job.processing_log = log_buffer.getvalue()
-        job.completed_at = datetime.utcnow()
-        db.commit()
-        return
+                pl.run(
+                    pdf_path=pdf_path,
+                    output_path=output_csv,
+                    inst_output_path=output_inst_index,
+                    datasheet_zip_path=output_inst_datasheets,
+                    original_filename=original_filename,
+                )
+    except Exception:
+        pipeline_error = traceback.format_exc()
     finally:
         os.chdir(original_cwd)
 
-    # If pid_no was not provided by user, read it from the CSV (auto-extracted by pipeline)
-    if not pid_no_override or pid_no_override == "UNKNOWN":
-        try:
-            with open(output_csv, newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                first_row = next(reader, None)
-                if first_row:
-                    extracted_pid = first_row.get("P&ID No", "").strip()
-                    if extracted_pid and extracted_pid != "UNKNOWN":
-                        pid_no_override = extracted_pid
-                        job.pid_no = extracted_pid
-                        db.commit()
-        except Exception:
-            pass  # non-fatal, keep UNKNOWN
+    elapsed = round(time.time() - start_time, 1)
+    log_text = log_buffer.getvalue()
 
-    # Read CSV → insert valve rows
+    # ── 3. Open a fresh session and write the final state ──
+    db = _short_session()
     try:
-        _ingest_csv(job_id, output_csv, pid_no_override, db, include_control_valves)
-    except Exception as exc:
-        job.status = "failed"
-        job.error_msg = f"CSV ingest error: {traceback.format_exc()}"
+        job = db.query(models.Job).filter(models.Job.id == job_id).first()
+        if not job:
+            return
+
+        if pipeline_error:
+            job.status = "failed"
+            job.error_msg = pipeline_error
+            job.processing_time = elapsed
+            job.processing_log = log_text
+            job.completed_at = datetime.utcnow()
+            db.commit()
+            return
+
+        # If pid_no wasn't provided, read it from the valve CSV
+        if not pid_no_override or pid_no_override == "UNKNOWN":
+            try:
+                with open(output_csv, newline="", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    first_row = next(reader, None)
+                    if first_row:
+                        extracted_pid = first_row.get("P&ID No", "").strip()
+                        if extracted_pid and extracted_pid != "UNKNOWN":
+                            pid_no_override = extracted_pid
+                            job.pid_no = extracted_pid
+            except Exception:
+                pass  # non-fatal, keep whatever the row had
+
+        # Insert valve rows from the CSV
+        try:
+            _ingest_csv(job_id, output_csv, pid_no_override, db, include_control_valves)
+        except Exception:
+            job.status = "failed"
+            job.error_msg = f"CSV ingest error: {traceback.format_exc()}"
+            job.processing_time = elapsed
+            job.processing_log = log_text
+            job.completed_at = datetime.utcnow()
+            db.commit()
+            return
+
+        job.status = "done"
+        job.output_csv_path = output_csv
+        if Path(output_inst_index).exists():
+            job.output_inst_index_path = output_inst_index
+        if Path(output_inst_datasheets).exists():
+            job.output_inst_datasheet_path = output_inst_datasheets
         job.completed_at = datetime.utcnow()
+        job.processing_time = elapsed
+        job.processing_log = log_text
+        job.valve_count = (
+            db.query(models.ValveRow).filter(models.ValveRow.job_id == job_id).count()
+        )
         db.commit()
-        return
 
-    job.status = "done"
-    job.output_csv_path = output_csv
-    if Path(output_inst_index).exists():
-        job.output_inst_index_path = output_inst_index
-    if Path(output_inst_datasheets).exists():
-        job.output_inst_datasheet_path = output_inst_datasheets
-    job.completed_at = datetime.utcnow()
-    job.processing_time = round(time.time() - start_time, 1)
-    job.processing_log = log_buffer.getvalue()
-    job.valve_count = db.query(models.ValveRow).filter(models.ValveRow.job_id == job_id).count()
-    db.commit()
-
-    # Auto-sync tiles to Label Studio if configured
-    _auto_sync_to_label_studio(job, job_dir, db)
-
-    # Dispatch YOLO inference to Windows GPU worker if configured
-    _dispatch_gpu_job(job, job_dir)
+        # Side effects (LS sync, GPU dispatch) use the same session
+        _auto_sync_to_label_studio(job, job_dir, db)
+        _dispatch_gpu_job(job, job_dir)
+    finally:
+        db.close()
 
 
 def _auto_sync_to_label_studio(job, job_dir: Path, db) -> None:

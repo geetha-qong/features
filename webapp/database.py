@@ -12,8 +12,31 @@ class Base(DeclarativeBase):
     pass
 
 
+def _column_exists(conn, table: str, column: str) -> bool:
+    """Check if a column exists. Avoids acquiring DDL locks for ALTERs we'd skip anyway."""
+    is_sqlite = DATABASE_URL.startswith("sqlite")
+    if is_sqlite:
+        rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+        return any(r[1] == column for r in rows)
+    # Postgres
+    row = conn.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :t AND column_name = :c"
+        ),
+        {"t": table, "c": column},
+    ).first()
+    return row is not None
+
+
 def run_migrations():
-    """Add new columns to existing tables if they don't exist yet."""
+    """Add new columns to existing tables if they don't exist yet.
+
+    Important: probe column existence first so we don't issue ALTER TABLE for
+    columns that already exist. ALTER acquires an ACCESS EXCLUSIVE lock on the
+    table even when it ultimately errors with 'column already exists', which
+    can deadlock against long-running cpu-worker transactions.
+    """
     new_columns = [
         ("jobs", "processing_time", "REAL"),
         ("jobs", "processing_log", "TEXT"),
@@ -30,15 +53,15 @@ def run_migrations():
         ("users", "organization", "TEXT"),
         ("jobs", "original_filename", "TEXT"),
     ]
-    # Use a fresh connection per column — on Postgres a failed ALTER leaves the
-    # connection in aborted state, silently breaking every subsequent ALTER.
     for table, column, col_type in new_columns:
         try:
             with engine.connect() as conn:
+                if _column_exists(conn, table, column):
+                    continue
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
                 conn.commit()
         except Exception:
-            pass  # column already exists
+            pass  # racy — another worker added it concurrently
 
     # Create new SaaS tables via SQLAlchemy ORM (dialect-agnostic — works on SQLite + Postgres)
     from webapp import models  # noqa: F401 — registers tables on Base.metadata
