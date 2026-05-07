@@ -208,6 +208,7 @@ services:
       - webapp_db:/app/data
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
       - DATABASE_URL=${DATABASE_URL:-sqlite:///data/webapp.db}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - STORAGE_ENDPOINT_URL=${STORAGE_ENDPOINT_URL:-http://minio:9000}
