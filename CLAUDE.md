@@ -394,11 +394,15 @@ docker compose run --rm trainer python3 train.py --export runs/detect/pid_valves
 
 **Rule: if you switch environment (Docker → host, CPU → MPS), always start fresh. Never carry a checkpoint across.**
 
-### Training Results (pid_valves_v1-5) — COMPLETED
-- Run: `runs/detect/pid_valves_v1-5/` — 50 epochs, mAP50 = **0.511** (target ≥0.5 ✅)
-- Strong classes: `valve_db` 0.944, `valve_bf` 0.845, `valve_bv` 0.634
-- Weak classes (too few training instances): `valve_ck` 0.001, `valve_gl` 0.034
-- ONNX exported to `models/best.onnx` (43 MB)
+### Training Results (pid_valves_v1-5) — SUPERSEDED
+- Run: `runs/detect/pid_valves_v1-5/` — 50 epochs, mAP50 = **0.511**
+- Training set: 36 images, 389 labels
+
+### Training Results (pid_valves_v1-6) — CURRENT BEST (2026-05-07)
+- Run: `runs/detect/pid_valves_v1-6/` — 50 epochs, mAP50 = **0.855** at epoch 30 (up from 0.511 ✅)
+- Training set: 44 images, 510 labels (added 9 tiles + 121 labels from MUK-61 drawing)
+- ONNX exported to `runs/detect/pid_valves_v1-6/weights/best.onnx` (45 MB) and deployed to Windows GPU worker
+- Key fix: corrected nc=13→10 in data.yaml (instrument class indices were corrupting training)
 - To retrain: `python3 train.py` (always start fresh from `yolov8s.pt`; ~17 min on M3 Pro)
 - To export: `python3 train.py --export runs/detect/<run_name>/weights/best.pt`
 
@@ -477,6 +481,12 @@ Some customer P&IDs use tags like `VB25`, `VB40 2090`, `VBPP40` — no `AreaCode
 - **`.env` permissions**: `chmod 600 /app/qong_poc/.env` — must stay 600; re-apply after any manual file copy
 - **After port binding changes in docker-compose.yml**: use `--force-recreate` — plain `up -d` won't rebind already-running containers
 - **MinIO bucket**: anonymous download removed — use `storage.presigned_url()` for download links; never run `mc anonymous set download` again
+- **Redis requires auth (2026-05-07)**: Redis has `--requirepass ${REDIS_PASSWORD}`; URL format: `redis://:${REDIS_PASSWORD}@redis:6379/0` (internal), `redis://:${REDIS_PASSWORD}@100.127.190.88:6379/0` (GPU Tailscale)
+- **`docker compose up -d` does NOT restart redis/minio** after docker-compose.yml changes — use `sudo docker compose up -d --force-recreate redis minio` explicitly when changing their config
+- **All credentials in .env — no compose defaults**: REDIS_PASSWORD, MINIO_ROOT_USER/PASSWORD, STORAGE_ACCESS_KEY/SECRET_KEY, POSTGRES_PASSWORD — none have fallback values in compose; missing any will fail on startup
+- **fail2ban active**: installed on GCP VM; monitors sshd; auto-bans after 5 failed attempts in 10 min. Check status: `sudo fail2ban-client status sshd`
+- **GCS buckets hardened**: uniform IAM + public access prevention on `qong-backups`; verify: `gcloud storage buckets describe gs://qong-backups` (use text format, not `--format=json` — JSON misleadingly shows None for some settings)
+- **Windows GPU worker Redis update**: to push env changes to Windows, write a `.ps1` to `/tmp/`, `gcloud compute scp` to GCP VM, then `sshpass scp` to Windows, then `sshpass ssh ... powershell`. Inline PowerShell in 3-hop bash→gcloud→sshpass chain fails due to quoting.
 
 ## Temporary Files
 
