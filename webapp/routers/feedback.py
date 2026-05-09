@@ -18,7 +18,7 @@ async def submit_feedback(
     db: Session = Depends(get_db),
 ):
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
-    if not job or job.user_id != current_user.id:
+    if not job or (job.user_id != current_user.id and current_user.role not in ("super_admin", "annotator")):
         raise HTTPException(status_code=404, detail="Job not found")
 
     fb = models.Feedback(job_id=job_id, user_id=current_user.id, notes=notes.strip())
