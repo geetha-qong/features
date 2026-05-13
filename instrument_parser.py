@@ -150,7 +150,9 @@ _INST_TAG_RE = re.compile(
     r"(?:(\d+(?:-\d+)*)-)?"   # optional unit prefix
     r"([A-Z]{2,5})"            # type code
     r"-"
-    r"(\d{3,6})"               # serial number (3-6 digits)
+    r"([\dX]{3,6})"            # serial: digits + optional literal X placeholders
+                               # (Vision is instructed to emit X for unreadable digits;
+                               #  we keep these rows so engineers can fill them in)
     r"([A-Z]{1,2})?"           # optional suffix (A, B, AA)
     r"$"
 )
@@ -343,9 +345,18 @@ def build_instrument_row(raw: dict, pid_no: str = "") -> Optional[InstrumentRow]
     equipment_no = _norm(raw.get("equipment_number"), "NA")
 
     # Vision-supplied tag_service first; fall back to fluid-hint heuristic.
+    # If Vision returned just a bare measured-variable like "FLOW" / "PRESS" / "TEMP"
+    # (no equipment context), treat it as if Vision failed and synthesize a richer
+    # service from line + equipment. We also cap at 30 chars to keep the column tidy.
     vision_service = _norm(raw.get("tag_service"), "TBD")
-    tag_service = vision_service if vision_service != "TBD" else \
-        _fallback_tag_service(line_no, type_code, equipment_no)
+    _bare_vars = {"FLOW", "PRESS", "TEMP", "LEVEL", "POSITION", "SPEED", "VIBRATION",
+                  "DIFF PRESS", "ANALYSER", "ANALYZER"}
+    if vision_service == "TBD" or vision_service.upper().strip() in _bare_vars:
+        tag_service = _fallback_tag_service(line_no, type_code, equipment_no)
+    else:
+        tag_service = vision_service
+    if len(tag_service) > 30:
+        tag_service = tag_service[:30].rstrip()
 
     return InstrumentRow(
         tag_number=tag,

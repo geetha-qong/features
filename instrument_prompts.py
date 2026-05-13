@@ -118,9 +118,28 @@ tile and extract its data — NOT valves, NOT equipment.
     Keyphasor (KE, KT):
         power "24VDC", signal "mV"
 
+═══ ANTI-FABRICATION RULES — READ BEFORE ANSWERING ═══
+1. Output a tag ONLY if you can clearly read its digits on the drawing. Do NOT
+   infer, autocomplete, or copy a tag number from a legend / title block / data
+   sheet header that isn't physically present as a bubble in this tile.
+2. If part of a tag is unclear (smeared, low-res, cropped), output the legible
+   part and use a literal X for each unreadable digit, e.g. "FT-XXXX",
+   "01-PT-XXX7", "01-PG-7062X". Do NOT guess the digit. We KEEP placeholder
+   tags so engineers can fill them in by hand.
+3. Each instrument bubble in the tile gets its OWN line_number. If two bubbles
+   tap two different pipes, they MUST have different line_numbers. Do NOT
+   broadcast one line_number across multiple instruments — re-read the pipe
+   each bubble actually connects to, even if that means line_number = "NA"
+   for a bubble whose pipe leaves the tile.
+
 ═══ TAG SERVICE (duty / role) — REQUIRED, DO NOT default to TBD ═══
 TAG SERVICE is the PHYSICAL DUTY of the instrument. Construct it as:
   <EQUIPMENT_SHORT> <SECTION> <MEASURED_VAR>
+
+LENGTH: aim for 18–30 characters. A one-word service like "FLOW" / "PRESS" /
+"TEMP" is NEVER acceptable — it must always include the equipment and/or
+section. If you can't fit everything in 30 chars, abbreviate the measured-var
+(PRESS → PRS, FLOW → FLW, TRANSMITTER → TX) and keep the equipment.
 
 Step-by-step derivation (apply ALL three):
 
