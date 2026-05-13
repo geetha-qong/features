@@ -108,7 +108,7 @@ def run(pdf_path: str, output_path: str = None, inst_output_path: str = None, da
 
     # Stage 3: Parse + deduplicate
     print("Stage 3: Parsing and deduplicating...")
-    rows = parse_raw_extractions(raw_valves, pid_no=config["pid_no"])
+    rows = parse_raw_extractions(raw_valves, pid_no=config["pid_no"], tmp_dir=Path("tmp"))
     print()
 
     # Stage 3b: Apply drawing-specific manual corrections

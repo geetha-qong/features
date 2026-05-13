@@ -7,8 +7,10 @@ Stage 3: Parse raw Claude extractions into structured CSV rows.
 - Maps actuator → Dynamic Code + 3 actuator columns
 """
 from __future__ import annotations
+import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 
@@ -24,6 +26,15 @@ TAG_PATTERN_1 = re.compile(
 # e.g. VB15-2011A, VF300-2057, AVF250-2016
 TAG_PATTERN_2 = re.compile(
     r"^(?P<actuator>[A-Z])?(?P<type>V[A-Z]{0,2})(?P<size>\d{2,4})-(?P<area>\d)(?P<serial>\d{3})(?P<series>[A-Z])?$",
+    re.IGNORECASE,
+)
+
+# Format 3: WTP / non-MUK — whitespace between size and area+serial (Format 2's dashed cousin).
+# Same semantic shape as Format 2: leading 1-digit area embedded in the serial group.
+# e.g. "VB15 7007" -> area=7, serial=007 ; "VB15 81631A" -> area=8, serial=1631, series=A.
+# Vision non-deterministically emits Format 2 (dash) or Format 3 (space/newline) for the same tag.
+TAG_PATTERN_3 = re.compile(
+    r"^(?P<actuator>[AMP])?(?P<type>V[A-Z]{0,2})(?P<size>\d{2,4})\s+(?P<area>\d)(?P<serial>\d{3,4})(?P<series>[A-Z])?$",
     re.IGNORECASE,
 )
 
@@ -112,13 +123,14 @@ class ValveRow:
 def parse_valve_tag(tag: str) -> Optional[dict]:
     """
     Parse a valve tag string into its components.
-    Tries Format 1 first (62-BF-151031), then Format 2 (VB15-2011A).
+    Tries Format 1 (62-BF-151031), then Format 2 (VB15-2011A), then Format 3 (VB15 7007).
     Returns dict with keys: area, type_code, serial, and optionally:
       size, series_code, actuator_from_tag, format
     """
     if not tag:
         return None
-    s = tag.strip().upper()
+    # Collapse any internal whitespace (Vision sometimes splits tags across newlines)
+    s = re.sub(r"\s+", " ", tag.strip().upper())
 
     # Format 1: 62-BF-151031
     m = TAG_PATTERN_1.search(s)
@@ -139,6 +151,22 @@ def parse_valve_tag(tag: str) -> Optional[dict]:
             "serial": m.group("serial"),
             "size": m.group("size"),
             "format": 2,
+        }
+        if m.group("series"):
+            result["series_code"] = m.group("series").upper()
+        if m.group("actuator"):
+            result["actuator_from_tag"] = m.group("actuator").upper()
+        return result
+
+    # Format 3: VB15 7007, VF125 8142, AVF125 81631A — space variant of Format 2
+    m = TAG_PATTERN_3.match(s)
+    if m:
+        result = {
+            "area": m.group("area"),
+            "type_code": m.group("type").upper(),
+            "serial": m.group("serial"),
+            "size": m.group("size"),
+            "format": 3,
         }
         if m.group("series"):
             result["series_code"] = m.group("series").upper()
@@ -323,16 +351,39 @@ def deduplicate(rows: list) -> list:
     return sorted(merged, key=lambda r: (r.area_code, r.serial_no))
 
 
-def parse_raw_extractions(raw_valves: list, pid_no: str = "") -> list:
-    rows, skipped = [], 0
+def parse_raw_extractions(
+    raw_valves: list,
+    pid_no: str = "",
+    tmp_dir: Optional[Path] = None,
+) -> list:
+    rows, skipped_raws = [], []
     for raw in raw_valves:
         row = build_valve_row(raw, pid_no=pid_no)
         if row:
             rows.append(row)
         else:
-            skipped += 1
+            skipped_raws.append({
+                "valve_tag": raw.get("valve_tag", ""),
+                "line_number": raw.get("line_number", ""),
+                "actuator": raw.get("actuator", ""),
+                "tile": raw.get("tile", ""),
+                "pid_no": pid_no,
+            })
 
+    skipped = len(skipped_raws)
     print(f"  Parsed {len(rows)} rows, skipped {skipped} unparseable")
+
+    # Log unparseable detections so we can mine them for new tag-format regexes.
+    # This file is the source for parser improvements over time — each run accumulates
+    # the patterns we still can't handle.
+    if tmp_dir is not None and skipped_raws:
+        tmp_dir = Path(tmp_dir)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        out = tmp_dir / "unparseable_valves.json"
+        out.write_text(json.dumps(skipped_raws, indent=2))
+        print(f"  → unparseable detections written to {out}")
+        print(f"    (mine this file to add new regex patterns to parser.py)")
+
     deduped = deduplicate(rows)
     complete = sum(1 for r in deduped if r.completeness() == 3)
     print(f"  After dedup: {len(deduped)} unique | {complete} fully complete (size+fluid+piping)")
