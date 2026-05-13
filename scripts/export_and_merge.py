@@ -25,7 +25,15 @@ import requests
 LS_URL = os.environ.get("LS_URL", "http://localhost:8080").rstrip("/")
 LS_API_KEY = os.environ.get("LS_API_KEY", "")
 
-EXPORT_PROJECTS = [1, 3, 4, 5, 6, 11, 12, 13, 14]  # fully annotated projects
+EXPORT_PROJECTS = [
+    1, 3, 4, 5, 6,                                  # MUK 1001-1005 (v1-7 baseline)
+    8,                                              # MUK 61-0-0218
+    10, 11, 12, 13, 14,                             # UNKNOWN-06, 09, 10, 12, 13
+    15, 16, 17, 18,                                 # UNKNOWN-16, 16-18, 17, 18
+    19, 20, 21, 22, 23, 24,                         # UNKNOWN-4, 5, 7, 8, Pg.17, Pg.5
+    25,                                             # WS-25-WTP-01 (new water-treatment domain)
+]
+# Excluded: 7 (empty in LS), 9 (duplicate of 4 — same drawing), 26 (still in progress)
 
 _HERE = Path(__file__).resolve().parent.parent
 DATASET_DIR = _HERE / "datasets" / "pid_valves"
