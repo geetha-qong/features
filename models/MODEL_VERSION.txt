@@ -1,0 +1,35 @@
+# Production YOLO model version registry
+#
+# This file pins which trained model the inference code (detector.py,
+# scripts/auto_annotate_ls.py, GPU worker) should load. On startup, those
+# entry points should refuse to run if the on-disk model's sha256 does not
+# match the entry for the version listed here.
+#
+# Download from GitHub Releases:
+#   https://github.com/Qong-Systems/qong_product/releases/tag/<version>
+#
+# Adding a new version: append a row below, do NOT edit existing rows.
+# Format:  <version>\t<filename>\t<sha256>
+
+current: v1-8
+
+versions:
+  v1-7:
+    notes: |
+      Trained 2026-05-07 on Windows GPU (RTX 2000 Ada).
+      99 images (44 MUK + 55 from LS 1,3,4,5,6), nc=22, 92 epochs.
+      mAP50 = 0.897.
+    files:
+      # hashes unknown — v1-7 was deployed before this registry existed.
+      best.onnx:
+
+  v1-8:
+    notes: |
+      Trained 2026-05-13 on Windows GPU (RTX 2000 Ada).
+      414 images from 22 LS projects (MUK 1001-1005, MUK 61-0-0218, 14 UNKNOWN
+      drawings, WS-25-WTP-01), 14934 annotated instances, nc=22, 100 epochs.
+      mAP50 = 0.881 at epoch 90 (val set = 9 MUK images — same as v1-7).
+      Adds water-treatment-plant + non-MUK drawing coverage v1-7 didn't have.
+    files:
+      best.pt:   d44a427c373ef534d53d6654b9a135996db3c739b4e36ed43e2171a6da000981
+      best.onnx: c59e811e5d0fd802dca545a7586698fb95e59224ae65e81e85fd0236fa341a5b
