@@ -1,4 +1,5 @@
 """Job routes: upload, detail, status poll, download."""
+import json
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -16,11 +17,13 @@ from webapp.config import JOB_OUTPUT_DIR, UPLOAD_DIR, get_job_dir, get_user_uplo
 from webapp.database import SessionLocal, get_db
 from webapp.jinja import templates
 from webapp.queue import get_cpu_queue
+from webapp.watchdog import STALE_HEARTBEAT_SECONDS
 
 router = APIRouter()
 
-# Jobs that have been "processing" longer than this are flagged as stuck in the
-# UI. The startup reaper marks anything older than 90 minutes as failed.
+# Legacy time-based stale hint (used only as a fallback when there's no
+# JobRun row, e.g. for pre-observability jobs). The heartbeat watchdog handles
+# new runs.
 STALE_HINT_MINUTES = 60
 
 # RQ job timeout — generous to fit a 12-page P&ID (~30 min) plus headroom.
@@ -127,6 +130,36 @@ async def job_detail(
         .order_by(models.Feedback.created_at.desc())
         .all()
     )
+    job_runs = (
+        db.query(models.JobRun)
+        .filter(models.JobRun.job_id == job_id)
+        .order_by(models.JobRun.attempt_num.desc())
+        .all()
+    )
+    # Decode stage_timings JSON for each run so the template doesn't need to
+    runs_view = []
+    for r in job_runs:
+        try:
+            timings = json.loads(r.stage_timings) if r.stage_timings else []
+        except Exception:
+            timings = []
+        duration = None
+        if r.started_at and r.ended_at:
+            duration = round((r.ended_at - r.started_at).total_seconds(), 1)
+        runs_view.append({
+            "id": r.id,
+            "attempt_num": r.attempt_num,
+            "rq_id": r.rq_id,
+            "status": r.status,
+            "current_stage": r.current_stage,
+            "started_at": r.started_at,
+            "ended_at": r.ended_at,
+            "duration_seconds": duration,
+            "last_heartbeat_at": r.last_heartbeat_at,
+            "error_msg": r.error_msg,
+            "killer": r.killer,
+            "stage_timings": timings,
+        })
     return templates.TemplateResponse(
         "job_detail.html",
         {
@@ -135,6 +168,7 @@ async def job_detail(
             "job": job,
             "valve_rows": valve_rows,
             "feedbacks": feedbacks,
+            "job_runs": runs_view,
         },
     )
 
@@ -151,14 +185,32 @@ async def job_status(
 
     is_stale = False
     elapsed_minutes = None
+    stale_seconds = None
+    current_stage = None
     if job.status == "processing" and job.created_at:
         created = job.created_at
         if created.tzinfo is None:
-            # Stored as naive UTC by SQLAlchemy default — treat accordingly
             created = created.replace(tzinfo=timezone.utc)
         elapsed = datetime.now(timezone.utc) - created
         elapsed_minutes = int(elapsed.total_seconds() // 60)
-        is_stale = elapsed_minutes >= STALE_HINT_MINUTES
+
+        # Prefer heartbeat-driven staleness when a JobRun row exists.
+        latest_run = (
+            db.query(models.JobRun)
+            .filter(models.JobRun.job_id == job_id)
+            .order_by(models.JobRun.attempt_num.desc())
+            .first()
+        )
+        if latest_run and latest_run.last_heartbeat_at:
+            current_stage = latest_run.current_stage
+            hb = latest_run.last_heartbeat_at
+            if hb.tzinfo is None:
+                hb = hb.replace(tzinfo=timezone.utc)
+            stale_seconds = int((datetime.now(timezone.utc) - hb).total_seconds())
+            is_stale = stale_seconds > STALE_HEARTBEAT_SECONDS
+        else:
+            # Pre-observability fallback: time-based.
+            is_stale = elapsed_minutes >= STALE_HINT_MINUTES
 
     return JSONResponse({
         "status": job.status,
@@ -166,6 +218,8 @@ async def job_status(
         "error_msg": job.error_msg,
         "is_stale": is_stale,
         "elapsed_minutes": elapsed_minutes,
+        "stale_seconds": stale_seconds,
+        "current_stage": current_stage,
     })
 
 
