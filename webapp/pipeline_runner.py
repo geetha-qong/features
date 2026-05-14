@@ -4,7 +4,9 @@ then stores results in the database.
 """
 import csv
 import io
+import json
 import os
+import re
 import sys
 import threading
 import time
@@ -20,6 +22,15 @@ from webapp.config import JOB_OUTPUT_DIR, get_job_dir
 
 _pipeline_lock = threading.Lock()
 
+# Heartbeat cadence — every N seconds the heartbeat thread refreshes
+# last_heartbeat_at + current_stage on the JobRun row. The watchdog
+# considers a run stale if no heartbeat for > 3× this interval.
+HEARTBEAT_INTERVAL_SECONDS = 30
+
+# Matches the "Stage N: …" headers that pipeline.run() prints. We grep the
+# captured stdout for the latest of these to populate JobRun.current_stage.
+_STAGE_LINE_RE = re.compile(r"^Stage\s+(\w+):\s*(.+?)(?:\.\.\.)?\s*$", re.MULTILINE)
+
 # Add project root to sys.path so pipeline imports work
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -30,6 +41,122 @@ def _short_session():
     """Open a transient session — used for short DB writes around the pipeline run."""
     from webapp.database import SessionLocal
     return SessionLocal()
+
+
+def _latest_stage(log_text: str) -> str:
+    """Return the most-recent 'Stage N: ...' line in the captured pipeline log."""
+    matches = _STAGE_LINE_RE.findall(log_text)
+    if not matches:
+        return ""
+    n, label = matches[-1]
+    return f"Stage {n}: {label.strip()}"
+
+
+def _create_job_run(job_id: int, rq_id: str) -> int:
+    """Create a JobRun row for this attempt and return its id."""
+    db = _short_session()
+    try:
+        prev = (
+            db.query(models.JobRun)
+            .filter(models.JobRun.job_id == job_id)
+            .order_by(models.JobRun.attempt_num.desc())
+            .first()
+        )
+        attempt_num = (prev.attempt_num + 1) if prev else 1
+        run = models.JobRun(
+            job_id=job_id,
+            attempt_num=attempt_num,
+            rq_id=rq_id or None,
+            started_at=datetime.utcnow(),
+            status="running",
+            last_heartbeat_at=datetime.utcnow(),
+            stage_timings=json.dumps([]),
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return run.id
+    finally:
+        db.close()
+
+
+def _finalize_job_run(run_id: int, status: str, error_msg: str = "", error_traceback: str = "") -> None:
+    """Write the terminal state of a JobRun in its own short-lived session."""
+    db = _short_session()
+    try:
+        run = db.query(models.JobRun).filter(models.JobRun.id == run_id).first()
+        if not run:
+            return
+        run.status = status
+        run.ended_at = datetime.utcnow()
+        if error_msg:
+            run.error_msg = error_msg
+        if error_traceback:
+            run.error_traceback = error_traceback
+        db.commit()
+    finally:
+        db.close()
+
+
+class _HeartbeatThread(threading.Thread):
+    """Background thread: every HEARTBEAT_INTERVAL_SECONDS, refreshes the
+    JobRun's last_heartbeat_at and current_stage from the captured stdout.
+    Also records stage-transition timings into JobRun.stage_timings (JSON).
+
+    Uses its own short-lived session per beat so it never holds a
+    transaction open across the pipeline run.
+    """
+
+    def __init__(self, run_id: int, log_buffer: io.StringIO):
+        super().__init__(daemon=True, name=f"jobrun-heartbeat-{run_id}")
+        self.run_id = run_id
+        self.log_buffer = log_buffer
+        self._stop_event = threading.Event()
+        self._current_stage: str = ""
+        self._stage_started_at: datetime = datetime.utcnow()
+        self._stage_timings: list = []
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def run(self) -> None:
+        # Emit one beat immediately so last_heartbeat_at is fresh from the start.
+        self._beat()
+        while not self._stop_event.wait(HEARTBEAT_INTERVAL_SECONDS):
+            self._beat()
+
+    def _beat(self) -> None:
+        now = datetime.utcnow()
+        try:
+            stage = _latest_stage(self.log_buffer.getvalue())
+        except Exception:
+            stage = self._current_stage
+        # Stage transition → close the previous stage's timing window
+        if stage and stage != self._current_stage:
+            if self._current_stage:
+                self._stage_timings.append({
+                    "stage": self._current_stage,
+                    "started_at": self._stage_started_at.isoformat(),
+                    "ended_at": now.isoformat(),
+                })
+            self._current_stage = stage
+            self._stage_started_at = now
+
+        db = _short_session()
+        try:
+            run = db.query(models.JobRun).filter(models.JobRun.id == self.run_id).first()
+            if not run:
+                return
+            run.last_heartbeat_at = now
+            if self._current_stage:
+                run.current_stage = self._current_stage
+            run.stage_timings = json.dumps(self._stage_timings)
+            db.commit()
+        except Exception:
+            # Heartbeat must never crash the worker. Swallow and retry next beat.
+            pass
+        finally:
+            db.close()
 
 
 def run_pipeline_for_job_rq(
@@ -62,8 +189,19 @@ def run_pipeline_for_job_rq(
     output_inst_datasheets = str(job_dir / "instrument_datasheets.zip")
     output_annotated_pdf = str(job_dir / "annotated.pdf")
 
+    # ── 1b. Open a JobRun row for this attempt + start the heartbeat thread ──
+    try:
+        from rq import get_current_job as _rq_get_current_job
+        _rq_job = _rq_get_current_job()
+        _rq_id = _rq_job.id if _rq_job else ""
+    except Exception:
+        _rq_id = ""
+    run_id = _create_job_run(job_id, _rq_id)
+
     # ── 2. Run the pipeline with NO open DB session ──
     log_buffer = io.StringIO()
+    heartbeat = _HeartbeatThread(run_id=run_id, log_buffer=log_buffer)
+    heartbeat.start()
     start_time = time.time()
     pipeline_error: str = ""
     original_cwd = os.getcwd()
@@ -87,6 +225,9 @@ def run_pipeline_for_job_rq(
         pipeline_error = traceback.format_exc()
     finally:
         os.chdir(original_cwd)
+        heartbeat.stop()
+        # Don't join — the thread is a daemon and we don't want to block
+        # the worker shutting down on a final heartbeat round-trip.
 
     elapsed = round(time.time() - start_time, 1)
     log_text = log_buffer.getvalue()
@@ -105,6 +246,7 @@ def run_pipeline_for_job_rq(
             job.processing_log = log_text
             job.completed_at = datetime.utcnow()
             db.commit()
+            _finalize_job_run(run_id, "failed", error_msg="pipeline exception", error_traceback=pipeline_error)
             return
 
         # If pid_no wasn't provided, read it from the valve CSV
@@ -125,12 +267,14 @@ def run_pipeline_for_job_rq(
         try:
             _ingest_csv(job_id, output_csv, pid_no_override, db, include_control_valves)
         except Exception:
+            _tb = traceback.format_exc()
             job.status = "failed"
-            job.error_msg = f"CSV ingest error: {traceback.format_exc()}"
+            job.error_msg = f"CSV ingest error: {_tb}"
             job.processing_time = elapsed
             job.processing_log = log_text
             job.completed_at = datetime.utcnow()
             db.commit()
+            _finalize_job_run(run_id, "failed", error_msg="CSV ingest error", error_traceback=_tb)
             return
 
         job.status = "done"
@@ -148,6 +292,7 @@ def run_pipeline_for_job_rq(
             db.query(models.ValveRow).filter(models.ValveRow.job_id == job_id).count()
         )
         db.commit()
+        _finalize_job_run(run_id, "done")
 
         # Side effects (LS sync, GPU dispatch) use the same session
         _auto_sync_to_label_studio(job, job_dir, db)

@@ -44,6 +44,30 @@ class Job(Base):
     gpu_detections = Column(Text, nullable=True)              # JSON list from GPU worker callback
 
 
+class JobRun(Base):
+    """One row per pipeline attempt for a Job (rerun => new row).
+
+    Tracks heartbeat for staleness detection, stage progress for visibility,
+    and the final outcome / killer. Decouples per-attempt observability from
+    the Job row, which only tracks the latest state.
+    """
+    __tablename__ = "job_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
+    attempt_num = Column(Integer, nullable=False)
+    rq_id = Column(String, nullable=True)
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ended_at = Column(DateTime, nullable=True)
+    status = Column(String, default="running")        # running|done|failed|killed
+    current_stage = Column(String, nullable=True)     # latest "Stage N: ..." line
+    last_heartbeat_at = Column(DateTime, nullable=True)
+    error_msg = Column(Text, nullable=True)
+    error_traceback = Column(Text, nullable=True)
+    stage_timings = Column(Text, nullable=True)       # JSON: [{stage, started_at, ended_at}]
+    killer = Column(String, nullable=True)            # heartbeat-watchdog|manual|sigterm
+
+
 class ValveRow(Base):
     __tablename__ = "valve_rows"
 

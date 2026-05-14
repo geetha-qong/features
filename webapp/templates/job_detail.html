@@ -71,10 +71,12 @@
   <div class="spinner-border spinner-border-sm me-2" role="status"></div>
   Extraction in progress… this page will refresh automatically.
   <span id="elapsed-hint" class="ms-2 text-muted small"></span>
+  <span id="stage-hint" class="ms-2 text-muted small"></span>
 </div>
 <div id="stale-msg" class="alert alert-warning" style="display:none">
   <strong>This job looks stuck.</strong>
-  It's been processing longer than expected. The worker may have crashed.
+  <span id="stale-detail">No worker heartbeat received recently.</span>
+  The pipeline worker may have crashed; the watchdog will mark it failed shortly if heartbeats don't resume.
   <form method="post" action="/jobs/{{ job.id }}/rerun" class="d-inline ms-2">
     <input type="hidden" name="include_control_valves" value="{{ 'on' if job.include_control_valves else 'off' }}">
     <button type="submit" class="btn btn-sm btn-warning">Re-run</button>
@@ -142,6 +144,83 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+</div>
+{% endif %}
+
+{% if job_runs %}
+<!-- Run History (Phase 1 observability) -->
+<div class="card shadow-sm mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center"
+       style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#runHistory">
+    <span>🩺 <strong>Run History</strong>
+      <span class="badge bg-secondary ms-2">{{ job_runs|length }} attempt{{ 's' if job_runs|length != 1 else '' }}</span>
+    </span>
+    <span class="text-muted small">click to expand ▾</span>
+  </div>
+  <div class="collapse {% if job_runs[0].status in ('running', 'failed', 'killed') %}show{% endif %}" id="runHistory">
+    <div class="card-body p-0">
+      <table class="table table-sm mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>#</th>
+            <th>Status</th>
+            <th>Stage / Killer</th>
+            <th>Started</th>
+            <th>Ended</th>
+            <th>Duration</th>
+            <th>Last heartbeat</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in job_runs %}
+          <tr class="{% if r.status == 'failed' or r.status == 'killed' %}table-danger{% elif r.status == 'running' %}table-warning{% endif %}">
+            <td>{{ r.attempt_num }}</td>
+            <td>
+              <span class="badge bg-{% if r.status == 'done' %}success{% elif r.status == 'running' %}info{% else %}danger{% endif %}">{{ r.status }}</span>
+            </td>
+            <td class="small">
+              {% if r.killer %}
+                <span class="text-danger">killed by {{ r.killer }}</span>
+              {% elif r.current_stage %}
+                {{ r.current_stage }}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+              {% if r.error_msg %}
+              <div class="text-muted" style="font-size:.75rem">{{ r.error_msg|truncate(120) }}</div>
+              {% endif %}
+            </td>
+            <td class="small text-muted">{{ r.started_at | to_ist if r.started_at else '—' }}</td>
+            <td class="small text-muted">{{ r.ended_at | to_ist if r.ended_at else '—' }}</td>
+            <td class="small">{% if r.duration_seconds %}{{ r.duration_seconds }}s{% else %}—{% endif %}</td>
+            <td class="small text-muted">{{ r.last_heartbeat_at | to_ist if r.last_heartbeat_at else '—' }}</td>
+          </tr>
+          {% if r.stage_timings %}
+          <tr>
+            <td></td>
+            <td colspan="6" class="p-0">
+              <details class="px-3 py-2">
+                <summary class="small text-muted" style="cursor:pointer">{{ r.stage_timings|length }} stage timing{{ 's' if r.stage_timings|length != 1 else '' }}</summary>
+                <table class="table table-sm table-borderless mb-0 mt-2">
+                  <tbody>
+                    {% for st in r.stage_timings %}
+                    <tr>
+                      <td class="small" style="width:60%">{{ st.stage }}</td>
+                      <td class="small text-muted">{{ st.started_at }}</td>
+                      <td class="small text-muted">→ {{ st.ended_at }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </details>
+            </td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 {% endif %}
@@ -216,11 +295,19 @@
       if (hint && data.elapsed_minutes != null) {
         hint.textContent = `(${data.elapsed_minutes} min elapsed)`;
       }
+      const stageHint = document.getElementById('stage-hint');
+      if (stageHint) {
+        stageHint.textContent = data.current_stage ? `• ${data.current_stage}` : '';
+      }
       const staleMsg = document.getElementById('stale-msg');
       const procMsg = document.getElementById('processing-msg');
+      const staleDetail = document.getElementById('stale-detail');
       if (data.is_stale && staleMsg) {
         staleMsg.style.display = 'block';
         if (procMsg) procMsg.style.display = 'none';
+        if (staleDetail && data.stale_seconds != null) {
+          staleDetail.textContent = `No worker heartbeat for ${data.stale_seconds}s.`;
+        }
       }
       if (data.status === 'done' || data.status === 'failed') {
         clearInterval(interval);

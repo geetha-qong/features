@@ -12,6 +12,7 @@ from webapp.routers import admin as admin_router
 from webapp.routers import account as account_router
 from webapp.routers import api_v1 as api_v1_router
 from webapp.config import JOB_OUTPUT_DIR, get_job_dir
+from webapp.watchdog import start_watchdog
 
 # Create all DB tables and run column migrations on startup
 Base.metadata.create_all(bind=engine)
@@ -82,6 +83,9 @@ _reset_stale_jobs()
 _ensure_super_admin()
 
 app = FastAPI(title="Qong — P&ID Valve Extractor")
+
+# Heartbeat-watchdog: reaps JobRuns whose pipeline-runner stopped beating.
+start_watchdog(app)
 
 # Serve static assets (logo, etc.)
 _imgs_dir = Path(__file__).parent / "imgs"
