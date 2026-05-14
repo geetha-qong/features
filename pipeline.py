@@ -63,7 +63,7 @@ def make_datasheet_zip_path(pdf_path: str) -> str:
     return str(OUTPUT_DIR / f"instrument_datasheets_{stem}_{ts}.zip")
 
 
-def run(pdf_path: str, output_path: str = None, inst_output_path: str = None, datasheet_zip_path: str = None, skip_extraction: bool = False, original_filename: str = ""):
+def run(pdf_path: str, output_path: str = None, inst_output_path: str = None, datasheet_zip_path: str = None, annotated_pdf_path: str = None, skip_extraction: bool = False, original_filename: str = ""):
     if output_path is None:
         output_path = make_output_path(pdf_path)
     if inst_output_path is None:
@@ -131,9 +131,14 @@ def run(pdf_path: str, output_path: str = None, inst_output_path: str = None, da
 
     # Stage 5: Generate annotated PDF for human verification
     full_png = "tmp/page_0_full.png"
-    # Name annotated PDF after the original drawing file (not the timestamped CSV)
-    source_stem = Path(name_for_stem if name_for_stem else pdf_path).stem
-    annotated_pdf = str(OUTPUT_DIR / f"{source_stem}_annotated.pdf")
+    if annotated_pdf_path:
+        annotated_pdf = annotated_pdf_path
+        Path(annotated_pdf).parent.mkdir(parents=True, exist_ok=True)
+    else:
+        # CLI default: name annotated PDF after the original drawing file
+        source_stem = Path(name_for_stem if name_for_stem else pdf_path).stem
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        annotated_pdf = str(OUTPUT_DIR / f"{source_stem}_annotated.pdf")
     print("\nStage 5: Generating annotated PDF for verification...")
     deduped_tags = [r.raw_tag for r in valid_rows if r.raw_tag]
     try:

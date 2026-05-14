@@ -233,6 +233,27 @@ async def download_inst_index(
     )
 
 
+@router.get("/jobs/{job_id}/annotated-pdf")
+async def download_annotated_pdf(
+    job_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job or not _can_access_job(job, current_user):
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "done" or not job.output_annotated_pdf_path:
+        raise HTTPException(status_code=400, detail="Annotated PDF not available")
+    pdf_path = Path(job.output_annotated_pdf_path)
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="Annotated PDF file missing")
+    return FileResponse(
+        str(pdf_path),
+        media_type="application/pdf",
+        filename=f"annotated_{job.pid_no}.pdf",
+    )
+
+
 @router.get("/jobs/{job_id}/tiles/{filename}")
 async def serve_tile(
     job_id: int,
@@ -297,6 +318,7 @@ async def rerun_job(
     job.output_csv_path = None
     job.output_inst_index_path = None
     job.output_inst_datasheet_path = None
+    job.output_annotated_pdf_path = None
     job.processing_time = None
     job.processing_log = None
     job.completed_at = None

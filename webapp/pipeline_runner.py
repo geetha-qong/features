@@ -60,6 +60,7 @@ def run_pipeline_for_job_rq(
     output_csv = str(job_dir / "valve_list.csv")
     output_inst_index = str(job_dir / "instrumentation_index.csv")
     output_inst_datasheets = str(job_dir / "instrument_datasheets.zip")
+    output_annotated_pdf = str(job_dir / "annotated.pdf")
 
     # ── 2. Run the pipeline with NO open DB session ──
     log_buffer = io.StringIO()
@@ -79,6 +80,7 @@ def run_pipeline_for_job_rq(
                     output_path=output_csv,
                     inst_output_path=output_inst_index,
                     datasheet_zip_path=output_inst_datasheets,
+                    annotated_pdf_path=output_annotated_pdf,
                     original_filename=original_filename,
                 )
     except Exception:
@@ -137,6 +139,8 @@ def run_pipeline_for_job_rq(
             job.output_inst_index_path = output_inst_index
         if Path(output_inst_datasheets).exists():
             job.output_inst_datasheet_path = output_inst_datasheets
+        if Path(output_annotated_pdf).exists():
+            job.output_annotated_pdf_path = output_annotated_pdf
         job.completed_at = datetime.utcnow()
         job.processing_time = elapsed
         job.processing_log = log_text
