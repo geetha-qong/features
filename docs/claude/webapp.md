@@ -20,6 +20,8 @@ FastAPI webapp, SaaS layer, DB schema, admin operations. See `CLAUDE.md` for top
   - `get_job_dir(job)` in `config.py` — checks new path first, falls back to legacy `job_outputs/{job_id}/`
 - **Super admin + annotator see all jobs**: `_can_access_job(job, user)` in `jobs.py` — owner OR super_admin OR annotator can view/download/rerun; dashboard shows User column for both
 - **Instrumentation Index download**: `/jobs/{id}/download-inst-index` endpoint; button shown on job detail when ready
+- **Annotated PDF download**: `/jobs/{id}/annotated-pdf` endpoint — numbered bounding boxes per detected valve (colour-coded by detection source). Written to `job_dir/annotated.pdf` by Stage 5 of `pipeline.py` via the `annotated_pdf_path` kwarg. Button appears on job detail when `output_annotated_pdf_path` is set.
+- **Run History panel** (per-attempt observability): every pipeline attempt writes a `job_runs` row. Panel on job detail shows attempt #, status, current/final stage, duration, last heartbeat, killer reason, and per-stage timings. Stale banner is driven by the heartbeat (not elapsed-minutes guessing).
 - **Serving PDFs inline**: use `starlette.responses.Response` with `media_type="application/pdf"` and `Content-Disposition: inline; filename="..."` — `FileResponse` forces a download instead
 
 ## SaaS Features (merged to dev branch)
@@ -53,6 +55,8 @@ FastAPI webapp, SaaS layer, DB schema, admin operations. See `CLAUDE.md` for top
 - Job columns added: `ls_project_id` (Int), `ls_synced` (Bool) — Label Studio sync state
 - Job columns added: `output_inst_index_path` (Str) — path to instrumentation_index.csv when generated
 - Job columns added: `output_inst_datasheet_path` (Str) — path to instrument_datasheets.zip when generated
+- Job columns added: `output_annotated_pdf_path` (Str) — path to annotated.pdf (numbered bounding boxes) when generated
+- **`job_runs` table** (Phase 1 observability) — one row per pipeline attempt. Columns: `id, job_id, attempt_num, rq_id, started_at, ended_at, status (running|done|failed|killed), current_stage, last_heartbeat_at, error_msg, error_traceback, stage_timings (JSON), killer`. Created via `Base.metadata.create_all` on startup; no raw SQL migration needed.
 
 ## Admin / Password Reset
 
@@ -73,6 +77,8 @@ FastAPI webapp, SaaS layer, DB schema, admin operations. See `CLAUDE.md` for top
 - `webapp/credits.py` — ledger helpers: `grant`, `deduct`, `refund`, `check_balance`, `get_balance`; all commit to `credit_transactions`
 - `webapp/routers/api_v1.py` — REST API endpoints; `_get_api_user` dep accepts Bearer OR cookie
 - `webapp/routers/account.py` — user-facing `/account/*` and `/feedback` routes
+- `webapp/watchdog.py` (Phase 2 observability) — asyncio loop started at FastAPI startup. Sweeps every 5 min, marks `JobRun` rows with no heartbeat for >90s as `killed` (killer=`heartbeat-watchdog`) and flips the parent `Job` to `failed` if still `processing`. Constants: `STALE_HEARTBEAT_SECONDS=90`, `WATCHDOG_INTERVAL_SECONDS=300`.
+- `webapp/pipeline_runner.py` heartbeat thread (Phase 1 observability) — `_HeartbeatThread` writes `last_heartbeat_at` + parses log_buffer for latest "Stage N: ..." every 30s; uses fresh short-lived sessions so heartbeat writes never conflict with the main pipeline transaction. JobRun finalize also uses a fresh session (avoids the same-transaction status-flip bug that broke job 39's first rerun).
 
 ## Testing Pattern (unit tests)
 
