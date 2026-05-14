@@ -32,4 +32,4 @@ versions:
       Adds water-treatment-plant + non-MUK drawing coverage v1-7 didn't have.
     files:
       best.pt:   d44a427c373ef534d53d6654b9a135996db3c739b4e36ed43e2171a6da000981
-      best.onnx: c59e811e5d0fd802dca545a7586698fb95e59224ae65e81e85fd0236fa341a5b
+      best.onnx: f442ce021b909b4bf8d7f53a85cceb4fd45f668ea30a9682690cf4b799feeee4
