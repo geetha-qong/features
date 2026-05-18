@@ -141,8 +141,17 @@ def run(pdf_path: str, output_path: str = None, inst_output_path: str = None, da
         annotated_pdf = str(OUTPUT_DIR / f"{source_stem}_annotated.pdf")
     print("\nStage 5: Generating annotated PDF for verification...")
     deduped_tags = [r.raw_tag for r in valid_rows if r.raw_tag]
+    # The offline detector attaches bbox_tile to each raw valve; the API extractor
+    # does not. When raw_valves has no spatial info, OCR each tile and fuzzy-match
+    # each CSV tag so visualize.generate_annotated_pdf can still draw boxes.
+    annotation_tiles = tiles if not skip_extraction else []
+    if not any(v.get("bbox_tile") for v in raw_valves) and deduped_tags and annotation_tiles:
+        from ocr_locate import locate_tags
+        annotation_source = locate_tags(annotation_tiles, deduped_tags)
+    else:
+        annotation_source = raw_valves
     try:
-        generate_annotated_pdf(raw_valves, tiles if not skip_extraction else [], full_png, annotated_pdf, deduped_tags)
+        generate_annotated_pdf(annotation_source, annotation_tiles, full_png, annotated_pdf, deduped_tags)
     except Exception as e:
         print(f"  [visualize] Failed: {e}")
 

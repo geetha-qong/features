@@ -2,3 +2,5 @@ anthropic
 pymupdf
 pillow
 pandas
+rapidocr-onnxruntime
+rapidfuzz
