@@ -38,6 +38,15 @@ TAG_PATTERN_3 = re.compile(
     re.IGNORECASE,
 )
 
+# Format 4: client convention with NO area-code prefix — [Type][sep][Serial].
+# Job 41 (MUK-62-0-0002) / job 40 use this: PV-01156, BV-32062, DV-01157, XV-01052, VG 01-1034.
+# Type is whitelisted to known valve codes so we don't match random TYPE-NUMBER noise
+# like "TUB-01", "S30-BSN", or pipe-size labels.
+TAG_PATTERN_4 = re.compile(
+    r"^(?P<type>BF|BV|VB|VF|DB|CK|GL|CV|VM|VG|NV|SV|PV|XV|DV|GV)[\s\-]*(?P<serial>\d{3,6})$",
+    re.IGNORECASE,
+)
+
 # ── Line number patterns (tried in order, most → least specific) ──────────────
 
 # Format 2 line: 250-WAP-XXXX-AS1LC → fluid=WAP, piping=AS1LC (no size extraction)
@@ -173,6 +182,16 @@ def parse_valve_tag(tag: str) -> Optional[dict]:
         if m.group("actuator"):
             result["actuator_from_tag"] = m.group("actuator").upper()
         return result
+
+    # Format 4: TYPE-SERIAL with no area-code prefix — e.g. PV-01156, BV-32062
+    m = TAG_PATTERN_4.match(s)
+    if m:
+        return {
+            "area": "-",
+            "type_code": m.group("type").upper(),
+            "serial": m.group("serial"),
+            "format": 4,
+        }
 
     return None
 
