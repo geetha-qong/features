@@ -97,6 +97,30 @@ Some customer P&IDs use tags like `VB25`, `VB40 2090`, `VBPP40` — no `AreaCode
 - Instrument index extraction still works (instrument bubbles are standard).
 - To support these: extend `parser.py` with new regex patterns alongside existing ones (additive, never modify working patterns).
 
+## Parser tag formats (current)
+
+- Format 1: `62-BF-151031` — MUK area-prefixed `(area=\d{2})-(type=[A-Z]{2,4})-(serial=\d{5,6})`
+- Format 2: `VB15-2011A` — WTP dashed; size embedded; `V[A-Z]{0,2}\d{2,4}-\d{4}[A-Z]?`
+- Format 3: `VB15 7007` — whitespace variant of Format 2 (Vision non-deterministically emits dash or space)
+- Format 4: `PV-01156`, `BV-32062`, `XV01171` — **no area code**, type-whitelisted (BF/BV/VB/VF/DB/CK/GL/CV/VM/VG/NV/SV/PV/XV/DV/GV); separator `[\s\-]*`. Added 2026-05-18 for new-client drawings (MUK-62-0-0002, MUK-63-1-0177). Whitelist prevents noise like `TUB-01`, `3/4"`, `IS01501`, `S30BSN` from being promoted to valves.
+
+## Recall regression debugging
+
+When a job's `valve_count` looks too low, isolate Vision-side vs parser-side loss:
+1. Pull `tmp/raw_extractions_pass1.json` and `valve_list.csv` from the job dir
+2. Compare counts: `len(raw)` ≫ CSV rows → parser problem; both small → Vision problem; CSV rows much smaller than `set(r.valve_tag for r in raw)` → over-dedup
+3. For parser problems: apply `parse_valve_tag` to every raw tag, group unparseables with `Counter.most_common(15)` — that surfaces the new tag convention to add as a Format N regex
+4. `tmp/unparseable_valves.json` is written per-job by `parse_raw_extractions` when `tmp_dir` is set — mine it before adding new regexes
+
+## Annotated PDF in API mode
+
+The annotated PDF feature (`visualize.generate_annotated_pdf`) needs `bbox_tile` / `tile_x0` / `tile_y0` on each raw valve. The offline detector (`detector.py`) sets these; the API extractor (`extractor.py`) does not. `ocr_locate.py` (added 2026-05-18) bridges the gap:
+- One RapidOCR pass per tile (per-tile is much more accurate than full-page because tags are ~10-15px on the page vs ~30-50px on a tile)
+- Fuzzy match each CSV tag to OCR segments via `rapidfuzz.partial_ratio` + digit-core lookup
+- Returns synthetic `raw_valves`-shaped dicts with full-page bboxes; `visualize.py` works unchanged
+- `pipeline.py` Stage 5 auto-selects: if any raw_valve has `bbox_tile`, use detector boxes; else call `ocr_locate.locate_tags(tiles, tags)`. Offline detector path is unchanged.
+- Deps: `rapidocr-onnxruntime`, `rapidfuzz`. Dockerfile must install `libxcb1 libgl1 libglib2.0-0` (opencv-python deps) or import fails with `libxcb.so.1`.
+
 ## Offline Detector Recall Improvements (feature/own-system, committed cf21758)
 
 - `_extract_tags_from_tile()` — row-based OCR token clustering (40px y-tolerance), groups 1–4 tokens to reassemble fragmented tags

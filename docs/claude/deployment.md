@@ -11,7 +11,7 @@ GCP VM, docker services, security hardening, multi-cloud migration. See `CLAUDE.
 - **OS**: Debian 12 (bookworm), user `maahedev`
 - **Code**: `/app/qong_poc/` (branch `dev`)
 - **Auto-deploy**: every push to `dev` branch triggers GitHub Actions → SSH → `git reset --hard origin/dev` + `docker compose build/up` (workflow: `.github/workflows/deploy-dev.yml`; GitHub secret name: `GSP_DEV_SSH_KEY`; uses `webfactory/ssh-agent@v0.9.0` — appleboy/ssh-action silently drops the key)
-- **Access**: `gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="..."`
+- **Access**: `gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --tunnel-through-iap --command="..."` — `--tunnel-through-iap` is **required** when plain port 22 is firewalled (the SSH `qong-allow-ssh` rule is open only to specific IPs; IAP routes via Google's identity-aware proxy). Same flag on `gcloud compute scp` for file transfer.
 - **Local gcloud**: installed at `/opt/homebrew/share/google-cloud-sdk/bin/gcloud`; add to PATH: `export PATH=/opt/homebrew/share/google-cloud-sdk/bin:"$PATH"`; auth: `theqongglobal@gmail.com`; project: `project-7555468d-d13a-482e-9ae`
 - **All docker commands need `sudo`** on GCP VM: `sudo docker compose ...`
 - **Deploy key**: `~/.ssh/id_ed25519_qong_product` on VM; SSH alias `qong-product` in `~/.ssh/config`
@@ -49,6 +49,7 @@ Rebuilt containers get new IPs; nginx caches old IP → 502. Fix: `sudo docker c
 - `minio` — S3-compatible local storage; `STORAGE_ENDPOINT_URL=http://minio:9000`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`
 - `cpu-worker` — RQ worker consuming `cpu` queue; runs pipeline jobs off the main web process
 - `database.py` reads `DATABASE_URL` env var — falls back to SQLite when unset
+- **opencv-python system deps**: `Dockerfile` installs `libxcb1 libgl1 libglib2.0-0` alongside `gcc`. cv2 loads X11 / GL libs even in headless mode, so any new dep that pulls `opencv-python` (`rapidocr-onnxruntime`, `paddleocr`, …) will fail at import with `ImportError: libxcb.so.1: cannot open shared object file` if these are missing from `python:3.11-slim`.
 
 ### Original five services in `docker-compose.yml`:
 - `web` — FastAPI webapp (port 8000)

@@ -156,6 +156,15 @@ sudo docker compose exec -T web python3 scripts/auto_annotate_ls.py --project 25
 - **LS bulk task API caveat**: `/api/tasks/?project=X` bulk response shows `ann_count: 0` even for annotated tasks — always use per-task `/api/tasks/{id}/` to check actual annotations
 - Tiles with 0 YOLO detections (background/margin tiles) are silently skipped — not errors
 
+### Rerunning auto-annotation after a new model
+
+1. SCP new `best.onnx` from Windows GPU machine to `/tmp/v1-N_best.onnx` on the VM (via gcloud IAP); backup current: `sudo cp models/best.onnx models/best.onnx.<prev>-backup_$(date +%Y%m%d)`; swap: `sudo cp /tmp/v1-N_best.onnx models/best.onnx`
+2. `sudo docker compose restart web` — the ONNX session is process-lifetime, the running container won't pick up the new file otherwise
+3. Find LS project ID for a given webapp job: `Job.ls_project_id` column (e.g. job 41 → LS project 27)
+4. Rerun: `sudo docker compose exec -T web env LS_API_KEY=$(grep '^LS_API_KEY=' .env | cut -d= -f2) python3 scripts/auto_annotate_ls.py --project <N> --force` — `--force` overwrites stale model predictions but does NOT touch human annotations
+5. **`MODEL_VERSION.txt` hashes drift from actual export bytes** — ONNX export is non-deterministic (graph metadata varies between export runs even for identical weights). Trust the training date in MODEL_VERSION.txt entries, not the hash. Update the hash field in `MODEL_VERSION.txt` to whatever's actually deployed once verified.
+6. Also bump `MODEL_VERSION` constant + `CLASS_NAMES` in `scripts/auto_annotate_ls.py` if class layout changed (v1-7 → v1-8 was same nc=22 layout — no script change needed).
+
 ## LS Projects — Annotation Status
 
 `EXPORT_PROJECTS = [1, 3, 4, 5, 6, 11, 12, 13, 14]` in `scripts/export_and_merge.py`
@@ -305,3 +314,17 @@ gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --command="
 Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; Start-Service sshd; Set-Service -Name sshd -StartupType Automatic; New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
 ```
 - Password auth disabled by default — also run: `Add-Content "C:\ProgramData\ssh\sshd_config" "\nPasswordAuthentication yes"; Restart-Service sshd`
+
+## Tailscale Topology (cross-machine file transfer)
+
+| Node | Tailscale IP | Role |
+|---|---|---|
+| `devs-macbook-pro` | 100.81.161.115 | Mac dev |
+| `desktop-6o56u39` | 100.91.199.103 | Windows GPU (training, ONNX export) |
+| `qong-dev-server` | 100.127.190.88 | GCP VM (production) |
+
+- Mac CLI not on PATH by default: `/Applications/Tailscale.app/Contents/MacOS/Tailscale status`
+- **Windows OpenSSH admin gotcha**: when the Windows user (`qongsystems`) is in the Administrators group, OpenSSH **ignores** `C:\Users\qongsystems\.ssh\authorized_keys` and uses `C:\ProgramData\ssh\administrators_authorized_keys` instead. Wrong file silently produces `Permission denied (publickey,password,keyboard-interactive)`. Required ACL on the admin file: `icacls "C:\ProgramData\ssh\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"`.
+- SSH from Mac with multi-key keychain: `ssh -o IdentitiesOnly=yes -i ~/.ssh/<key> qongsystems@100.91.199.103` to avoid `Too many authentication failures` (Windows OpenSSH `MaxAuthTries=6`; ~3 Mac keys × multiple attempts saturates fast).
+- v1-N ONNX source path on Windows: `qongsystems@100.91.199.103:C:/Users/qongsystems/qong-poc-gpu/runs/detect/pid_valves/weights/best.onnx`
+- Two-hop transfer Windows → Mac → VM: `scp -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 "qongsystems@100.91.199.103:C:/.../best.onnx" /tmp/v1-N.onnx && gcloud compute scp --zone=asia-southeast1-c --tunnel-through-iap /tmp/v1-N.onnx qong-dev-server:/tmp/v1-N.onnx`

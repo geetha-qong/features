@@ -39,6 +39,12 @@ docker compose exec web python3 -m pytest tests/unit/ -v      # run unit tests
 - Label Studio (direct): http://localhost:9001
 - Label Studio (via nginx): http://localhost:9000/ls/
 
+## VM access (production troubleshooting)
+
+- SSH via IAP (plain port 22 is firewalled): `gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --tunnel-through-iap --command="..."` — works because gcloud is authed as `theqongglobal@gmail.com`. Same `--tunnel-through-iap` flag on `gcloud compute scp`.
+- Query production DB from VM: `psql -U postgres` fails (role doesn't exist). Use the ORM via the web container: `sudo docker compose exec -T web python3 -c "from webapp.database import SessionLocal; from webapp.models import Job; s=SessionLocal(); print(s.get(Job, 41).output_csv_path)"`. Avoid f-strings inside `-c` (quoting hell — use `print(label, value)` with `,` separator).
+- Job artifact paths: jobs ≥ 40 use org-scoped `/app/job_outputs/{org_id}/{job_id}/`; jobs ≤ 39 use flat `/app/job_outputs/{job_id}/`. Always read the exact path from `Job.output_csv_path` / `output_annotated_pdf_path` in the DB rather than guessing.
+
 ## CRITICAL: Two-Mode Architecture — Do NOT Mix
 
 **Production (end users)** → API-based pipeline only (`extractor.py`):
@@ -60,7 +66,7 @@ If someone changes this by mistake, revert it immediately. The offline detector 
 - Use `Optional[X]` not `X | None`, use `python3` not `python`
 - OpenRouter API: `OPENROUTER_API_KEY` env var required (not Anthropic directly)
 - Default model: `google/gemini-2.0-flash-001` (fast); override via `OPENROUTER_MODEL`
-- Temp files → `tmp/` per job in `job_outputs/{job_id}/tmp/` (never commit). Also never commit `webapp.db`, `uploads/`, `job_outputs/`.
+- Temp files → `tmp/` per job in `job_outputs/{org_id}/{job_id}/tmp/` (jobs ≥ 40) or `job_outputs/{job_id}/tmp/` (jobs ≤ 39); never commit. Also never commit `webapp.db`, `uploads/`, `job_outputs/`.
 
 ## Repo
 
