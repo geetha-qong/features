@@ -22,8 +22,11 @@ docker compose build web cpu-worker
 echo "==> Recreate web + cpu-worker"
 docker compose up -d web cpu-worker
 
-echo "==> Restart nginx (refresh upstream DNS)"
-docker compose restart nginx
+echo "==> Recreate nginx (force-recreate, not just restart)"
+# `restart` reuses the existing container, which means a `git reset --hard`
+# that wrote nginx.conf at a new inode leaves the container reading the OLD
+# file via its stale bind mount. `up -d --force-recreate` rebinds the mount.
+docker compose up -d --force-recreate nginx
 
 echo "==> Final status"
 docker compose ps --format "table {{.Name}}\t{{.Status}}" | head -10

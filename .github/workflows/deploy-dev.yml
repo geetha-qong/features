@@ -26,6 +26,9 @@ jobs:
           git reset --hard origin/dev
           sudo docker compose build web cpu-worker
           sudo docker compose up -d web cpu-worker
-          sudo docker compose restart nginx
+          # Force-recreate nginx: `restart` reuses the existing container,
+          # so a `git reset --hard` that rewrites nginx.conf at a new inode
+          # leaves nginx serving the OLD file via its stale bind mount.
+          sudo docker compose up -d --force-recreate nginx
           echo "Deploy complete: $(git log -1 --format='%h %s')"
           ENDSSH
