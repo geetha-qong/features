@@ -92,10 +92,12 @@ LS_NAME_TO_IDX: Dict[str, int] = {
     "Motor": 15,
     "valve_3way_relief": 16,
     "valve_3way_releif": 16,   # typo fix (3 instances in LS)
+    "valve_3way": 16,          # remap: 3-way valve generic → 3-way relief (visually similar)
     "valve_ncbv": 17,
     "valve_relief_safety": 18,
     "valve_pnuectrl": 19,
     "valve_pneuctrl": 19,      # spelling variant in project 6
+    "inst_local_panel": 10,    # remap: local panel-mounted instrument → PLC
 }
 
 

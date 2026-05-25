@@ -11,9 +11,25 @@
 # Adding a new version: append a row below, do NOT edit existing rows.
 # Format:  <version>\t<filename>\t<sha256>
 
-current: v1-8
+current: v1-9
 
 versions:
+  v1-9:
+    notes: |
+      Trained 2026-05-25 on Windows GPU (RTX 2000 Ada).
+      845 train + 49 val tiles from 26 LS projects (added 7, 26, 27, 28 vs v1-8),
+      including 442 oversampled tiles for rare instrument classes (DCS 4x, PLC 5x,
+      interlock 5x, valve_gl 5x, valve_3way_relief 3x). nc=20 — dropped 3 empty
+      actuator classes, added valve_gt (gate valve, 556 instances previously dropped).
+      57 epochs (early stopped at 27), mAP50 = 0.404 on diverse val set.
+      Per-class recall: valve_ck 87%, valve_bf 80%, valve_gt 87%, valve_bv 75%,
+      DCS 62%, inst_field 62%, PLC 41%, valve_3way_relief 6% (regressed).
+      NOTE: val set is 49 random tiles across 26 drawing styles — much harder
+      than v1-7/v1-8's MUK-only 9-image val. mAP not directly comparable.
+    files:
+      best.pt:   (unknown — not transferred from Windows GPU)
+      best.onnx: 11e29b47dea7a36b5609f315a7f589c53f0d0f8e24f0b95e74ecb9447f526178
+
   v1-7:
     notes: |
       Trained 2026-05-07 on Windows GPU (RTX 2000 Ada).

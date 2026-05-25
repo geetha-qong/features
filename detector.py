@@ -20,38 +20,37 @@ CONF_THRESH = 0.25
 IOU_THRESH = 0.45
 
 CLASS_NAMES = [
-    "actuator_motor",      # 0
-    "actuator_pneu",       # 1
-    "actuator_sol",        # 2
-    "valve_bf",            # 3
-    "valve_bv",            # 4
-    "valve_ck",            # 5
-    "valve_cv",            # 6
-    "valve_db",            # 7
-    "valve_gen",           # 8
-    "valve_gl",            # 9
-    "inst_field",          # 10
-    "DCS",                 # 11
-    "PLC",                 # 12
-    "interlock",           # 13
-    "interlock-R",         # 14
-    "inst_field-R",        # 15
-    "Pump_Dwg_Pump",       # 16
-    "Motor",               # 17
-    "valve_3way_relief",   # 18
-    "valve_ncbv",          # 19
-    "valve_relief_safety", # 20
-    "valve_pnuectrl",      # 21
+    "valve_bf",            # 0
+    "valve_bv",            # 1
+    "valve_ck",            # 2
+    "valve_cv",            # 3
+    "valve_db",            # 4
+    "valve_gen",           # 5
+    "valve_gl",            # 6
+    "valve_gt",            # 7  (gate valve — new in v1-9)
+    "inst_field",          # 8
+    "DCS",                 # 9
+    "PLC",                 # 10
+    "interlock",           # 11
+    "interlock-R",         # 12
+    "inst_field-R",        # 13
+    "Pump_Dwg_Pump",       # 14
+    "Motor",               # 15
+    "valve_3way_relief",   # 16
+    "valve_ncbv",          # 17
+    "valve_relief_safety", # 18
+    "valve_pnuectrl",      # 19
 ]
 
 # YOLO class → valve type code (None = infer from nearby OCR text)
 CLASS_TO_TYPE: Dict[str, Optional[str]] = {
     "valve_bf": "BF", "valve_bv": "BV", "valve_ck": "CK",
     "valve_cv": "CV", "valve_db": "DB", "valve_gen": None, "valve_gl": "GL",
+    "valve_gt": "GV",
     "valve_3way_relief": "SV", "valve_ncbv": "BV",
     "valve_relief_safety": "SV", "valve_pnuectrl": "PV",
 }
-ACTUATOR_CLASSES = {"actuator_motor": "M", "actuator_pneu": "P", "actuator_sol": "SL"}
+ACTUATOR_CLASSES: Dict[str, str] = {}  # dropped in v1-9 (zero instances across all annotated projects)
 VALVE_CLASSES = set(CLASS_TO_TYPE.keys())
 
 # Instrument bubble classes → LOCATION value (per Ebara/Ronesans legend)

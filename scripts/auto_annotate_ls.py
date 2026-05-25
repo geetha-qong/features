@@ -41,37 +41,33 @@ MODEL_PATH = os.environ.get("MODEL_PATH", str(_HERE / "models" / "best.onnx"))
 IMGSZ = 1280
 CONF_THRESH = 0.15
 IOU_THRESH = 0.45
-MODEL_VERSION = "yolo-v1-7"
+MODEL_VERSION = "yolo-v1-9"
 
 CLASS_NAMES = [
-    "actuator_motor",      # 0
-    "actuator_pneu",       # 1
-    "actuator_sol",        # 2
-    "valve_bf",            # 3
-    "valve_bv",            # 4
-    "valve_ck",            # 5
-    "valve_cv",            # 6
-    "valve_db",            # 7
-    "valve_gen",           # 8
-    "valve_gl",            # 9
-    "inst_field",          # 10
-    "DCS",                 # 11
-    "PLC",                 # 12
-    "interlock",           # 13
-    "interlock-R",         # 14
-    "inst_field-R",        # 15
-    "Pump_Dwg_Pump",       # 16
-    "Motor",               # 17
-    "valve_3way_relief",   # 18
-    "valve_ncbv",          # 19
-    "valve_relief_safety", # 20
-    "valve_pnuectrl",      # 21
+    "valve_bf",            # 0
+    "valve_bv",            # 1
+    "valve_ck",            # 2
+    "valve_cv",            # 3
+    "valve_db",            # 4
+    "valve_gen",           # 5
+    "valve_gl",            # 6
+    "valve_gt",            # 7  (gate valve — new in v1-9)
+    "inst_field",          # 8
+    "DCS",                 # 9
+    "PLC",                 # 10
+    "interlock",           # 11
+    "interlock-R",         # 12
+    "inst_field-R",        # 13
+    "Pump_Dwg_Pump",       # 14
+    "Motor",               # 15
+    "valve_3way_relief",   # 16
+    "valve_ncbv",          # 17
+    "valve_relief_safety", # 18
+    "valve_pnuectrl",      # 19
 ]
 
 # Map canonical class names → LS label config names where they differ
 _LS_LABEL_NAME = {
-    "actuator_pneu":  "actuator_pneumatic",
-    "actuator_sol":   "actuator_solenoid",
     "Pump_Dwg_Pump":  "Pump/Dwg Pump",
 }
 
