@@ -27,73 +27,75 @@ LS_API_KEY = os.environ.get("LS_API_KEY", "")
 
 EXPORT_PROJECTS = [
     1, 3, 4, 5, 6,                                  # MUK 1001-1005 (v1-7 baseline)
+    7,                                              # PID Training - All Valves (45 ann) — included v1-9
     8,                                              # MUK 61-0-0218
     10, 11, 12, 13, 14,                             # UNKNOWN-06, 09, 10, 12, 13
     15, 16, 17, 18,                                 # UNKNOWN-16, 16-18, 17, 18
     19, 20, 21, 22, 23, 24,                         # UNKNOWN-4, 5, 7, 8, Pg.17, Pg.5
     25,                                             # WS-25-WTP-01 (new water-treatment domain)
+    26,                                             # UNKNOWN (324 tasks, 325 ann) — included v1-9
+    27,                                             # MUK-62-0-0002 — included v1-9
+    28,                                             # MUK-63-1-0177 — included v1-9
 ]
-# Excluded: 7 (empty in LS), 9 (duplicate of 4 — same drawing), 26 (still in progress)
+# Excluded: 9 (duplicate of 4 — same drawing)
 
 _HERE = Path(__file__).resolve().parent.parent
 DATASET_DIR = _HERE / "datasets" / "pid_valves"
 TRAIN_IMG = DATASET_DIR / "images" / "train"
 TRAIN_LBL = DATASET_DIR / "labels" / "train"
 
-# Canonical class list — indices 0-9 MUST match existing label files exactly
+# Canonical class list (v1-9 onwards) — actuator_* dropped (0 instances anywhere
+# across all 26 annotated projects; team stopped labelling actuators separately).
+# valve_gt added (556 instances were being silently dropped pre-v1-9).
 CANONICAL_CLASSES = [
-    "actuator_motor",     # 0
-    "actuator_pneu",      # 1
-    "actuator_sol",       # 2
-    "valve_bf",           # 3
-    "valve_bv",           # 4
-    "valve_ck",           # 5
-    "valve_cv",           # 6
-    "valve_db",           # 7
-    "valve_gen",          # 8
-    "valve_gl",           # 9
-    "inst_field",         # 10  ← new
-    "DCS",                # 11  ← new
-    "PLC",                # 12  ← new
-    "interlock",          # 13  ← new
-    "interlock-R",        # 14  ← new
-    "inst_field-R",       # 15  ← new
-    "Pump_Dwg_Pump",      # 16  ← new (slash/space replaced for filesystem safety)
-    "Motor",              # 17  ← new
-    "valve_3way_relief",  # 18
-    "valve_ncbv",         # 19
-    "valve_relief_safety",# 20
-    "valve_pnuectrl",     # 21
+    "valve_bf",            # 0
+    "valve_bv",            # 1
+    "valve_ck",            # 2
+    "valve_cv",            # 3
+    "valve_db",            # 4
+    "valve_gen",           # 5
+    "valve_gl",            # 6
+    "valve_gt",            # 7  ← new in v1-9 (gate valve)
+    "inst_field",          # 8
+    "DCS",                 # 9
+    "PLC",                 # 10
+    "interlock",           # 11
+    "interlock-R",         # 12
+    "inst_field-R",        # 13
+    "Pump_Dwg_Pump",       # 14  (slash/space replaced for filesystem safety)
+    "Motor",               # 15
+    "valve_3way_relief",   # 16
+    "valve_ncbv",          # 17
+    "valve_relief_safety", # 18
+    "valve_pnuectrl",      # 19
 ]
 
-# LS label name → canonical index (handles name differences)
+# LS label name → canonical index (handles name differences and typos).
+# Indices match CANONICAL_CLASSES order above (v1-9 scheme — actuators dropped, valve_gt added).
 LS_NAME_TO_IDX: Dict[str, int] = {
-    "actuator_motor": 0,
-    "actuator_pneumatic": 1,   # LS name ≠ canonical
-    "actuator_solenoid": 2,    # LS name ≠ canonical
-    "actuator_pneu": 1,        # fallback if old name appears
-    "actuator_sol": 2,
-    "valve_bf": 3,
-    "valve_bv": 4,
-    "valve_ck": 5,
-    "valve_cv": 6,
-    "valve_db": 7,
-    "valve_gen": 8,
-    "valve_gl": 9,
-    "inst_field": 10,
-    "DCS": 11,
-    "PLC": 12,
-    "interlock": 13,
-    "interlock-R": 14,
-    "inst_field-R": 15,
-    "Pump/Dwg Pump": 16,
-    "Pump_Dwg_Pump": 16,
-    "Motor": 17,
-    "valve_3way_relief": 18,
-    "valve_ncbv": 19,
-    "valve_relief_safety": 20,
-    "valve_pnuectrl": 21,
-    "valve_pneuctrl": 21,      # spelling variant in project 6
+    "valve_bf": 0,
+    "valve_bv": 1,
+    "valve_ck": 2,
+    "valve_cv": 3,
+    "valve_db": 4,
+    "valve_gen": 5,
+    "valve_gl": 6,
+    "valve_gt": 7,
+    "inst_field": 8,
+    "DCS": 9,
+    "PLC": 10,
+    "interlock": 11,
+    "interlock-R": 12,
+    "inst_field-R": 13,
+    "Pump/Dwg Pump": 14,
+    "Pump_Dwg_Pump": 14,
+    "Motor": 15,
+    "valve_3way_relief": 16,
+    "valve_3way_releif": 16,   # typo fix (3 instances in LS)
+    "valve_ncbv": 17,
+    "valve_relief_safety": 18,
+    "valve_pnuectrl": 19,
+    "valve_pneuctrl": 19,      # spelling variant in project 6
 }
 
 
@@ -287,6 +289,92 @@ names: {json.dumps(CANONICAL_CLASSES)}
     print(f"\nUpdated data.yaml: nc={len(CANONICAL_CLASSES)} classes")
 
 
+# Per-class minimum instance target — tiles containing classes below target
+# get duplicated (image+label hardlinks) up to OVERSAMPLE_CAP times.
+# Targets chosen from v1-9 class distribution analysis to lift rare instrument
+# subtypes (DCS/PLC/interlock) closer to inst_field's ~4500 instance count,
+# so the model trains discriminating signal between location subtypes.
+OVERSAMPLE_TARGETS: Dict[str, int] = {
+    "DCS": 1500,            # baseline 542
+    "PLC": 1000,            # baseline 242
+    "interlock": 500,       # baseline 81
+    "interlock-R": 175,     # baseline 35 (5x cap)
+    "valve_gl": 250,        # baseline 50
+    "valve_3way_relief": 300,  # baseline ~99
+}
+OVERSAMPLE_CAP = 5    # max duplication factor per tile (prevents overfitting)
+
+
+def oversample_rare_classes():
+    """Duplicate training tiles that contain rare classes to balance distribution.
+
+    For each rare class C with target T, find all tiles containing C, compute the
+    duplication factor needed to reach T, cap at OVERSAMPLE_CAP, then copy
+    (image, label) pairs with a "_dupN" suffix into the same train dirs.
+    A tile containing multiple rare classes gets the MAX factor.
+    """
+    from collections import defaultdict
+
+    # Count current instances per class + tiles-per-class
+    counts: Dict[int, int] = defaultdict(int)
+    tiles_with_class: Dict[int, set] = defaultdict(set)
+    for lbl_path in TRAIN_LBL.glob("*.txt"):
+        for line in lbl_path.read_text().strip().splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            try:
+                cls_idx = int(parts[0])
+            except ValueError:
+                continue
+            counts[cls_idx] += 1
+            tiles_with_class[cls_idx].add(lbl_path.stem)
+
+    # Compute per-tile duplication factor
+    tile_factor: Dict[str, int] = {}
+    for cls_name, target in OVERSAMPLE_TARGETS.items():
+        if cls_name not in CANONICAL_CLASSES:
+            continue
+        cls_idx = CANONICAL_CLASSES.index(cls_name)
+        current = counts.get(cls_idx, 0)
+        if current >= target or current == 0:
+            print(f"  skip oversample {cls_name}: have {current}, target {target}")
+            continue
+        # how much each tile must contribute to reach target
+        n_tiles = len(tiles_with_class[cls_idx])
+        if n_tiles == 0:
+            continue
+        factor = min(OVERSAMPLE_CAP, max(1, round(target / current)))
+        print(f"  oversample {cls_name}: {current}→~{current*factor} via {factor}x on {n_tiles} tiles")
+        for stem in tiles_with_class[cls_idx]:
+            tile_factor[stem] = max(tile_factor.get(stem, 1), factor)
+
+    # Materialize duplicates
+    n_dup = 0
+    for stem, factor in tile_factor.items():
+        if factor <= 1:
+            continue
+        src_lbl = TRAIN_LBL / f"{stem}.txt"
+        src_img = None
+        for ext in (".png", ".jpg", ".jpeg"):
+            cand = TRAIN_IMG / f"{stem}{ext}"
+            if cand.exists():
+                src_img = cand
+                break
+        if not src_img or not src_lbl.exists():
+            continue
+        for i in range(1, factor):  # factor=3 → make 2 duplicates (orig + 2 = 3 total)
+            dup_stem = f"{stem}__dup{i}"
+            dup_lbl = TRAIN_LBL / f"{dup_stem}.txt"
+            dup_img = TRAIN_IMG / f"{dup_stem}{src_img.suffix}"
+            if not dup_lbl.exists():
+                dup_lbl.write_bytes(src_lbl.read_bytes())
+            if not dup_img.exists():
+                dup_img.write_bytes(src_img.read_bytes())
+            n_dup += 1
+    print(f"  Created {n_dup} duplicate tile pairs ({len(tile_factor)} unique tiles oversampled)")
+
+
 def create_transfer_archive():
     """Pack dataset into /tmp/dataset_for_gpu.tar.gz for scp to Windows."""
     import subprocess
@@ -328,6 +416,11 @@ def main():
 
     n_img2, n_lbl2 = count_existing()
     print(f"\nDataset after merge: {n_img2} images, {n_lbl2} label files (+{n_img2-n_img} images, +{n_lbl2-n_lbl} labels)")
+
+    print("\nOversampling rare instrument classes for v1-9...")
+    oversample_rare_classes()
+    n_img3, n_lbl3 = count_existing()
+    print(f"Dataset after oversample: {n_img3} images, {n_lbl3} label files (+{n_img3-n_img2} duplicates)")
 
     create_transfer_archive()
     print("\nDone. Next step: scp /tmp/dataset_for_gpu.tar.gz to Windows and run train_gpu.py")
