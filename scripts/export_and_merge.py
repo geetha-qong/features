@@ -68,6 +68,8 @@ CANONICAL_CLASSES = [
     "valve_ncbv",          # 17
     "valve_relief_safety", # 18
     "valve_pnuectrl",      # 19
+    "inst_bpcs",           # 20  ← new in v1-10 (Basic Process Control System bubble)
+    "inst_sis",            # 21  ← new in v1-10 (Safety Instrumented System bubble)
 ]
 
 # LS label name → canonical index (handles name differences and typos).
@@ -98,6 +100,8 @@ LS_NAME_TO_IDX: Dict[str, int] = {
     "valve_pnuectrl": 19,
     "valve_pneuctrl": 19,      # spelling variant in project 6
     "inst_local_panel": 10,    # remap: local panel-mounted instrument → PLC
+    "inst_bpcs": 20,           # new in v1-10
+    "inst_sis": 21,            # new in v1-10
 }
 
 
@@ -303,6 +307,8 @@ OVERSAMPLE_TARGETS: Dict[str, int] = {
     "interlock-R": 175,     # baseline 35 (5x cap)
     "valve_gl": 250,        # baseline 50
     "valve_3way_relief": 300,  # baseline ~99
+    "inst_bpcs": 500,       # v1-10 new — bootstrap toward DCS-level (5x cap until enough labels)
+    "inst_sis": 500,        # v1-10 new — bootstrap toward DCS-level (5x cap until enough labels)
 }
 OVERSAMPLE_CAP = 5    # max duplication factor per tile (prevents overfitting)
 
