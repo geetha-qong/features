@@ -2,13 +2,31 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Read order at the start of every session (do NOT skip)
+
+1. **`SESSION_STATE.md`** — what the previous session did, where it stopped, next concrete step, what's blocked, gotchas the previous session learned. Short on purpose; the journal lives in FEATURES.md.
+2. **`FEATURES.md`** — append-only history of every meaningful decision, model swap, threshold change, architecture choice. Read the most recent 5–10 entries.
+3. **This file (`CLAUDE.md`)** — repo conventions, branch policy, environment, security rules.
+4. **The user's current message** — what they want done now.
+
+## Must do during every session
+
+- When implementing a feature, behavior change, model swap, or architecture decision: **append one entry to `FEATURES.md`**. Never edit past entries — mark superseded with `SUPERSEDED BY #NN`. Recording the *reasoning* matters more than the choice. Format inside FEATURES.md.
+- For long discussions, link out to `docs/decisions/NN-title.md` from the FEATURES.md entry.
+
+## Must do at the end of every session
+
+- **Overwrite `SESSION_STATE.md` in full** with: what happened this session, where you stopped (file paths, commit hashes), next concrete step, what's blocked, what the next session should know (gotchas, lessons). Don't accumulate — overwrite. The journal accumulates in FEATURES.md, not here.
+
 ## Project Goal
 
-Extract a **Valve List** from scanned P&ID drawings (PDFs) and output a structured CSV.
-Target: **≥90% recall** on valve identification.
+Extract a **Valve List** from scanned P&ID drawings (PDFs) and output a structured CSV today.
+Evolving into a **human-in-the-loop digital twin platform** (multi-page graph + new deliverables: valve list, instrument index, datasheets, BOM, loop trace, equipment list) over the next 6-9 months. See FEATURES.md #01 and the plan at `/Users/maahedev/.claude/plans/async-soaring-puppy.md` for the full trajectory.
 
-**Current status**: Production webapp live at https://dev.qongsystems.com
-**Next phase**: Replace API with own offline model (see `OWN_SYSTEM_DESIGN.md`)
+Headline metric long-term: graph isomorphism (`networkx.is_isomorphic`) — measures topological correctness of the extracted graph vs human ground truth. Short-term (existing product): ≥90% recall on valve identification.
+
+**Current status:** Production webapp live at https://dev.qongsystems.com. v1-9 YOLO ONNX deployed today (2026-05-26).
+**Next phase:** Digital Twin MVP — Sprint 1 starts today on branch `feature/digital-twin` (not yet created; SCRUM-54).
 
 ## Detail Index (read on demand)
 
@@ -19,7 +37,8 @@ Target: **≥90% recall** on valve identification.
 
 ## Branches
 
-- `dev` — active development; auto-deploys to `dev.qongsystems.com` on every push via GitHub Actions
+- `dev` — active development; auto-deploys to `dev.qongsystems.com` on every push via GitHub Actions. Existing valve-list product flows continue shipping here throughout the digital twin build-out.
+- `feature/digital-twin` — all digital twin MVP work (Sprints 1-5, ~8-10 weeks). Created in SCRUM-54. Merges back to `dev` at MVP cutover (Sprint 5).
 - `main` — reserved for future production at `app.qongsystems.com` (do not push until prod infra ready)
 - `feature/multi-cloud-saas` — superseded by `dev` (all phases A1-A3, B1-B5 merged in)
 
