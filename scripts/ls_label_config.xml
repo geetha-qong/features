@@ -1,0 +1,43 @@
+<!--
+  Canonical Label Studio labeling config for P&ID annotation projects.
+
+  This is the SOURCE OF TRUTH for which labels are available in LS.
+  - To add/remove a label: edit this file, then run `scripts/ls_sync_labels.py`
+  - For NEW projects: paste this XML into the LS "Labeling Setup" step
+
+  Labels here must stay in sync with:
+  - CANONICAL_CLASSES + LS_NAME_TO_IDX in scripts/export_and_merge.py
+  - CLASS_NAMES in detector.py and scripts/auto_annotate_ls.py
+  (Labels that exist in LS but not in the Python CANONICAL_CLASSES will be
+  silently dropped at training-export time. Add them when ready to train.)
+-->
+<View>
+  <Image name="image" value="$image"/>
+  <RectangleLabels name="label" toName="image">
+    <!-- Valves -->
+    <Label value="valve_bf" background="#FF6B6B"/>
+    <Label value="valve_bv" background="#4ECDC4"/>
+    <Label value="valve_ck" background="#96CEB4"/>
+    <Label value="valve_cv" background="#DDA0DD"/>
+    <Label value="valve_db" background="#45B7D1"/>
+    <Label value="valve_gen" background="#98D8C8"/>
+    <Label value="valve_gl" background="#FFEAA7"/>
+    <Label value="valve_gt" background="#B37FEB"/>
+    <Label value="valve_3way_relief" background="#722ED1"/>
+    <Label value="valve_ncbv" background="#1890FF"/>
+    <Label value="valve_relief_safety" background="#CF1322"/>
+    <Label value="valve_pnuectrl" background="#FA541C"/>
+    <!-- Instruments -->
+    <Label value="inst_field" background="#FFA39E"/>
+    <Label value="inst_field-R" background="#5CDBD3"/>
+    <Label value="DCS" background="#FFC069"/>
+    <Label value="PLC" background="#AD8B00"/>
+    <Label value="interlock" background="#D4380D"/>
+    <Label value="interlock-R" background="#096DD9"/>
+    <Label value="inst_bpcs" background="#FA8C16"/>
+    <Label value="inst_sis" background="#EB2F96"/>
+    <!-- Equipment -->
+    <Label value="Pump/Dwg Pump" background="#389E0D"/>
+    <Label value="Motor" background="#D3F261"/>
+  </RectangleLabels>
+</View>
