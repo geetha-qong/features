@@ -172,10 +172,10 @@ This is intentionally simple. ML-based matching is a v1.5 / FLEDGE topic.
 |---|---|---|---|
 | **Omprakash** (full-stack) | Qong Studio Konva canvas (6) · per-customer template engine (3) · deliverable generators (3) · customer-side quote-request UI (1) · vendor API integration glue (1) | 14 | 14 ✅ at cap |
 | **Tarunkumar** (CTO / lead) | SaaS-infra backend: orgs / projects / audit / email notifications (5) · AWS + ops (ongoing) · Laravel vendor portal — self-build or hire external (separate stream) | partial-FT | flex |
-| **Geetha** (ML data / eval) | Datasheet content extraction model (6) · Equipment YOLO classes + annotation + train (4) · eval harness + golden test set (3) | 13 | 14 ✅ 1w slack |
-| **Swaraj** (ML training infra) | Training infra + AWS retraining loop (4) · pre-load 5-10 vendor catalogs (3) · Postgres schema + backend helpers (2) | 9 | 14 ✅ 5w slack |
+| **Geetha** (ML data / eval) | Datasheet content extraction model (6) · Equipment YOLO class spec + LS annotation + dataset prep + model-QC (2) · eval harness + golden test set (3) | 11 | 14 ✅ 3w slack |
+| **Swaraj** (ML training infra) | Training infra + AWS retraining loop (4) · Equipment YOLO training runs + eval-gate integration (2) · pre-load 5-10 vendor catalogs (3) · Postgres schema + backend helpers (2) | 11 | 14 ✅ 3w slack |
 
-**Bottleneck:** Omprakash, at-capacity. Everyone else has slack to absorb surprises. The capacity unlock was Tarunkumar handling Laravel vendor portal separately — without that, Omprakash was at 2.3× capacity.
+**Bottleneck:** Omprakash, at-capacity. Geetha and Swaraj each carry 3 weeks of slack to absorb surprises and back each other up (Geetha → Swaraj for training-execution overflow if a model needs more iterations; Swaraj → Geetha for annotation help if equipment class definitions explode in scope). The capacity unlock was Tarunkumar handling the Laravel vendor portal separately — without that, Omprakash was at 2.3× capacity.
 
 ### 5.2 Cross-cutting open questions per work-stream
 
@@ -193,7 +193,7 @@ This is a sketch, not a sprint plan. Sprint planning happens in the implementati
 |---|---|
 | 1-2 | Sprint 1 wrap-up: Qong Studio scaffold + first hello-konva canvas (per existing QS-60). Geetha kicks off datasheet field-extraction R&D. Swaraj begins AWS burst-training plumbing (QS-52). Tarunkumar finishes AWS setup (QS-48) and stands up Laravel portal repo. |
 | 3-5 | Qong Studio renders one tile with bbox editing + keyboard shortcuts. Equipment-class annotations start in LS (Geetha). First 2 vendor catalogs pre-loaded (Swaraj). Orgs / projects schemas migrated (Tarunkumar). |
-| 6-8 | Equipment List deliverable working end-to-end. Per-customer template engine reads JSON + outputs Valve List & Instrument Index in 2 EPC formats. Vendor portal MVP login + catalog upload (Tarunkumar). Datasheet field extraction first pass (Geetha). |
+| 6-8 | Equipment YOLO model trained on AWS and eval-gated (Swaraj — using the new burst-mode pipeline from QS-52). Equipment List deliverable working end-to-end. Per-customer template engine reads JSON + outputs Valve List & Instrument Index in 2 EPC formats. Vendor portal MVP login + catalog upload (Tarunkumar). Datasheet field extraction first pass (Geetha). |
 | 9-11 | Datasheet PDF deliverable generating from internal graph + vendor catalog match. Vendor portal email notifications wired (Tarunkumar). Audit table + minimal SQL queries (Tarunkumar). First eval-harness run against 5 golden MUK drawings (Geetha). |
 | 12-13 | First 3 design-partner agencies invited. End-to-end test: agency uploads P&ID → reviewer corrects in 15 min → exports 4 deliverables → vendor receives email notification. Bug-fixing pass. |
 | 14 | Public-ish launch — open signup for design-partner agencies. Telemetry watching. Lead working invoices manually. |
