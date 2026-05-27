@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mono & overlines</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin: 0; padding: 22px 26px; background: #fff; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .sec { display: grid; gap: 10px; }
+  .meta { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.08em; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tags .tag { padding: 4px 8px; background: var(--ink-50); border: 1px solid var(--border); border-radius: 4px; color: var(--ink-900); font-weight: 500; }
+  .ov-list { display: grid; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="sec">
+    <div class="meta">Mono · JetBrains · engineering tags</div>
+    <div class="tags">
+      <span class="tag">PT-101</span><span class="tag">FT-201</span><span class="tag">LT-301</span><span class="tag">TT-401</span><span class="tag">AT-501</span><span class="tag">V-102</span>
+    </div>
+    <div class="tag" style="font-size: 14px; color: var(--qong-purple); font-weight: 700;">QONG-PID-001 · REV3</div>
+  </div>
+  <div class="sec">
+    <div class="meta">Overlines · Barlow Condensed 700 · 16% tracking</div>
+    <div class="ov-list">
+      <div class="overline" style="font-size: 13px;">Next-Engineered for Oil &amp; Gas</div>
+      <div class="overline" style="font-size: 13px;">The Problem</div>
+      <div class="overline" style="font-size: 13px;">Why Choose QONG Systems</div>
+      <div class="overline" style="font-size: 13px; color:var(--qong-magenta)">● Now in Active Development</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

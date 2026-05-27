@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nav bar</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin: 0; padding: 18px; background: var(--ink-50); font-family: var(--font-sans); min-height: 100px; }
+  nav {
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    height: 52px;
+    padding: 0 6px 0 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: var(--shadow-sm);
+    box-sizing: border-box;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 16px; letter-spacing: -0.02em; line-height: 1; color: var(--fg-1); }
+  .brand img { width: 24px; height: 24px; display: block; }
+
+  .links { display: flex; align-items: center; gap: 2px; margin-left: 10px; }
+  .links a {
+    font-size: 13px; font-weight: 500; color: var(--fg-2);
+    height: 32px; padding: 0 14px;
+    display: inline-flex; align-items: center;
+    border-radius: 999px; text-decoration: none;
+    line-height: 1;
+  }
+  .links a.active { background: var(--qong-violet-100); color: var(--qong-purple); font-weight: 600; }
+
+  .spacer { flex: 1; }
+
+  .cta {
+    background: var(--qong-gradient); color: #fff;
+    font-family: var(--font-display); font-size: 14px; font-weight: 600;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    height: 40px; padding: 0 20px;
+    display: inline-flex; align-items: center;
+    border-radius: 999px; border: none; cursor: pointer;
+    box-shadow: var(--glow-brand-sm);
+    line-height: 1;
+  }
+</style>
+</head>
+<body>
+<nav>
+  <div class="brand"><img src="../assets/qong-mark.png" alt="">QONG</div>
+  <div class="links">
+    <a href="#" class="active">Home</a>
+    <a href="#">About</a>
+    <a href="#">Product</a>
+    <a href="#">Technology</a>
+    <a href="#">Careers</a>
+    <a href="#">Contact</a>
+  </div>
+  <div class="spacer"></div>
+  <button class="cta">Request Demo</button>
+</nav>
+</body>
+</html>

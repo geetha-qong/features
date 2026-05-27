@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Status chips & badges</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin: 0; padding: 22px 26px; background: #fff; font-family: var(--font-sans); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: #fff; color: var(--fg-1); }
+  .chip .dot { width: 7px; height: 7px; border-radius: 999px; }
+  .chip.brand { color: var(--qong-purple); background: var(--qong-violet-100); border-color: transparent; }
+  .chip.brand .dot { background: var(--qong-purple); box-shadow: 0 0 8px var(--qong-purple); animation: p 1.6s infinite; }
+  @keyframes p { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } }
+  .chip.ok { color: #065F46; background: #D1FAE5; border-color: transparent; }
+  .chip.ok .dot { background: #10B981; }
+  .chip.warn { color: #92400E; background: #FEF3C7; border-color: transparent; }
+  .chip.warn .dot { background: #F59E0B; }
+  .chip.err { color: #991B1B; background: #FEE2E2; border-color: transparent; }
+  .chip.err .dot { background: #EF4444; }
+  .chip.mono { font-family: var(--font-mono); font-weight: 500; }
+  .meta { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.08em; margin: 12px 0 6px; }
+  .meta:first-child { margin-top: 0; }
+</style>
+</head>
+<body>
+<div class="meta">Live status</div>
+<div class="row">
+  <span class="chip brand"><span class="dot"></span>Now in Active Development</span>
+  <span class="chip ok"><span class="dot"></span>✓ DONE</span>
+  <span class="chip warn"><span class="dot"></span>Reading…</span>
+  <span class="chip err"><span class="dot"></span>Validation Failed</span>
+</div>
+<div class="meta">Engineering tags</div>
+<div class="row">
+  <span class="chip mono">PT-101</span>
+  <span class="chip mono">FT-201 · Flow Xmtr</span>
+  <span class="chip mono">V-102 · Gate · 4" · CS</span>
+  <span class="chip mono" style="background:var(--ink-1000); color:#fff; border-color:transparent">QONG-PID-001 · REV3</span>
+</div>
+</body>
+</html>
