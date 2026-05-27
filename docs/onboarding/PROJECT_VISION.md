@@ -4,7 +4,7 @@ This file describes the end product. It changes rarely. Every session should rea
 
 ## The end product, in one paragraph
 
-An on-premises software appliance that ingests P&ID drawings from an oil and gas plant, extracts every component and the directed connections between them, lets a human reviewer correct any mistakes in a web UI, and outputs a queryable directed graph plus a valid DEXPI XML file that can be imported into any major engineering data system. The reviewer's corrections are captured as training data and used to improve the underlying models over time. The system runs without internet access at the client site.
+An on-premises software appliance that ingests P&ID drawings from an oil and gas plant, extracts every component and the directed connections between them, lets a human reviewer correct any mistakes in a web UI, and produces a set of proprietary customer deliverables (Valve List, Instrument Index, Datasheets, BOM, Equipment List, Loop Trace report) derived from a queryable internal graph. The graph itself stays inside the product — we deliberately do NOT export an industry-standard format like DEXPI, so that customers cannot trivially migrate the digitized data off our platform. The reviewer's corrections are captured as training data and used to improve the underlying models over time. The system runs without internet access at the client site.
 
 ## Why this exists
 
@@ -20,7 +20,7 @@ Oil and gas operators have thousands of legacy P&IDs trapped as PDFs and scans. 
 | Tag-to-symbol association accuracy | >= 0.92 |
 | Time to digitize one A1 sheet (cold start, GPU) | < 60 seconds |
 | Reviewer time per sheet to reach 99% accuracy | < 15 minutes |
-| DEXPI 2.0 export passes schema validation | 100% |
+| Proprietary deliverables (Valve List, Instrument Index, Datasheets, BOM, Equipment List, Loop Trace) generate cleanly from the internal graph | 100% |
 | Runs fully offline after install | yes |
 | Single-box deployment (one GPU server) | yes |
 
@@ -41,7 +41,7 @@ If a request would expand any of the above, it is out of scope. Push back and as
 
 Two distinct users, both inside the same client organization:
 
-1. **Plant engineer / project lead.** Uploads sheets, supervises a team of reviewers, exports DEXPI to their existing system. Cares about throughput and correctness.
+1. **Plant engineer / project lead.** Uploads sheets, supervises a team of reviewers, downloads the proprietary deliverable bundle (CSV/PDF/XLSX) for their existing engineering workflow. Cares about throughput and correctness.
 2. **Reviewer / drafter.** Spends the day in the review UI, correcting model output one sheet at a time. Cares about UI speed, clear visualizations of low-confidence regions, and not having to relearn the tool each release.
 
 The system is NOT designed for plant operators, control room engineers, or HSE auditors. They are downstream consumers of the graph, not users of the tool.
@@ -51,7 +51,7 @@ The system is NOT designed for plant operators, control room engineers, or HSE a
 These are the load-bearing decisions. They should not be changed without a recorded discussion in `docs/decisions/`.
 
 1. **Modular detection pipeline.** Symbols, lines, direction, text are separate models that can be improved and swapped independently. Migration to a joint-detection transformer (Relationformer family) is a v2 candidate, not v1.
-2. **DEXPI 2.0 as the canonical output format.** Internal JSON is for our own pipeline. The contract with the outside world is DEXPI XML. Anything that breaks DEXPI compatibility is a regression.
+2. **Proprietary deliverables as the only customer-facing output.** Internal JSON / NetworkX graph stays inside the product. Customers receive Valve List CSV, Instrument Index CSV, Datasheets PDF, BOM XLSX, Equipment List XLSX, and a Loop Trace report — never the raw graph and never a standards-based interchange format. We deliberately do NOT export DEXPI 2.0 XML or any other industry-standard format: providing a clean exit format would let customers walk the digitized data off our platform. See FEATURES.md #04 for the full rationale; this is a reversible decision but only on a per-customer paid-for basis.
 3. **Human-in-the-loop is a feature, not a fallback.** The review UI is core product, not scaffolding. Reviewer corrections feed an active-learning loop that improves models over time.
 4. **Offline by design at the customer site.** The *shipped product* must run with no internet at the client. No telemetry, no licence check phoning home, no model weights pulled at runtime. Updates ship as signed bundles. This constraint applies to production deployment only — see "Development vs production environments" below for the dev-side picture.
 5. **One small box per site.** Target hardware is NVIDIA DGX Spark (or higher in the DGX family). 128 GB unified Grace-Blackwell memory, ARM64 architecture, 4 TB NVMe. Code must run in that envelope.
@@ -98,7 +98,7 @@ Two environments. Do not confuse them.
 |-- api/                         (FastAPI service exposing pipeline + storage)
 |-- web/                         (review UI - React or Inertia, decide separately)
 |-- training/                    (data prep, training scripts, eval harness)
-|-- schemas/                     (JSON Schema + DEXPI XSD, versioned)
+|-- schemas/                     (JSON Schema for internal canonical graph, versioned)
 |-- models/                      (model weights, gitignored, fetched from registry)
 |-- deploy/                      (Docker Compose, installer scripts, licence)
 `-- tests/                       (cross-cutting; unit tests live next to code)

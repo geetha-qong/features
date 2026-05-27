@@ -1,6 +1,6 @@
 # P&ID Digitization
 
-On-premises software that turns oil-and-gas P&ID drawings into a queryable directed graph and DEXPI XML. Runs without internet at the client site. Reviewer-assisted.
+On-premises software that turns oil-and-gas P&ID drawings into a queryable internal directed graph and a set of proprietary customer deliverables (Valve List, Instrument Index, Datasheets, BOM, Equipment List, Loop Trace report). The graph stays inside the product — no DEXPI / industry-standard export (see FEATURES.md #04). Runs without internet at the client site. Reviewer-assisted.
 
 ## For humans joining this codebase
 
@@ -23,7 +23,7 @@ Read the live **`/CLAUDE.md`** at the repo root first — it tells you the actua
 | Question | Answer |
 |---|---|
 | What problem? | Oil-and-gas plants have thousands of P&IDs locked as PDFs. Manually digitizing them takes 3–6 months per facility. We do it in days with a reviewer in the loop. |
-| What's the deliverable? | A directed graph (Neo4j) and a DEXPI 2.0 XML file. |
+| What's the deliverable? | A queryable internal directed graph (Neo4j) plus customer-facing files: Valve List CSV, Instrument Index CSV, Datasheets PDF, BOM XLSX, Equipment List XLSX, Loop Trace report. The raw graph never leaves the product. |
 | What's the differentiator? | The review UI and the active-learning loop. Detection accuracy alone is a commodity. |
 | Where does this run? | On a single on-premises GPU box at the client site. No internet. |
 | Who is the user? | A reviewer (drafter or junior process engineer) who spends 8 hours a day in the review UI. |
@@ -46,7 +46,7 @@ pipeline/       Python detection + graph build
 api/            FastAPI control plane
 web/            React review UI (PixiJS canvas)
 training/       Model training scripts and eval harness
-schemas/        JSON Schema and DEXPI XSD
+schemas/        JSON Schema for internal canonical graph
 deploy/         Docker Compose, installer, rollback
 docs/           Reference docs, datasets, decision records
 ```

@@ -183,4 +183,4 @@ If a request lands that asks for any of the above, push back as per `CLAUDE.md`.
 
 ## Acceptance criteria for v1
 
-The UI ships when a reviewer, with the keyboard shortcuts memorized, can take a freshly-detected sheet from "raw model output" to "topologically correct DEXPI export" in 15 minutes on at least 80% of held-out test sheets. That is the bar. Pretty animations do not count; correction throughput does.
+The UI ships when a reviewer, with the keyboard shortcuts memorized, can take a freshly-detected sheet from "raw model output" to "topologically-correct internal graph that generates clean customer deliverables" in 15 minutes on at least 80% of held-out test sheets. That is the bar. Pretty animations do not count; correction throughput does.

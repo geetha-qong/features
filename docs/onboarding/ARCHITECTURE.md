@@ -79,7 +79,7 @@ The pipeline is modular. Each stage is independently swappable. The current stag
 8. **Graph construction** — NetworkX in-process, persisted to Neo4j. Nodes carry symbol attributes; edges carry direction and line type.
 9. **Validation** — ISA S5.1 rule checks, orphan detection, cycle detection in directed flows.
 10. **Review UI** — human-in-the-loop correction. See `REVIEW_UI_SPEC.md`.
-11. **Export** — JSON (internal canonical) and DEXPI 2.0 XML (external contract). Validated against DEXPI XSD before output.
+11. **Export** — proprietary customer deliverables generated from the internal canonical JSON: Valve List CSV, Instrument Index CSV, Datasheets PDF, BOM XLSX, Equipment List XLSX, Loop Trace report. Internal canonical JSON is versioned in `schemas/version.json` and is not shipped to customers. No DEXPI XML or other industry-standard export — see FEATURES.md #04.
 
 The two stages that dominate v1 effort are **line + direction** (the technical core) and **review UI** (the product surface). Everything else either exists in POC form or is well-trodden engineering.
 
@@ -115,7 +115,7 @@ The two stages that dominate v1 effort are **line + direction** (the technical c
                          |  |  |  +----> MinIO (tiles, weights, exports)
                          |  |  +-------> Triton inference server (GPU)
                          |  +----------> PaddleOCR
-                         +-------------> NetworkX, pydexpi    |
+                         +-------------> NetworkX, deliverable generators (CSV/PDF/XLSX)
                                                               |
                     +----------------+                        |
                     | Triton         |                        |
@@ -156,7 +156,7 @@ Every box above is a Docker container. The whole thing comes up with one `docker
 | Canvas renderer | Konva 9 via `react-konva` | Built-in drag/transform/hit-detection; comfortably handles P&IDs in our element range; faster team productivity than PixiJS. See FEATURES.md #03. |
 | Frontend state | Zustand + TanStack Query | Light, no Redux ceremony |
 | Schema validation | Pydantic v2 (back), Zod (front) | Same contract both sides |
-| DEXPI output | `pydexpi` | Validates against official XSD |
+| Deliverable generation | pandas + openpyxl + reportlab | CSV / XLSX / PDF customer outputs (no DEXPI — see FEATURES.md #04) |
 | Testing | pytest + Vitest + Playwright | Unit, component, E2E |
 | Container runtime | Docker Compose (v1) → k3s (later) | One-box first |
 | Monitoring | Prometheus + Grafana | Local-only dashboards |
@@ -176,7 +176,7 @@ For a four-person team (2 ML, 2 full-stack) with the existing symbol-detection P
 | **4. Association and graph** | 4 weeks | Tag-to-symbol association, line-endpoint resolution, graph persisted to Neo4j, queryable | — |
 | **5. Full review UI** | 6 weeks | Everything in `REVIEW_UI_SPEC.md`: editing, keyboard shortcuts, issue panel, ReviewEvent capture | — |
 | **6. Active learning loop** | 6 weeks | TrainingEvent pipeline, weekly retraining, eval harness, signed model bundles. See `ACTIVE_LEARNING_SPEC.md` | — |
-| **7. DEXPI export and validation** | 4 weeks | `pydexpi` integration, XSD validation in CI, end-to-end test with a reference DEXPI viewer | — |
+| **7. Proprietary deliverables export** | 4 weeks | Generators for Valve List CSV, Instrument Index CSV, Datasheets PDF, BOM XLSX, Equipment List XLSX, Loop Trace report. Smoke test that every deliverable opens cleanly in Excel / Acrobat. | — |
 | **8. Offline deployment** | 4 weeks | Installer, licensing, signed-bundle update mechanism, on-prem monitoring | — |
 
 Approximate total calendar time with parallelism: **~9 months**. Without parallelism it stretches to 12+. Plan for the longer number — interruptions and integration debt always cost more than planned.
@@ -187,8 +187,8 @@ These are the interfaces that downstream code and external systems depend on. Ch
 
 - **`ReviewEvent` schema** (Postgres + API) — see `REVIEW_UI_SPEC.md`
 - **`TrainingEvent` schema** (Postgres + MinIO artifacts) — see `ACTIVE_LEARNING_SPEC.md`
-- **DEXPI 2.0 XML output** — must validate against the official XSD
-- **Internal canonical JSON** — version pinned in `schemas/version.json`
+- **Internal canonical JSON** — version pinned in `schemas/version.json`; this is the contract every deliverable generator reads from
+- **Proprietary deliverable file formats** — Valve List / Instrument Index CSV column order, Datasheet PDF template, BOM / Equipment List XLSX sheet structure — all locked once a customer signs off; changes go in `schemas/version.json` and FEATURES.md
 - **Model artifact layout in MinIO** — `models/{model_target}/{version}/`
 - **Pipeline job state machine** — `queued → preprocessing → detecting → associating → building_graph → validating → ready_for_review → reviewed → exported`
 
@@ -228,7 +228,7 @@ These are the interfaces that downstream code and external systems depend on. Ch
 │   ├── synthetic/              (synthetic data generation)
 │   ├── runs/                   (training scripts, one per model_target)
 │   └── eval/                   (eval harness)
-├── schemas/                    (JSON Schema + DEXPI XSD)
+├── schemas/                    (JSON Schema for internal canonical graph)
 ├── models/                     (gitignored; weights fetched from registry)
 ├── deploy/
 │   ├── docker-compose.yml
@@ -247,7 +247,7 @@ These are the interfaces that downstream code and external systems depend on. Ch
 | Single-GPU box can't run all models concurrently | Medium | Triton scheduling + INT8 quantization. Profile at end of Phase 2 |
 | Konva performance ceiling hit on unusually dense sheets (>10,000 overlay elements) | Low | Tile overlays by region; if recurring, migrate the renderer to PixiJS. Don't pre-optimize. |
 | Hexagon SmartPlant bundles a free P&ID parser as response | Medium | Compete on review workflow, not on detection accuracy alone |
-| DEXPI output rejected by client's downstream system | Low | Validate against XSD in CI from Phase 7 day one |
+| Deliverable file formats rejected by client (column naming, sheet ordering, PDF layout) | Low | Lock per-customer deliverable templates at signing; smoke-test that every deliverable opens cleanly in Excel + Acrobat in CI |
 
 ## 9. What this file is not
 

@@ -39,7 +39,7 @@ The most complete end-to-end reference available. Production-grade architecture 
 ### AWS Solutions Library — guidance-for-piping-and-instrumentation-diagrams-digitization-on-aws
 https://github.com/aws-solutions-library-samples/guidance-for-piping-and-instrumentation-diagrams-digitization-on-aws
 
-AWS Bedrock Data Automation + SageMaker version. The cloud bits don't apply to us (we're on-prem), but their output format choices (DEXPI XML, JSON with bounding boxes) are worth copying directly.
+AWS Bedrock Data Automation + SageMaker version. The cloud bits don't apply to us (we're on-prem). Their **JSON output schema** for bounding boxes + tag associations is worth copying directly. Skip the DEXPI export step they include — we deliberately do NOT ship DEXPI (see FEATURES.md #04); our customer deliverables are proprietary CSV / PDF / XLSX instead.
 
 ### Mohit Gupta — PID_Symbol_Detection and PID-KnowledgeGraph-demo
 - https://github.com/mgupta70/PID_Symbol_Detection
@@ -64,16 +64,13 @@ Detectron2-based alternative. Good if we ever want to compare against Detectron'
 
 ## Standards and formats
 
-### DEXPI 2.0 specification
+### ISA S5.1 (we use this)
+The instrument symbology standard. Every oil-and-gas P&ID respects it. Tag prefixes (PT, TT, FT, LT, PV, FV, FCV, ...) are defined here. Keep a copy of the standard at hand when writing the `associate/` stage. This is the only external standard the product reads from.
+
+### DEXPI 2.0 — evaluated and intentionally rejected
 https://dexpi.org/specifications/
 
-The output format we're committed to. ISO 15926-based, XML, well-supported by EPCs. Validation against the official XSD is part of CI.
-
-### pyDEXPI
-Python framework for reading and writing DEXPI XML. Wraps the schema and provides validation. Install with `pip install pydexpi`. We use this from day one of Phase 7.
-
-### ISA S5.1
-The instrument symbology standard. Every oil-and-gas P&ID respects it. Tag prefixes (PT, TT, FT, LT, PV, FV, FCV, ...) are defined here. Keep a copy of the standard at hand when writing the `associate/` stage.
+DEXPI 2.0 is an ISO-15926-based XML interchange format for P&ID data, well-supported by EPCs and major engineering platforms. An earlier draft of this project committed to it as the canonical output. **That decision was reversed on 2026-05-26** (see FEATURES.md #04): exporting a clean industry-standard format would make it trivially easy for customers to migrate digitized data off our platform, undermining the commercial moat. We therefore ship **only proprietary deliverables** (Valve List, Instrument Index, Datasheets, BOM, Equipment List, Loop Trace) in CSV / PDF / XLSX. The internal graph schema in `schemas/version.json` is independent of DEXPI. Do not add `pydexpi` to requirements. Reversible later only on a per-customer paid-for basis.
 
 ## When to reach for which paper
 
@@ -85,6 +82,6 @@ The instrument symbology standard. Every oil-and-gas P&ID respects it. Tag prefi
 | `pipeline/text/` | Byun 2025 (integrated detection), PaddleOCR docs |
 | `pipeline/associate/` | Mani 2020 (text-symbol association), ISA S5.1 |
 | `pipeline/validate/` | Nature 2025 (error detection methods) |
-| `pipeline/export/` | DEXPI 2.0 spec, pyDEXPI docs |
+| `pipeline/export/` | Internal canonical schema in `schemas/version.json`; pandas / openpyxl / reportlab for CSV / XLSX / PDF deliverables |
 | `web/` (review UI) | None — this is product work, not research |
 | `training/` | All four foundational papers, plus our own eval results in `docs/decisions/` |
