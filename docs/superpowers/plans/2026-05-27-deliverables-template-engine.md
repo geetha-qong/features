@@ -2,11 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the customer-template engine and four deliverable generators (Valve List CSV+XLSX, Instrument Index CSV+XLSX, Equipment List XLSX, Instrument Datasheet PDF) that read the pipeline's internal canonical JSON and produce per-customer formatted files for the Qong Studio MVP.
+**Goal:** Build the customer-template engine and four deliverable generators (Valve List CSV+XLSX, Instrument Index CSV+XLSX, Equipment List XLSX, Instrument Datasheet **XLSX** — sectioned multi-sheet template matching the customer IDS reference) that read the pipeline's internal canonical JSON and produce per-customer formatted files for the Qong Studio MVP.
 
-**Architecture:** A `Generator` abstract base class with one concrete generator per (deliverable_type × file_format). Each generator takes a `JobCanonical` Pydantic model (the pipeline's internal output) + a `TemplateConfig` Pydantic model (a per-customer JSON file) and returns `bytes`. A `Registry` maps (deliverable_type, file_format) → generator class. A FastAPI router exposes `POST /api/jobs/{job_id}/export/{deliverable}` that loads the job's canonical JSON from the existing pipeline output path, picks the customer template from the project's `template_slug`, runs the generator, stores the file, and returns a download URL.
+**Architecture:** A `Generator` abstract base class with one concrete generator per (deliverable_type × file_format). Each generator takes a `JobCanonical` Pydantic model (the pipeline's internal output) + a `TemplateConfig` Pydantic model (a per-customer JSON file) and returns `bytes`. A `Registry` maps (deliverable_type, file_format) → generator class. A FastAPI router exposes `POST /api/v1/jobs/{job_id}/export/{deliverable}/{format}` that loads the job's canonical JSON from the existing pipeline output path, picks the customer template from the project's `template_slug`, runs the generator, stores the file, and returns a download response.
 
-**Tech Stack:** Python 3.12, FastAPI, Pydantic v2, pandas, openpyxl, reportlab, pytest. Existing webapp scaffolding (`webapp/database.py`, `webapp/models.py`, `webapp/routers/`).
+**Tech Stack:** Python 3.12, FastAPI, Pydantic v2, pandas, openpyxl, pytest. Existing webapp scaffolding (`webapp/database.py`, `webapp/models.py`, `webapp/routers/`).
+
+**Column reference sources** (used to derive template defaults — engineer should not invent columns):
+- **Valve List default** — exact columns from existing `parser.py:113` `to_csv_dict()` (currently produced by `webapp/pipeline_runner.py`). Includes the trailing space on `"Pneumatic Actuator "` — preserve verbatim.
+- **Instrument Index default** — 32 columns from the TNB customer sample (`TNB-26E009A001_Instrument index R0.pdf`).
+- **Instrument Datasheet template** — 11-section XLSX structure from `23E065AJ01_ASV_IDS.xlsx` (General Data, Inlet line, Outlet line, Operating Conditions, Calculation Results, Valve Body, Actuator, Positioner, Accessories, Position Transmitter, Purchase).
+- **Equipment List default** — Instrument Index columns adapted to equipment (drop instrument-only columns like Signal Type / Loop Name; rename Service → Service Duty).
 
 **Reads from spec:** `docs/decisions/01-qong-studio-mvp-design.md` §3 (deliverables), §4.1 (architecture), §4.2 (extraction pipeline), §4.4 (in-scope).
 
@@ -27,14 +33,14 @@ webapp/deliverables/
 ├── valve_list.py                        # ValveListCSVGenerator + ValveListXLSXGenerator
 ├── instrument_index.py                  # InstrumentIndexCSVGenerator + InstrumentIndexXLSXGenerator
 ├── equipment_list.py                    # EquipmentListXLSXGenerator
-├── datasheet.py                         # DatasheetPDFGenerator
+├── datasheet.py                         # DatasheetXLSXGenerator (sectioned IDS)
 └── customer_templates/
     ├── default.json                     # Fallback template
     ├── ronesans.json                    # Ronesans EPC template
     └── muk.json                         # MUK Oman template
 
 webapp/routers/
-└── exports.py                           # POST /api/jobs/{id}/export/{deliverable}
+└── exports.py                           # POST /api/v1/jobs/{id}/export/{deliverable}/{format}
 
 tests/unit/deliverables/
 ├── __init__.py
@@ -57,7 +63,7 @@ tests/e2e/
 
 **Modified files:**
 
-- `requirements-webapp.txt` — add openpyxl, reportlab, pydantic>=2 (pandas already present)
+- `requirements-webapp.txt` — add openpyxl, pydantic>=2 (pandas already present)
 - `webapp/main.py` — register the new exports router
 - (no migration needed in this plan — uses existing `Job.output_csv_path` + reads canonical from filesystem alongside existing CSV)
 
@@ -72,13 +78,12 @@ tests/e2e/
 
 Run: `cat requirements-webapp.txt`
 
-- [ ] **Step 2: Append the three new dependencies**
+- [ ] **Step 2: Append the two new dependencies**
 
-Add these three lines to the end of `requirements-webapp.txt`:
+Add these two lines to the end of `requirements-webapp.txt`:
 
 ```
 openpyxl>=3.1.0,<4.0.0
-reportlab>=4.2.0,<5.0.0
 pydantic>=2.7.0,<3.0.0
 ```
 
@@ -89,14 +94,14 @@ Expected: build succeeds, image tagged.
 
 - [ ] **Step 4: Smoke-test imports inside the container**
 
-Run: `docker compose run --rm web python3 -c "import openpyxl, reportlab, pydantic; print(openpyxl.__version__, reportlab.Version, pydantic.VERSION)"`
-Expected: prints three version strings, no errors.
+Run: `docker compose run --rm web python3 -c "import openpyxl, pydantic; print(openpyxl.__version__, pydantic.VERSION)"`
+Expected: prints two version strings, no errors.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add requirements-webapp.txt
-git commit -m "feat(deliverables): add openpyxl, reportlab, pydantic>=2 deps"
+git commit -m "feat(deliverables): add openpyxl, pydantic>=2 deps"
 ```
 
 ---
@@ -132,15 +137,21 @@ def test_jobcanonical_parses_sample_fixture():
     job = JobCanonical.model_validate(raw)
     assert job.job_id == 41
     assert job.canonical_schema_version == "1.0.0"
-    assert job.customer_template_slug == "ronesans"
+    assert job.customer_template_slug == "default"
     assert len(job.entities) == 4
-    valve = next(e for e in job.entities if e.entity_class == "valve")
-    assert valve.tag == "GV-001"
-    assert valve.fields["size"] == "4in"
+    valves = [e for e in job.entities if e.entity_class == "valve"]
+    assert len(valves) == 2
+    first_valve = valves[0]
+    assert first_valve.tag == "62-GL-151000"
+    assert first_valve.fields["category"] == "GL"
+    assert first_valve.fields["size"] == "8"
     instr = next(e for e in job.entities if e.entity_class == "instrument")
-    assert instr.tag == "PT-01018"
+    assert instr.tag == "422-11-PT-006A"
+    assert instr.fields["loop_name"] == "422-11-P-006"
     assert instr.vendor_match is not None
     assert instr.vendor_match.vendor_name == "Yokogawa"
+    equipment = next(e for e in job.entities if e.entity_class == "equipment")
+    assert equipment.tag == "V-101"
 
 
 def test_jobcanonical_rejects_unknown_entity_class():
@@ -200,43 +211,118 @@ def canonical_sample_path() -> Path:
     return FIXTURE_DIR / "canonical_sample.json"
 ```
 
-Create `tests/unit/deliverables/fixtures/canonical_sample.json`:
+Create `tests/unit/deliverables/fixtures/canonical_sample.json`. The `fields` dict carries
+every deliverable-specific datum (Valve List columns, Instrument Index columns, IDS sections).
+Field keys are conventional snake_case names mapped from the customer reference samples
+(parser.py for valves, TNB Instrument Index PDF for instruments, 23E065 ASV IDS xlsx for
+datasheet sections):
 
 ```json
 {
   "job_id": 41,
   "canonical_schema_version": "1.0.0",
-  "customer_template_slug": "ronesans",
+  "customer_template_slug": "default",
   "entities": [
     {
       "entity_id": "11111111-1111-1111-1111-111111111111",
       "entity_class": "valve",
-      "sub_class": "gate_valve",
-      "tag": "GV-001",
-      "pid_number": "P-001",
+      "sub_class": "GL",
+      "tag": "62-GL-151000",
+      "pid_number": "MUK-62-1-15-1001-001-24C7-D",
       "sheet_number": 1,
       "bbox": [100.0, 200.0, 150.0, 250.0],
-      "fields": {"size": "4in", "service": "Process Water", "material": "CS"}
+      "fields": {
+        "dynamic_code": "-",
+        "category": "GL",
+        "size": "8",
+        "area_code": "62",
+        "serial_no": "151000",
+        "series_code": "-",
+        "fluid_code": "G",
+        "piping_class": "AC-PP",
+        "qty": "1",
+        "motor_actuator": "-",
+        "pneumatic_actuator": "-",
+        "solenoid": "-",
+        "line": "8\"-G-62151004-AC-PP"
+      }
     },
     {
       "entity_id": "22222222-2222-2222-2222-222222222222",
       "entity_class": "valve",
-      "sub_class": "ball_valve",
-      "tag": "BV-002",
-      "pid_number": "P-001",
+      "sub_class": "BV",
+      "tag": "62-BV-151001",
+      "pid_number": "MUK-62-1-15-1001-001-24C7-D",
       "sheet_number": 1,
       "bbox": [300.0, 200.0, 350.0, 250.0],
-      "fields": {"size": "2in", "service": "Instrument Air", "material": "SS316"}
+      "fields": {
+        "dynamic_code": "-",
+        "category": "BV",
+        "size": "2",
+        "area_code": "62",
+        "serial_no": "151001",
+        "series_code": "-",
+        "fluid_code": "LO",
+        "piping_class": "AC",
+        "qty": "1",
+        "motor_actuator": "-",
+        "pneumatic_actuator": "-",
+        "solenoid": "-",
+        "line": "2\"-LO-62151004-AC"
+      }
     },
     {
       "entity_id": "33333333-3333-3333-3333-333333333333",
       "entity_class": "instrument",
       "sub_class": "PT",
-      "tag": "PT-01018",
-      "pid_number": "P-001",
+      "tag": "422-11-PT-006A",
+      "pid_number": "VEN-M5BC-6-50-0002",
       "sheet_number": 1,
       "bbox": [500.0, 200.0, 540.0, 240.0],
-      "fields": {"service": "Reactor outlet pressure", "signal_type": "4-20mA HART"},
+      "fields": {
+        "rev_no": "0",
+        "unit_number": "422-11",
+        "loop_name": "422-11-P-006",
+        "instrument_type": "PRESSURE TRANSMITTER",
+        "service_description": "COMP SUCTION PRESS",
+        "line_no": "LATER",
+        "equipment_no": "422-11-K-001A",
+        "location": "FIELD",
+        "system": "UCP",
+        "technical_room": "",
+        "io_type": "AI",
+        "signal_type": "4-20mA",
+        "signal_level": "",
+        "io_grouping": "",
+        "external_power_supply": "",
+        "analog_range_low_scale": "0",
+        "analog_range_high_scale": "150",
+        "analog_range_eu": "bar",
+        "alarm_high_high": "",
+        "alarm_high": "",
+        "alarm_low": "",
+        "alarm_low_low": "",
+        "junction_box_panel": "",
+        "multi_cable_type": "",
+        "pair_no": "",
+        "datasheet_ref": "",
+        "hookup_drawing": "",
+        "remark": "",
+        "ids_inlet_line_size": "8in",
+        "ids_inlet_line_material": "Carbon Steel",
+        "ids_inlet_line_class": "101CS1P",
+        "ids_outlet_line_size": "8in",
+        "ids_outlet_line_material": "Carbon Steel",
+        "ids_outlet_line_class": "101CS1P",
+        "ids_fluid": "Gas",
+        "ids_phase": "Gas",
+        "ids_design_pressure_max": "14.5",
+        "ids_design_pressure_unit": "barg",
+        "ids_design_temperature_max": "140",
+        "ids_design_temperature_unit": "C",
+        "ids_sil_level_required": "Not Required",
+        "ids_nace_applicable": "MR0103"
+      },
       "vendor_match": {
         "vendor_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         "vendor_name": "Yokogawa",
@@ -246,7 +332,11 @@ Create `tests/unit/deliverables/fixtures/canonical_sample.json`:
           "range_min": "0",
           "range_max": "150 bar",
           "accuracy": "0.04%",
-          "body_material": "316L SS"
+          "body_material": "316L SS",
+          "ids_body_type": "Differential",
+          "ids_input_signal": "4-20 mA",
+          "ids_electrical_connection": "1/2 Inch NPT",
+          "ids_enclosure_protection": "IP66"
         }
       }
     },
@@ -255,10 +345,17 @@ Create `tests/unit/deliverables/fixtures/canonical_sample.json`:
       "entity_class": "equipment",
       "sub_class": "vessel",
       "tag": "V-101",
-      "pid_number": "P-001",
+      "pid_number": "VEN-M5BC-6-50-0006",
       "sheet_number": 1,
       "bbox": [700.0, 100.0, 900.0, 400.0],
-      "fields": {"duty": "Reactor", "volume": "12 m3"}
+      "fields": {
+        "unit_number": "422-11",
+        "equipment_type": "Reactor Vessel",
+        "service_duty": "Reactor",
+        "capacity": "12 m3",
+        "location": "FIELD",
+        "remark": ""
+      }
     }
   ]
 }
@@ -740,6 +837,17 @@ Expected: FAIL — `FileNotFoundError` on `default.json`.
 
 - [ ] **Step 3: Create the three customer template files**
 
+The three templates encode real customer column conventions. The **valve_list** columns
+mirror the existing production `parser.py:113` `to_csv_dict()` output (which `webapp/
+pipeline_runner.py` currently writes to `valve_list.csv`). Note the header
+`"Pneumatic Actuator "` carries an **intentional trailing space** — this is a
+production-shipped header, agency tooling may parse by exact column name, do not "fix" it.
+The **instrument_index** columns mirror the 32-column TNB sample
+(`TNB-26E009A001_Instrument index R0.pdf`). The **equipment_list** columns adapt the
+Instrument Index, dropping instrument-only fields (Signal Type, IO Type, Alarm Limits) and
+renaming Service → Service Duty. The **datasheet** template is a flat fallback list used
+only by the (much richer) XLSX datasheet generator in Task 13 for column auto-discovery.
+
 Create `webapp/deliverables/customer_templates/default.json`:
 
 ```json
@@ -750,54 +858,93 @@ Create `webapp/deliverables/customer_templates/default.json`:
     "valve_list": {
       "sheet_name": "Valve List",
       "columns": [
-        {"field": "tag", "header": "Tag", "order": 1},
-        {"field": "sub_class", "header": "Type", "order": 2},
-        {"field": "fields.size", "header": "Size", "order": 3},
-        {"field": "fields.service", "header": "Service", "order": 4},
-        {"field": "fields.material", "header": "Material", "order": 5},
-        {"field": "pid_number", "header": "P&ID", "order": 6}
+        {"field": "pid_number", "header": "P&ID No", "order": 1},
+        {"field": "fields.dynamic_code", "header": "Dynamic Code", "order": 2},
+        {"field": "fields.category", "header": "Category", "order": 3},
+        {"field": "fields.size", "header": "Size", "order": 4},
+        {"field": "fields.area_code", "header": "Area Code", "order": 5},
+        {"field": "fields.serial_no", "header": "Serial No", "order": 6},
+        {"field": "fields.series_code", "header": "Series Code", "order": 7},
+        {"field": "fields.fluid_code", "header": "Fluid Code", "order": 8},
+        {"field": "fields.piping_class", "header": "Piping Class", "order": 9},
+        {"field": "fields.qty", "header": "Qty", "order": 10},
+        {"field": "fields.motor_actuator", "header": "Motor Actuator", "order": 11},
+        {"field": "fields.pneumatic_actuator", "header": "Pneumatic Actuator ", "order": 12},
+        {"field": "fields.solenoid", "header": "Solenoid", "order": 13},
+        {"field": "fields.line", "header": "line", "order": 14}
       ]
     },
     "instrument_index": {
       "sheet_name": "Instrument Index",
       "columns": [
-        {"field": "tag", "header": "Tag", "order": 1},
-        {"field": "sub_class", "header": "Type", "order": 2},
-        {"field": "fields.service", "header": "Service", "order": 3},
-        {"field": "fields.signal_type", "header": "Signal", "order": 4},
-        {"field": "pid_number", "header": "P&ID", "order": 5}
+        {"field": "fields.rev_no", "header": "Rev. No", "order": 1},
+        {"field": "fields.unit_number", "header": "Unit Number", "order": 2},
+        {"field": "fields.loop_name", "header": "Loop Name", "order": 3},
+        {"field": "tag", "header": "Tag Number", "order": 4},
+        {"field": "fields.instrument_type", "header": "Instrument Type", "order": 5},
+        {"field": "fields.service_description", "header": "Service Description", "order": 6},
+        {"field": "pid_number", "header": "P&ID No.", "order": 7},
+        {"field": "fields.line_no", "header": "Line No.", "order": 8},
+        {"field": "fields.equipment_no", "header": "Equipment No.", "order": 9},
+        {"field": "fields.location", "header": "Location", "order": 10},
+        {"field": "fields.system", "header": "System", "order": 11},
+        {"field": "fields.technical_room", "header": "Technical Room", "order": 12},
+        {"field": "fields.io_type", "header": "IO Type", "order": 13},
+        {"field": "fields.signal_type", "header": "Signal Type", "order": 14},
+        {"field": "fields.signal_level", "header": "Signal Level", "order": 15},
+        {"field": "fields.io_grouping", "header": "IO Grouping", "order": 16},
+        {"field": "fields.external_power_supply", "header": "External Power Supply", "order": 17},
+        {"field": "fields.analog_range_low_scale", "header": "Analog Range Low Scale", "order": 18},
+        {"field": "fields.analog_range_high_scale", "header": "Analog Range High Scale", "order": 19},
+        {"field": "fields.analog_range_eu", "header": "Analog Range EU", "order": 20},
+        {"field": "fields.alarm_high_high", "header": "High High Alarm Limit", "order": 21},
+        {"field": "fields.alarm_high", "header": "High Alarm Limit", "order": 22},
+        {"field": "fields.alarm_low", "header": "Low Alarm Limit", "order": 23},
+        {"field": "fields.alarm_low_low", "header": "Low Low Alarm Limit", "order": 24},
+        {"field": "fields.junction_box_panel", "header": "Junction Box / Panel", "order": 25},
+        {"field": "fields.multi_cable_type", "header": "Multi-Cable Type", "order": 26},
+        {"field": "fields.pair_no", "header": "Pair No.", "order": 27},
+        {"field": "vendor_match.vendor_name", "header": "Manufacturer", "order": 28},
+        {"field": "vendor_match.product_name", "header": "Model No", "order": 29},
+        {"field": "fields.datasheet_ref", "header": "Inst. Datasheet", "order": 30},
+        {"field": "fields.hookup_drawing", "header": "Hook-up Drawing", "order": 31},
+        {"field": "fields.remark", "header": "Remark", "order": 32}
       ]
     },
     "equipment_list": {
       "sheet_name": "Equipment List",
       "columns": [
-        {"field": "tag", "header": "Tag", "order": 1},
-        {"field": "sub_class", "header": "Type", "order": 2},
-        {"field": "fields.duty", "header": "Duty", "order": 3},
-        {"field": "fields.volume", "header": "Volume", "order": 4},
-        {"field": "pid_number", "header": "P&ID", "order": 5}
+        {"field": "fields.unit_number", "header": "Unit Number", "order": 1},
+        {"field": "tag", "header": "Equipment Tag", "order": 2},
+        {"field": "fields.equipment_type", "header": "Equipment Type", "order": 3},
+        {"field": "fields.service_duty", "header": "Service Duty", "order": 4},
+        {"field": "fields.capacity", "header": "Capacity", "order": 5},
+        {"field": "pid_number", "header": "P&ID No.", "order": 6},
+        {"field": "fields.location", "header": "Location", "order": 7},
+        {"field": "vendor_match.vendor_name", "header": "Manufacturer", "order": 8},
+        {"field": "vendor_match.product_name", "header": "Model No", "order": 9},
+        {"field": "fields.remark", "header": "Remark", "order": 10}
       ]
     },
     "datasheet": {
+      "sheet_name": "Datasheet",
       "columns": [
-        {"field": "tag", "header": "Tag", "order": 1},
-        {"field": "sub_class", "header": "Type", "order": 2},
-        {"field": "fields.service", "header": "Service", "order": 3},
-        {"field": "fields.signal_type", "header": "Signal Type", "order": 4},
-        {"field": "vendor_match.vendor_name", "header": "Manufacturer", "order": 5},
-        {"field": "vendor_match.product_name", "header": "Model", "order": 6},
-        {"field": "vendor_match.part_number", "header": "Part Number", "order": 7},
-        {"field": "vendor_match.catalog_fields.range_min", "header": "Range Min", "order": 8},
-        {"field": "vendor_match.catalog_fields.range_max", "header": "Range Max", "order": 9},
-        {"field": "vendor_match.catalog_fields.accuracy", "header": "Accuracy", "order": 10},
-        {"field": "vendor_match.catalog_fields.body_material", "header": "Body Material", "order": 11}
+        {"field": "tag", "header": "Tag Number", "order": 1},
+        {"field": "fields.service_description", "header": "Service", "order": 2},
+        {"field": "pid_number", "header": "P&ID No.", "order": 3},
+        {"field": "vendor_match.vendor_name", "header": "Manufacturer", "order": 4},
+        {"field": "vendor_match.product_name", "header": "Model", "order": 5},
+        {"field": "vendor_match.part_number", "header": "Part No.", "order": 6}
       ]
     }
   }
 }
 ```
 
-Create `webapp/deliverables/customer_templates/ronesans.json`:
+Create `webapp/deliverables/customer_templates/ronesans.json` — same column structure as
+default for v1 of the MVP; an early customer-template override that just changes
+sheet_name + font + a few header labels. (Real per-EPC column variants land in v1.5 when
+a paying agency tells us what to change.)
 
 ```json
 {
@@ -808,58 +955,77 @@ Create `webapp/deliverables/customer_templates/ronesans.json`:
       "sheet_name": "VALVE LIST",
       "font": "Arial",
       "columns": [
-        {"field": "tag", "header": "Tag No.", "order": 1},
-        {"field": "fields.size", "header": "Size", "order": 2},
-        {"field": "sub_class", "header": "Valve Type", "order": 3},
-        {"field": "fields.service", "header": "Service Description", "order": 4},
-        {"field": "fields.material", "header": "Body Material", "order": 5},
-        {"field": "pid_number", "header": "P&ID Ref.", "order": 6},
-        {"field": "sheet_number", "header": "Sheet", "order": 7}
+        {"field": "pid_number", "header": "P&ID No", "order": 1},
+        {"field": "fields.dynamic_code", "header": "Dynamic Code", "order": 2},
+        {"field": "fields.category", "header": "Category", "order": 3},
+        {"field": "fields.size", "header": "Size", "order": 4},
+        {"field": "fields.area_code", "header": "Area Code", "order": 5},
+        {"field": "fields.serial_no", "header": "Serial No", "order": 6},
+        {"field": "fields.series_code", "header": "Series Code", "order": 7},
+        {"field": "fields.fluid_code", "header": "Fluid Code", "order": 8},
+        {"field": "fields.piping_class", "header": "Piping Class", "order": 9},
+        {"field": "fields.qty", "header": "Qty", "order": 10},
+        {"field": "fields.motor_actuator", "header": "Motor Actuator", "order": 11},
+        {"field": "fields.pneumatic_actuator", "header": "Pneumatic Actuator ", "order": 12},
+        {"field": "fields.solenoid", "header": "Solenoid", "order": 13},
+        {"field": "fields.line", "header": "line", "order": 14}
       ]
     },
     "instrument_index": {
       "sheet_name": "INSTRUMENT INDEX",
       "font": "Arial",
       "columns": [
-        {"field": "tag", "header": "Instrument Tag", "order": 1},
-        {"field": "sub_class", "header": "Type", "order": 2},
-        {"field": "fields.service", "header": "Description", "order": 3},
-        {"field": "fields.signal_type", "header": "Signal", "order": 4},
-        {"field": "pid_number", "header": "P&ID Ref.", "order": 5}
+        {"field": "fields.rev_no", "header": "Rev. No", "order": 1},
+        {"field": "fields.unit_number", "header": "Unit Number", "order": 2},
+        {"field": "fields.loop_name", "header": "Loop Name", "order": 3},
+        {"field": "tag", "header": "Tag Number", "order": 4},
+        {"field": "fields.instrument_type", "header": "Instrument Type", "order": 5},
+        {"field": "fields.service_description", "header": "Service Description", "order": 6},
+        {"field": "pid_number", "header": "P&ID No.", "order": 7},
+        {"field": "fields.line_no", "header": "Line No.", "order": 8},
+        {"field": "fields.equipment_no", "header": "Equipment No.", "order": 9},
+        {"field": "fields.location", "header": "Location", "order": 10},
+        {"field": "fields.system", "header": "System", "order": 11},
+        {"field": "fields.io_type", "header": "IO Type", "order": 12},
+        {"field": "fields.signal_type", "header": "Signal Type", "order": 13},
+        {"field": "fields.signal_level", "header": "Signal Level", "order": 14},
+        {"field": "fields.junction_box_panel", "header": "Junction Box / Panel", "order": 15},
+        {"field": "vendor_match.vendor_name", "header": "Manufacturer", "order": 16},
+        {"field": "vendor_match.product_name", "header": "Model No", "order": 17},
+        {"field": "fields.remark", "header": "Remark", "order": 18}
       ]
     },
     "equipment_list": {
       "sheet_name": "EQUIPMENT LIST",
       "font": "Arial",
       "columns": [
-        {"field": "tag", "header": "Equipment Tag", "order": 1},
-        {"field": "sub_class", "header": "Equipment Type", "order": 2},
-        {"field": "fields.duty", "header": "Service Duty", "order": 3},
-        {"field": "fields.volume", "header": "Capacity", "order": 4},
-        {"field": "pid_number", "header": "P&ID Ref.", "order": 5}
+        {"field": "fields.unit_number", "header": "Unit Number", "order": 1},
+        {"field": "tag", "header": "Equipment Tag", "order": 2},
+        {"field": "fields.equipment_type", "header": "Equipment Type", "order": 3},
+        {"field": "fields.service_duty", "header": "Service Duty", "order": 4},
+        {"field": "fields.capacity", "header": "Capacity", "order": 5},
+        {"field": "pid_number", "header": "P&ID Ref.", "order": 6}
       ]
     },
     "datasheet": {
+      "sheet_name": "Datasheet",
       "font": "Arial",
       "columns": [
         {"field": "tag", "header": "Tag No.", "order": 1},
-        {"field": "sub_class", "header": "Type", "order": 2},
-        {"field": "fields.service", "header": "Service", "order": 3},
-        {"field": "fields.signal_type", "header": "Signal Type", "order": 4},
-        {"field": "vendor_match.vendor_name", "header": "Manufacturer", "order": 5},
-        {"field": "vendor_match.product_name", "header": "Model", "order": 6},
-        {"field": "vendor_match.part_number", "header": "Part No.", "order": 7},
-        {"field": "vendor_match.catalog_fields.range_min", "header": "Range Min", "order": 8},
-        {"field": "vendor_match.catalog_fields.range_max", "header": "Range Max", "order": 9},
-        {"field": "vendor_match.catalog_fields.accuracy", "header": "Accuracy", "order": 10},
-        {"field": "vendor_match.catalog_fields.body_material", "header": "Body Material", "order": 11}
+        {"field": "fields.service_description", "header": "Service", "order": 2},
+        {"field": "pid_number", "header": "P&ID Ref.", "order": 3},
+        {"field": "vendor_match.vendor_name", "header": "Manufacturer", "order": 4},
+        {"field": "vendor_match.product_name", "header": "Model", "order": 5},
+        {"field": "vendor_match.part_number", "header": "Part No.", "order": 6}
       ]
     }
   }
 }
 ```
 
-Create `webapp/deliverables/customer_templates/muk.json`:
+Create `webapp/deliverables/customer_templates/muk.json` — MUK Oman variant. Currently
+identical to default for valve_list (production already ships this style for MUK); other
+deliverables get a stripped column set to demonstrate per-customer subsetting works.
 
 ```json
 {
@@ -869,39 +1035,49 @@ Create `webapp/deliverables/customer_templates/muk.json`:
     "valve_list": {
       "sheet_name": "Valve List",
       "columns": [
-        {"field": "tag", "header": "Tag", "order": 1},
-        {"field": "sub_class", "header": "Type", "order": 2},
-        {"field": "fields.size", "header": "Line Size", "order": 3},
-        {"field": "fields.service", "header": "Service", "order": 4},
-        {"field": "pid_number", "header": "Drawing", "order": 5}
+        {"field": "pid_number", "header": "P&ID No", "order": 1},
+        {"field": "fields.dynamic_code", "header": "Dynamic Code", "order": 2},
+        {"field": "fields.category", "header": "Category", "order": 3},
+        {"field": "fields.size", "header": "Size", "order": 4},
+        {"field": "fields.area_code", "header": "Area Code", "order": 5},
+        {"field": "fields.serial_no", "header": "Serial No", "order": 6},
+        {"field": "fields.series_code", "header": "Series Code", "order": 7},
+        {"field": "fields.fluid_code", "header": "Fluid Code", "order": 8},
+        {"field": "fields.piping_class", "header": "Piping Class", "order": 9},
+        {"field": "fields.qty", "header": "Qty", "order": 10},
+        {"field": "fields.motor_actuator", "header": "Motor Actuator", "order": 11},
+        {"field": "fields.pneumatic_actuator", "header": "Pneumatic Actuator ", "order": 12},
+        {"field": "fields.solenoid", "header": "Solenoid", "order": 13},
+        {"field": "fields.line", "header": "line", "order": 14}
       ]
     },
     "instrument_index": {
       "sheet_name": "Instrument Index",
       "columns": [
-        {"field": "tag", "header": "Tag", "order": 1},
-        {"field": "sub_class", "header": "Type", "order": 2},
-        {"field": "fields.service", "header": "Service", "order": 3},
-        {"field": "pid_number", "header": "Drawing", "order": 4}
+        {"field": "fields.unit_number", "header": "Unit", "order": 1},
+        {"field": "tag", "header": "Tag", "order": 2},
+        {"field": "fields.instrument_type", "header": "Type", "order": 3},
+        {"field": "fields.service_description", "header": "Service", "order": 4},
+        {"field": "pid_number", "header": "Drawing", "order": 5},
+        {"field": "fields.io_type", "header": "IO", "order": 6}
       ]
     },
     "equipment_list": {
       "sheet_name": "Equipment List",
       "columns": [
         {"field": "tag", "header": "Tag", "order": 1},
-        {"field": "sub_class", "header": "Type", "order": 2},
-        {"field": "fields.duty", "header": "Service", "order": 3},
+        {"field": "fields.equipment_type", "header": "Type", "order": 2},
+        {"field": "fields.service_duty", "header": "Service", "order": 3},
         {"field": "pid_number", "header": "Drawing", "order": 4}
       ]
     },
     "datasheet": {
+      "sheet_name": "Datasheet",
       "columns": [
         {"field": "tag", "header": "Tag", "order": 1},
-        {"field": "sub_class", "header": "Type", "order": 2},
-        {"field": "fields.service", "header": "Service", "order": 3},
-        {"field": "vendor_match.vendor_name", "header": "Mfg", "order": 4},
-        {"field": "vendor_match.product_name", "header": "Model", "order": 5},
-        {"field": "vendor_match.catalog_fields.accuracy", "header": "Accuracy", "order": 6}
+        {"field": "fields.service_description", "header": "Service", "order": 2},
+        {"field": "vendor_match.vendor_name", "header": "Mfg", "order": 3},
+        {"field": "vendor_match.product_name", "header": "Model", "order": 4}
       ]
     }
   }
@@ -1184,7 +1360,7 @@ def load_sample() -> JobCanonical:
     return JobCanonical.model_validate(raw)
 
 
-def test_valvelist_csv_default_template():
+def test_valvelist_csv_default_template_matches_production_format():
     job = load_sample()
     tpl = TemplateLoader().load("default")
     out = ValveListCSVGenerator().generate(job, tpl)
@@ -1192,22 +1368,25 @@ def test_valvelist_csv_default_template():
     assert out == expected
 
 
-def test_valvelist_csv_ronesans_template():
-    job = load_sample()
-    tpl = TemplateLoader().load("ronesans")
-    out = ValveListCSVGenerator().generate(job, tpl)
-    expected = (FIXTURE_DIR / "expected_valve_list_ronesans.csv").read_bytes()
-    assert out == expected
-
-
 def test_valvelist_csv_filters_to_valves_only():
     job = load_sample()
     tpl = TemplateLoader().load("default")
     out = ValveListCSVGenerator().generate(job, tpl).decode("utf-8")
-    assert "GV-001" in out
-    assert "BV-002" in out
-    assert "PT-01018" not in out
+    assert "62-GL-151000" in out or "151000" in out
+    assert "62-BV-151001" in out or "151001" in out
+    assert "422-11-PT-006A" not in out
     assert "V-101" not in out
+
+
+def test_valvelist_csv_preserves_trailing_space_in_pneumatic_actuator_header():
+    """Production header "Pneumatic Actuator " has a trailing space. Some agency
+    tooling parses by exact column name. Must be preserved verbatim."""
+    job = load_sample()
+    tpl = TemplateLoader().load("default")
+    out = ValveListCSVGenerator().generate(job, tpl).decode("utf-8")
+    header_line = out.splitlines()[0]
+    assert "Pneumatic Actuator " in header_line  # note trailing space
+    assert "Pneumatic Actuator," not in header_line  # the no-space version must NOT appear
 
 
 def test_valvelist_csv_class_attrs():
@@ -1215,23 +1394,26 @@ def test_valvelist_csv_class_attrs():
     assert ValveListCSVGenerator.file_format == "csv"
 ```
 
-Create `tests/unit/deliverables/fixtures/expected_valve_list_default.csv` (use `\r\n` line endings — that's what Python's csv writer produces):
+Create `tests/unit/deliverables/fixtures/expected_valve_list_default.csv` — header + 2 rows.
+This must match production format exactly (`webapp/pipeline_runner.py` writes this style
+today via `parser.py:113`). Use **CRLF** (`\r\n`) line endings — that's the default for
+Python's `csv.writer`. The `"8""-G-62151004-AC-PP"` quoting (double-double-quote = escaped
+literal quote) is csv-module standard for values containing `"`. Save the file with the
+exact bytes below:
 
 ```
-Tag,Type,Size,Service,Material,P&ID
-GV-001,gate_valve,4in,Process Water,CS,P-001
-BV-002,ball_valve,2in,Instrument Air,SS316,P-001
+P&ID No,Dynamic Code,Category,Size,Area Code,Serial No,Series Code,Fluid Code,Piping Class,Qty,Motor Actuator,Pneumatic Actuator ,Solenoid,line
+MUK-62-1-15-1001-001-24C7-D,-,GL,8,62,151000,-,G,AC-PP,1,-,-,-,"8""-G-62151004-AC-PP"
+MUK-62-1-15-1001-001-24C7-D,-,BV,2,62,151001,-,LO,AC,1,-,-,-,"2""-LO-62151004-AC"
 ```
 
-Create `tests/unit/deliverables/fixtures/expected_valve_list_ronesans.csv`:
+Save the file with **CRLF line endings**. In VS Code, click "LF" in the status bar and
+change to "CRLF" before saving. In nano/vim, the file produced by `Python's csv.writer`
+already uses CRLF; if you write the file by hand, manually add `\r\n`. Verify with:
 
-```
-Tag No.,Size,Valve Type,Service Description,Body Material,P&ID Ref.,Sheet
-GV-001,4in,gate_valve,Process Water,CS,P-001,1
-BV-002,2in,ball_valve,Instrument Air,SS316,P-001,1
-```
+`docker compose exec web python3 -c "p=open('tests/unit/deliverables/fixtures/expected_valve_list_default.csv','rb').read(); print(p[:5], '...', p[-5:]); print('CRLF count:', p.count(b'\\r\\n'))"`
 
-Note: when you save these `.csv` fixture files, ensure they use `\r\n` (CRLF) line endings — Python's `csv.writer` defaults to that. The test reads bytes, so line endings must match exactly. In editors: VS Code → "CRLF" in status bar before saving.
+Expected: `CRLF count: 3` (header + 2 rows).
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -1313,6 +1495,13 @@ import openpyxl
 from webapp.deliverables.valve_list import ValveListXLSXGenerator
 
 
+EXPECTED_VALVE_LIST_HEADERS = [
+    "P&ID No", "Dynamic Code", "Category", "Size", "Area Code",
+    "Serial No", "Series Code", "Fluid Code", "Piping Class", "Qty",
+    "Motor Actuator", "Pneumatic Actuator ", "Solenoid", "line",  # note trailing space on Pneumatic Actuator
+]
+
+
 def test_valvelist_xlsx_default_template():
     job = load_sample()
     tpl = TemplateLoader().load("default")
@@ -1320,9 +1509,13 @@ def test_valvelist_xlsx_default_template():
     wb = openpyxl.load_workbook(io.BytesIO(out_bytes))
     ws = wb["Valve List"]
     headers = [c.value for c in ws[1]]
-    assert headers == ["Tag", "Type", "Size", "Service", "Material", "P&ID"]
+    assert headers == EXPECTED_VALVE_LIST_HEADERS
     row2 = [c.value for c in ws[2]]
-    assert row2 == ["GV-001", "gate_valve", "4in", "Process Water", "CS", "P-001"]
+    assert row2 == [
+        "MUK-62-1-15-1001-001-24C7-D", "-", "GL", "8", "62",
+        "151000", "-", "G", "AC-PP", "1",
+        "-", "-", "-", "8\"-G-62151004-AC-PP",
+    ]
 
 
 def test_valvelist_xlsx_uses_ronesans_sheet_name():
@@ -1436,12 +1629,22 @@ def test_instrumentindex_csv_default():
     assert out == expected
 
 
+def test_instrumentindex_default_has_32_columns():
+    """Matches the TNB customer Instrument Index sample column count."""
+    job = load_sample()
+    tpl = TemplateLoader().load("default")
+    out = InstrumentIndexCSVGenerator().generate(job, tpl).decode("utf-8")
+    header = out.splitlines()[0]
+    assert len(header.split(",")) == 32
+
+
 def test_instrumentindex_filters_to_instruments():
     job = load_sample()
     tpl = TemplateLoader().load("default")
     out = InstrumentIndexCSVGenerator().generate(job, tpl).decode("utf-8")
-    assert "PT-01018" in out
-    assert "GV-001" not in out
+    assert "422-11-PT-006A" in out
+    assert "Yokogawa" in out  # vendor manufacturer appears
+    assert "62-GL-151000" not in out
     assert "V-101" not in out
 
 
@@ -1459,12 +1662,17 @@ def test_instrumentindex_class_attrs():
     assert InstrumentIndexXLSXGenerator.file_format == "xlsx"
 ```
 
-Create `tests/unit/deliverables/fixtures/expected_instrument_index_default.csv` (CRLF line endings):
+Create `tests/unit/deliverables/fixtures/expected_instrument_index_default.csv` — 32-column
+header + 1 instrument row (matching the TNB sample column set). Use **CRLF** line endings.
+Empty fields appear as bare commas (no quoting needed since none of the values contain
+commas / quotes / newlines).
 
 ```
-Tag,Type,Service,Signal,P&ID
-PT-01018,PT,Reactor outlet pressure,4-20mA HART,P-001
+Rev. No,Unit Number,Loop Name,Tag Number,Instrument Type,Service Description,P&ID No.,Line No.,Equipment No.,Location,System,Technical Room,IO Type,Signal Type,Signal Level,IO Grouping,External Power Supply,Analog Range Low Scale,Analog Range High Scale,Analog Range EU,High High Alarm Limit,High Alarm Limit,Low Alarm Limit,Low Low Alarm Limit,Junction Box / Panel,Multi-Cable Type,Pair No.,Manufacturer,Model No,Inst. Datasheet,Hook-up Drawing,Remark
+0,422-11,422-11-P-006,422-11-PT-006A,PRESSURE TRANSMITTER,COMP SUCTION PRESS,VEN-M5BC-6-50-0002,LATER,422-11-K-001A,FIELD,UCP,,AI,4-20mA,,,,0,150,bar,,,,,,,,Yokogawa,EJX130A,,,
 ```
+
+(One header line + one data row = 2 CRLFs total in the file.)
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -1592,9 +1800,15 @@ def test_equipmentlist_xlsx_default():
     wb = openpyxl.load_workbook(io.BytesIO(out_bytes))
     ws = wb["Equipment List"]
     headers = [c.value for c in ws[1]]
-    assert headers == ["Tag", "Type", "Duty", "Volume", "P&ID"]
+    assert headers == [
+        "Unit Number", "Equipment Tag", "Equipment Type", "Service Duty",
+        "Capacity", "P&ID No.", "Location", "Manufacturer", "Model No", "Remark",
+    ]
     row2 = [c.value for c in ws[2]]
-    assert row2 == ["V-101", "vessel", "Reactor", "12 m3", "P-001"]
+    assert row2 == [
+        "422-11", "V-101", "Reactor Vessel", "Reactor",
+        "12 m3", "VEN-M5BC-6-50-0006", "FIELD", "", "", "",
+    ]
 
 
 def test_equipmentlist_filters_to_equipment():
@@ -1603,10 +1817,11 @@ def test_equipmentlist_filters_to_equipment():
     out_bytes = EquipmentListXLSXGenerator().generate(job, tpl)
     wb = openpyxl.load_workbook(io.BytesIO(out_bytes))
     ws = wb["Equipment List"]
-    tags = [ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)]
+    # Equipment Tag column is column 2 in default template
+    tags = [ws.cell(row=r, column=2).value for r in range(2, ws.max_row + 1)]
     assert "V-101" in tags
-    assert "GV-001" not in tags
-    assert "PT-01018" not in tags
+    assert "62-GL-151000" not in tags
+    assert "422-11-PT-006A" not in tags
 
 
 def test_equipmentlist_class_attrs():
@@ -1686,7 +1901,19 @@ git commit -m "feat(deliverables): Equipment List XLSX generator"
 
 ---
 
-## Task 13: Datasheet PDF generator
+## Task 13: Datasheet XLSX generator (11-section template)
+
+The Instrument Datasheet is a **sectioned XLSX** matching the customer reference
+`23E065AJ01_ASV_IDS.xlsx`. Structure:
+
+- **One sheet per instrument**, sheet name = instrument tag.
+- **11 standard sections** (industry-standard IDS sections — hardcoded in `IDS_SECTIONS`):
+  General Data, Inlet line, Outlet line, Operating Conditions, Calculation Results,
+  Valve Body, Actuator, Positioner, Accessories, Position Transmitter, Purchase.
+- **Section headers** = bold merged cells spanning A:C.
+- **Within each section**: column A = field number, column B = field name, column C = value.
+- Field-name → canonical-path mappings are hardcoded in `IDS_SECTIONS`; vendor-derived fields
+  read from `vendor_match.catalog_fields.*`, line/operating fields from `fields.ids_*`.
 
 **Files:**
 - Create: `webapp/deliverables/datasheet.py`
@@ -1701,11 +1928,10 @@ import io
 import json
 from pathlib import Path
 
-import pytest
-from pypdf import PdfReader
+import openpyxl
 
 from webapp.deliverables.canonical import JobCanonical
-from webapp.deliverables.datasheet import DatasheetPDFGenerator
+from webapp.deliverables.datasheet import DatasheetXLSXGenerator, IDS_SECTIONS
 from webapp.deliverables.template_loader import TemplateLoader
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -1716,153 +1942,277 @@ def load_sample() -> JobCanonical:
     return JobCanonical.model_validate(raw)
 
 
-def extract_text(pdf_bytes: bytes) -> str:
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+def open_workbook(out_bytes: bytes) -> openpyxl.Workbook:
+    return openpyxl.load_workbook(io.BytesIO(out_bytes))
 
 
-def test_datasheet_pdf_contains_instrument_tag():
+def test_datasheet_xlsx_has_one_sheet_per_instrument():
     job = load_sample()
     tpl = TemplateLoader().load("default")
-    out = DatasheetPDFGenerator().generate(job, tpl)
-    text = extract_text(out)
-    assert "PT-01018" in text
-    assert "Yokogawa" in text
-    assert "EJX130A" in text
-    assert "0.04%" in text
-
-
-def test_datasheet_pdf_one_page_per_instrument():
-    job = load_sample()
-    tpl = TemplateLoader().load("default")
-    out = DatasheetPDFGenerator().generate(job, tpl)
-    reader = PdfReader(io.BytesIO(out))
+    out = DatasheetXLSXGenerator().generate(job, tpl)
+    wb = open_workbook(out)
     instrument_count = sum(1 for e in job.entities if e.entity_class == "instrument")
-    assert len(reader.pages) == instrument_count
+    assert len(wb.sheetnames) == instrument_count
 
 
-def test_datasheet_pdf_starts_with_pdf_magic():
+def test_datasheet_xlsx_sheet_named_after_tag():
     job = load_sample()
     tpl = TemplateLoader().load("default")
-    out = DatasheetPDFGenerator().generate(job, tpl)
-    assert out[:4] == b"%PDF"
+    out = DatasheetXLSXGenerator().generate(job, tpl)
+    wb = open_workbook(out)
+    assert "422-11-PT-006A" in wb.sheetnames
 
 
-def test_datasheet_class_attrs():
-    assert DatasheetPDFGenerator.deliverable_type == "datasheet"
-    assert DatasheetPDFGenerator.file_format == "pdf"
+def test_datasheet_xlsx_has_all_11_sections():
+    job = load_sample()
+    tpl = TemplateLoader().load("default")
+    out = DatasheetXLSXGenerator().generate(job, tpl)
+    wb = open_workbook(out)
+    ws = wb["422-11-PT-006A"]
+    # All section labels should appear in column A
+    column_a_values = [ws.cell(row=r, column=1).value for r in range(1, ws.max_row + 1)]
+    section_names = [name for name, _fields in IDS_SECTIONS]
+    assert len(section_names) == 11
+    for section in section_names:
+        assert section in column_a_values, f"section '{section}' missing"
+
+
+def test_datasheet_xlsx_contains_vendor_data_in_purchase_section():
+    job = load_sample()
+    tpl = TemplateLoader().load("default")
+    out = DatasheetXLSXGenerator().generate(job, tpl)
+    wb = open_workbook(out)
+    ws = wb["422-11-PT-006A"]
+    all_cell_values = [
+        ws.cell(row=r, column=c).value
+        for r in range(1, ws.max_row + 1)
+        for c in range(1, ws.max_column + 1)
+    ]
+    assert "Yokogawa" in all_cell_values
+    assert "EJX130A" in all_cell_values
+    assert "EJX130A-JMS5G-022NN" in all_cell_values
+
+
+def test_datasheet_xlsx_contains_general_data_fields():
+    job = load_sample()
+    tpl = TemplateLoader().load("default")
+    out = DatasheetXLSXGenerator().generate(job, tpl)
+    wb = open_workbook(out)
+    ws = wb["422-11-PT-006A"]
+    all_cell_values = [
+        ws.cell(row=r, column=c).value
+        for r in range(1, ws.max_row + 1)
+        for c in range(1, ws.max_column + 1)
+    ]
+    assert "422-11-PT-006A" in all_cell_values
+    assert "COMP SUCTION PRESS" in all_cell_values
+    assert "VEN-M5BC-6-50-0002" in all_cell_values
+
+
+def test_datasheet_xlsx_section_headers_are_merged_a_to_c():
+    job = load_sample()
+    tpl = TemplateLoader().load("default")
+    out = DatasheetXLSXGenerator().generate(job, tpl)
+    wb = open_workbook(out)
+    ws = wb["422-11-PT-006A"]
+    merged_ranges = {str(r) for r in ws.merged_cells.ranges}
+    # Find the row where "General Data" appears in column A; expect A:C merge there
+    for r in range(1, ws.max_row + 1):
+        if ws.cell(row=r, column=1).value == "General Data":
+            assert f"A{r}:C{r}" in merged_ranges
+            return
+    raise AssertionError("General Data section header row not found")
+
+
+def test_datasheet_xlsx_class_attrs():
+    assert DatasheetXLSXGenerator.deliverable_type == "datasheet"
+    assert DatasheetXLSXGenerator.file_format == "xlsx"
+
+
+def test_datasheet_xlsx_starts_with_zip_magic():
+    """XLSX files are ZIP archives — magic bytes PK\\x03\\x04."""
+    job = load_sample()
+    tpl = TemplateLoader().load("default")
+    out = DatasheetXLSXGenerator().generate(job, tpl)
+    assert out[:2] == b"PK"
 ```
-
-Add `pypdf>=4.0.0,<5.0.0` to `requirements-webapp.txt` (used only in tests, but easier to share with the runtime image than to maintain a separate test-only requirements file). Run `docker compose build web` again before continuing.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `docker compose exec web python3 -m pytest tests/unit/deliverables/test_datasheet.py -v`
 Expected: FAIL — `webapp.deliverables.datasheet` not found.
 
-- [ ] **Step 3: Implement DatasheetPDFGenerator**
+- [ ] **Step 3: Implement DatasheetXLSXGenerator**
 
 Create `webapp/deliverables/datasheet.py`:
 
 ```python
-"""Instrument Datasheet deliverable generator (PDF).
+"""Instrument Datasheet deliverable generator (XLSX, sectioned).
 
-One A4 page per instrument. Each page renders the column list defined in
-the template's 'datasheet' section as a two-column 'Field / Value' table.
+Output structure matches the customer reference 23E065AJ01_ASV_IDS.xlsx:
+- One sheet per instrument, sheet name = instrument tag.
+- 11 industry-standard IDS sections, each with a merged-cell header.
+- Within each section: column A = field number, column B = field name,
+  column C = value (resolved from the canonical entity via dot notation).
+
+The section structure (IDS_SECTIONS) is intentionally hardcoded — these are
+industry-standard sections defined per ISA/IEC conventions. Per-customer
+variations land as template overrides in v1.5.
 """
 
 import io
-from typing import ClassVar, List
+from typing import ClassVar, List, Tuple
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.units import cm
-from reportlab.platypus import (
-    PageBreak,
-    Paragraph,
-    SimpleDocTemplate,
-    Spacer,
-    Table,
-    TableStyle,
-)
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from webapp.deliverables.base import Generator
 from webapp.deliverables.canonical import CanonicalEntity, JobCanonical
 from webapp.deliverables.field_resolver import resolve_field
 from webapp.deliverables.registry import REGISTRY
-from webapp.deliverables.template import DeliverableConfig, TemplateConfig
+from webapp.deliverables.template import TemplateConfig
+
+# IDS_SECTIONS: list of (section_name, [(field_label, canonical_path), ...]).
+# Field labels are the human-readable names shown in the XLSX; canonical paths
+# are dot-notation lookups against CanonicalEntity (see field_resolver.py).
+IDS_SECTIONS: List[Tuple[str, List[Tuple[str, str]]]] = [
+    ("General Data", [
+        ("Tag Number", "tag"),
+        ("Service", "fields.service_description"),
+        ("P&ID No.", "pid_number"),
+        ("Line Number", "fields.line_no"),
+        ("SIL Level Required", "fields.ids_sil_level_required"),
+        ("Nace Applicable", "fields.ids_nace_applicable"),
+    ]),
+    ("Inlet line", [
+        ("Line Size", "fields.ids_inlet_line_size"),
+        ("Line Material", "fields.ids_inlet_line_material"),
+        ("Piping Class", "fields.ids_inlet_line_class"),
+    ]),
+    ("Outlet line", [
+        ("Line Size", "fields.ids_outlet_line_size"),
+        ("Line Material", "fields.ids_outlet_line_material"),
+        ("Piping Class", "fields.ids_outlet_line_class"),
+    ]),
+    ("Operating Conditions", [
+        ("Fluid", "fields.ids_fluid"),
+        ("Phase", "fields.ids_phase"),
+    ]),
+    ("Calculation Results", [
+        ("Required CV", "fields.ids_required_cv"),
+        ("Selected CV", "fields.ids_selected_cv"),
+    ]),
+    ("Valve Body", [
+        ("Body Type", "vendor_match.catalog_fields.ids_body_type"),
+        ("Body Material", "vendor_match.catalog_fields.body_material"),
+        ("Design Pressure Max", "fields.ids_design_pressure_max"),
+        ("Design Pressure Unit", "fields.ids_design_pressure_unit"),
+        ("Design Temperature Max", "fields.ids_design_temperature_max"),
+        ("Design Temperature Unit", "fields.ids_design_temperature_unit"),
+    ]),
+    ("Actuator", [
+        ("Actuator Type", "vendor_match.catalog_fields.ids_actuator_type"),
+        ("Supply Pressure", "vendor_match.catalog_fields.ids_actuator_supply"),
+    ]),
+    ("Positioner", [
+        ("Input Signal", "vendor_match.catalog_fields.ids_input_signal"),
+        ("Electrical Connection", "vendor_match.catalog_fields.ids_electrical_connection"),
+        ("Enclosure Protection", "vendor_match.catalog_fields.ids_enclosure_protection"),
+    ]),
+    ("Accessories", [
+        ("Handwheel", "vendor_match.catalog_fields.ids_handwheel"),
+        ("Solenoid Valve", "vendor_match.catalog_fields.ids_solenoid_valve"),
+    ]),
+    ("Position Transmitter", [
+        ("Position Transmitter Tag", "fields.ids_position_transmitter_tag"),
+        ("Air Volume Tank", "fields.ids_air_volume_tank"),
+    ]),
+    ("Purchase", [
+        ("Manufacturer", "vendor_match.vendor_name"),
+        ("Model No.", "vendor_match.product_name"),
+        ("Part Number", "vendor_match.part_number"),
+    ]),
+]
+
+SECTION_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 
 
 def _filter_instruments(entities: List[CanonicalEntity]) -> List[CanonicalEntity]:
     return [e for e in entities if e.entity_class == "instrument"]
 
 
-def _ordered_columns(cfg: DeliverableConfig):
-    return sorted(cfg.columns, key=lambda c: c.order)
+def _sheet_name_for(entity: CanonicalEntity) -> str:
+    """Excel sheet names: max 31 chars, no [ ] : * ? / \\."""
+    raw = entity.tag or str(entity.entity_id)
+    safe = "".join(c if c not in "[]:*?/\\" else "_" for c in raw)
+    return safe[:31]
 
 
-class DatasheetPDFGenerator(Generator):
+class DatasheetXLSXGenerator(Generator):
     deliverable_type: ClassVar[str] = "datasheet"
-    file_format: ClassVar[str] = "pdf"
+    file_format: ClassVar[str] = "xlsx"
 
     def generate(self, canonical: JobCanonical, template: TemplateConfig) -> bytes:
-        deliv = template.deliverables["datasheet"]
-        columns = _ordered_columns(deliv)
         instruments = _filter_instruments(canonical.entities)
+        deliv = template.deliverables.get("datasheet")
+        font_name = (deliv.font if deliv else None) or "Calibri"
 
-        buf = io.BytesIO()
-        doc = SimpleDocTemplate(
-            buf,
-            pagesize=A4,
-            leftMargin=2 * cm,
-            rightMargin=2 * cm,
-            topMargin=2 * cm,
-            bottomMargin=2 * cm,
-        )
-        styles = getSampleStyleSheet()
-        story = []
+        wb = Workbook()
+        wb.remove(wb.active)  # remove default sheet
 
-        for idx, instr in enumerate(instruments):
-            tag = instr.tag or instr.sub_class
-            story.append(Paragraph(
-                f"Instrument Datasheet — {tag}",
-                styles["Title"],
-            ))
-            story.append(Spacer(1, 0.5 * cm))
-            table_data = [["Field", "Value"]]
-            for col in columns:
-                value = resolve_field(instr, col.field)
-                table_data.append([col.header, value])
-            table = Table(table_data, colWidths=[6 * cm, 10 * cm])
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("PADDING", (0, 0), (-1, -1), 6),
-            ]))
-            story.append(table)
-            if idx < len(instruments) - 1:
-                story.append(PageBreak())
+        if not instruments:
+            wb.create_sheet("Datasheet")  # empty placeholder
 
-        doc.build(story)
-        return buf.getvalue()
+        for instr in instruments:
+            ws = wb.create_sheet(_sheet_name_for(instr))
+            ws.column_dimensions["A"].width = 6
+            ws.column_dimensions["B"].width = 32
+            ws.column_dimensions["C"].width = 40
+
+            row = 1
+            ws.cell(row=row, column=1, value=f"Instrument Datasheet — {instr.tag or ''}")
+            ws.cell(row=row, column=1).font = Font(name=font_name, bold=True, size=14)
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+            row += 2
+
+            field_num = 1
+            for section_name, fields in IDS_SECTIONS:
+                # Section header (merged A:C)
+                ws.cell(row=row, column=1, value=section_name)
+                ws.cell(row=row, column=1).font = Font(name=font_name, bold=True)
+                ws.cell(row=row, column=1).fill = SECTION_FILL
+                ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+                row += 1
+                for label, path in fields:
+                    ws.cell(row=row, column=1, value=field_num)
+                    ws.cell(row=row, column=2, value=label)
+                    ws.cell(row=row, column=2).font = Font(name=font_name)
+                    ws.cell(row=row, column=3, value=resolve_field(instr, path))
+                    ws.cell(row=row, column=3).font = Font(name=font_name)
+                    ws.cell(row=row, column=3).alignment = Alignment(wrap_text=True)
+                    row += 1
+                    field_num += 1
+                row += 1  # blank row between sections
+
+        out = io.BytesIO()
+        wb.save(out)
+        return out.getvalue()
 
 
-REGISTRY.register(DatasheetPDFGenerator)
+REGISTRY.register(DatasheetXLSXGenerator)
 ```
 
 - [ ] **Step 4: Run the tests**
 
 Run: `docker compose exec web python3 -m pytest tests/unit/deliverables/test_datasheet.py -v`
-Expected: 4 PASSED.
+Expected: 7 PASSED.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add webapp/deliverables/datasheet.py tests/unit/deliverables/test_datasheet.py requirements-webapp.txt
-git commit -m "feat(deliverables): Datasheet PDF generator (reportlab)"
+git add webapp/deliverables/datasheet.py tests/unit/deliverables/test_datasheet.py
+git commit -m "feat(deliverables): Datasheet XLSX generator (11-section IDS template)"
 ```
 
 ---
@@ -1889,7 +2239,7 @@ def test_all_generators_registered():
     assert REGISTRY.resolve("instrument_index", "csv").__name__ == "InstrumentIndexCSVGenerator"
     assert REGISTRY.resolve("instrument_index", "xlsx").__name__ == "InstrumentIndexXLSXGenerator"
     assert REGISTRY.resolve("equipment_list", "xlsx").__name__ == "EquipmentListXLSXGenerator"
-    assert REGISTRY.resolve("datasheet", "pdf").__name__ == "DatasheetPDFGenerator"
+    assert REGISTRY.resolve("datasheet", "xlsx").__name__ == "DatasheetXLSXGenerator"
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -2061,7 +2411,7 @@ git commit -m "feat(deliverables): job canonical-JSON loader (reads from job_out
 - Create: `webapp/deliverables/storage.py`
 - Create: `tests/unit/deliverables/test_storage.py`
 
-Generated files are written next to the job's existing artefacts at `{job_output_dir}/exports/{deliverable_type}.{ext}`. The download URL is served from the existing `/api/jobs/{id}/files/...` route.
+Generated files are written next to the job's existing artefacts at `{job_output_dir}/exports/{deliverable_type}.{ext}`. The export endpoint itself returns the file bytes inline (Content-Disposition: attachment) so the file is downloaded directly; the on-disk copy is a side-effect for reuse + audit.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2150,7 +2500,7 @@ git commit -m "feat(deliverables): file storage helper alongside job_outputs"
 
 ---
 
-## Task 17: FastAPI router — POST /api/jobs/{id}/export/{deliverable}/{format}
+## Task 17: FastAPI router — POST /api/v1/jobs/{id}/export/{deliverable}/{format}
 
 **Files:**
 - Create: `webapp/routers/exports.py`
@@ -2220,7 +2570,7 @@ def job_with_canonical(tmp_path, db_session, test_client):
 
 
 def test_export_valve_list_csv(test_client, job_with_canonical):
-    response = test_client.post(f"/api/jobs/{job_with_canonical.id}/export/valve_list/csv")
+    response = test_client.post(f"/api/v1/jobs/{job_with_canonical.id}/export/valve_list/csv")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     body = response.content.decode("utf-8")
@@ -2229,7 +2579,7 @@ def test_export_valve_list_csv(test_client, job_with_canonical):
 
 
 def test_export_valve_list_xlsx(test_client, job_with_canonical):
-    response = test_client.post(f"/api/jobs/{job_with_canonical.id}/export/valve_list/xlsx")
+    response = test_client.post(f"/api/v1/jobs/{job_with_canonical.id}/export/valve_list/xlsx")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith(
         "application/vnd.openxmlformats-officedocument"
@@ -2238,12 +2588,12 @@ def test_export_valve_list_xlsx(test_client, job_with_canonical):
 
 
 def test_export_unknown_deliverable_returns_400(test_client, job_with_canonical):
-    response = test_client.post(f"/api/jobs/{job_with_canonical.id}/export/unknown/csv")
+    response = test_client.post(f"/api/v1/jobs/{job_with_canonical.id}/export/unknown/csv")
     assert response.status_code == 400
 
 
 def test_export_unknown_job_returns_404(test_client):
-    response = test_client.post("/api/jobs/999999/export/valve_list/csv")
+    response = test_client.post("/api/v1/jobs/999999/export/valve_list/csv")
     assert response.status_code == 404
 
 
@@ -2257,7 +2607,7 @@ def test_export_job_without_canonical_returns_404(test_client, db_session, tmp_p
     job = Job(id=9998, output_csv_path=str(csv_path))
     db_session.add(job)
     db_session.commit()
-    response = test_client.post(f"/api/jobs/{job.id}/export/valve_list/csv")
+    response = test_client.post(f"/api/v1/jobs/{job.id}/export/valve_list/csv")
     assert response.status_code == 404
 ```
 
@@ -2271,7 +2621,7 @@ Expected: FAIL — `404 not found` for the new endpoint (because router doesn't 
 Create `webapp/routers/exports.py`:
 
 ```python
-"""POST /api/jobs/{job_id}/export/{deliverable_type}/{file_format}
+"""POST /api/v1/jobs/{job_id}/export/{deliverable_type}/{file_format}
 
 Generates and returns one customer deliverable for one job.
 """
@@ -2291,7 +2641,7 @@ from webapp.deliverables.storage import store_export
 from webapp.deliverables.template_loader import TemplateLoader
 from webapp.models import Job
 
-router = APIRouter(prefix="/api/jobs", tags=["exports"])
+router = APIRouter(prefix="/api/v1/jobs", tags=["exports"])
 
 _loader = TemplateLoader()
 
@@ -2381,7 +2731,7 @@ Expected: all green.
 
 ```bash
 git add webapp/routers/exports.py webapp/main.py tests/e2e/test_exports_api.py
-git commit -m "feat(deliverables): POST /api/jobs/{id}/export/{type}/{format} endpoint"
+git commit -m "feat(deliverables): POST /api/v1/jobs/{id}/export/{type}/{format} endpoint"
 ```
 
 ---
@@ -2425,7 +2775,7 @@ Datasheet PDF) from the pipeline's internal canonical JSON.
 
 ## Endpoint
 
-`POST /api/jobs/{job_id}/export/{deliverable_type}/{file_format}` →
+`POST /api/v1/jobs/{job_id}/export/{deliverable_type}/{file_format}` →
 returns the deliverable bytes with the appropriate `Content-Type` +
 `Content-Disposition: attachment` header. Also persists the file at
 `{job_output_dir}/exports/{deliverable_type}.{file_format}`.
@@ -2493,17 +2843,21 @@ customer experience hinges on four deliverables in per-EPC templates;
 this subsystem is the production path for all four.
 
 **What:** `webapp/deliverables/` package — Pydantic canonical schema
-(v1.0.0), per-customer JSON template format, generator registry, four
-concrete generators (Valve List CSV/XLSX, Instrument Index CSV/XLSX,
-Equipment List XLSX, Datasheet PDF) and the `POST /api/jobs/{id}/export/
-{type}/{format}` endpoint. Three customer templates landed: default,
-ronesans, muk. Pipeline-side `canonical.json` writing is intentionally
-out of scope for this plan — a follow-up plan will wire the extraction
-pipeline to emit canonical.json next to valve_list.csv.
+(v1.0.0), per-customer JSON template format, generator registry, six
+concrete generators (Valve List CSV+XLSX, Instrument Index CSV+XLSX,
+Equipment List XLSX, Datasheet XLSX with 11-section IDS structure) and
+the `POST /api/v1/jobs/{id}/export/{type}/{format}` endpoint. Three
+customer templates landed: default (matches production columns +
+TNB-style Instrument Index), ronesans (sheet-name + font overrides),
+muk (subsetted columns). Pipeline-side `canonical.json` writing is
+intentionally out of scope for this plan — a follow-up plan will wire
+the extraction pipeline to emit canonical.json next to valve_list.csv.
 
 **Result:** End-to-end test passes: given a hand-crafted canonical.json
-fixture, the endpoint returns valid CSV/XLSX/PDF in the expected
-template. ~33 unit tests + 5 E2E tests, all green.
+fixture, the endpoint returns valid CSV/XLSX in the expected template
+(matching the customer reference files `parser.py:to_csv_dict`,
+`TNB-26E009A001_Instrument index R0.pdf`, `23E065AJ01_ASV_IDS.xlsx`).
+~37 unit tests + 5 E2E tests, all green.
 
 **Notes:** Replace `YYYY-MM-DD` above with today's date when this commit
 lands. The customer_template_slug "default" is the fallback; jobs whose
