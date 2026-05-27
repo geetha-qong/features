@@ -44,8 +44,15 @@ models/paddle_cls/
 runs/
 annotate/tiles/
 
-# YOLO dataset images (regenerated from job_outputs)
+# Stray PyTorch weights at repo root (e.g. yolov8s.pt base weights)
+/*.pt
+
+# YOLO dataset images and label caches (regenerated from job_outputs)
 datasets/pid_valves/images/
+datasets/**/*.cache
+
+# Label Studio export archives (large, regenerable from LS)
+annotate/exports/*.zip
 
 # Playwright session data
 .playwright-mcp/
