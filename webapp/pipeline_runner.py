@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from webapp import models
 from webapp.config import JOB_OUTPUT_DIR, get_job_dir
+from webapp.deliverables.pipeline_emitter import write_canonical_for_job
 
 _pipeline_lock = threading.Lock()
 
@@ -292,6 +293,14 @@ def run_pipeline_for_job_rq(
             db.query(models.ValveRow).filter(models.ValveRow.job_id == job_id).count()
         )
         db.commit()
+
+        # Emit canonical.json so the deliverables export endpoint can serve this job
+        # (Plan A.5 #11). Failures here are non-fatal — pipeline state stays "done".
+        try:
+            write_canonical_for_job(job_dir=job_dir, job_id=job_id)
+        except Exception as _emit_err:
+            print(f"[canonical-emit] job {job_id}: {_emit_err}", file=sys.stderr)
+
         _finalize_job_run(run_id, "done")
 
         # Side effects (LS sync, GPU dispatch) use the same session
