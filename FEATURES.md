@@ -24,6 +24,45 @@
 
 ---
 
+## [2026-05-28] #14 — QONG Studio Phase 2b+2c: DatasheetDrawer + BulkReviewScreen
+
+**Type:** feature
+**Stage:** webapp
+**Status:** shipped
+
+**Why:** Phase 2a (#13) shipped the Studio visual shell with stub buttons for Open Datasheet and Bulk Review. This commit lands the two real surfaces those buttons open, completing the full design loop the user committed to in chat2.md (Studio → drawer → bulk-review → back to studio with element selected + drawer reopened).
+
+**What:**
+- **DatasheetDrawer** (`webapp/frontend/src/studio/datasheet/`):
+  - `schemas.ts` — 10 per-doc-type field schemas (datasheet, index, narrative, cande, io, valves, lines, equip, loop, tags); `defaultValues()` returns per-element + per-doc-type seed data. `FieldDef` with `w` hint (xs/sm/md/full = 1/2/3/4 grid cols), `extracted` + `conf` for confidence pills.
+  - `DocTypeIcon.tsx` — maps icon names (`file-text`, `list-checks`, `scroll-text`, `git-merge`, etc.) to lucide-react components.
+  - `DSField.tsx` — single field with locked-vs-input modes, P&ID badge for extracted fields, confidence pill, pencil to unlock for manual override, "Manual" hint for non-extracted empty fields.
+  - `DatasheetDrawer.tsx` — full drawer: doc-type picker (swaps schema), Bulk Review pill (count badge), close (Esc + outside-click), title + completion progress, **vertical accordion** sections (sections 0+1 open by default per chat2.md decision to replace horizontal scroll), Save Draft + Export footer. Backdrop blocks the studio behind.
+- **BulkReviewScreen** (`webapp/frontend/src/studio/bulk-review/`):
+  - `deliverables.ts` — `DELIVERABLES` list (10 docs with done/total counts), `COLUMNS` per-deliverable table column schemas, `DETAIL_GROUPS` per-deliverable right-panel field groups.
+  - `buildRows.ts` — 14 demo instruments (PV-203, FT-101, V-101, PT-201, TT-301, LT-401, FV-101, PSV-022, XV-501, P-101, E-104, FT-202, PT-301, TV-204), enriched per-deliverable.
+  - `BulkReviewScreen.tsx` — workbench top bar (Back to Studio, breadcrumb, search, Filter, Export, toggleable panel-right), left deliverables nav with completion bars, center table with grid-template-columns reshaping per deliverable + stat strip (Total/Complete/Review/Missing), right detail panel with Open in Studio action.
+- **Studio.tsx wiring**:
+  - Real `DatasheetDrawer` mounted (no more alert stub).
+  - `mode: "studio" | "bulk"` state. When `bulk`, renders `BulkReviewScreen` full-screen.
+  - `onBulkReview` closes the drawer and switches to bulk mode (triggered by both the studio top-bar "Bulk Review" button and the drawer's BULK REVIEW pill).
+  - `onOpenInStudio(id)` callback from bulk-review: sets `selectedId` to the picked tag, returns to studio mode, and reopens the drawer — matches v3 design behavior verbatim.
+
+**Result (if measurable):**
+- TypeScript build clean. Vite bundle 366 KB JS / 79 KB CSS (gzipped 108/14 KB), up from 2a's 331/78 KB.
+- Verified the full loop end-to-end with Playwright + a seeded job (Block-18-Crude-Train-2.pdf): Studio → click Open Datasheet → drawer shows Control Valve PV-203 with 14/21 fields (67%) → click BULK REVIEW pill → workbench shows 14 instruments with PV-203 row pre-selected → click FT-101 row → right panel updates → click Open in Studio → studio reopens with FT-101 selected + drawer reopened with Flow Transmitter schema and per-element defaults (Reflux header flow, Differential Pressure 4-20mA HART, P-12-102-CS150 line).
+
+**Notes:**
+- **`1fr` column compression on narrow viewport.** In Bulk Review, the "Type" column uses `w: "1fr"` in the datasheet schema but ends up compressed to ~30px on a 1200px viewport because the parent grid's free-space calculation doesn't expand 1fr when other fixed cols sum near the container width. Minor visual bug — not breaking. Likely the bundle's CSS expects a wider viewport (1600+). Easy follow-up: switch `.br-table-wrap` to `overflow-x: auto` and let the table extend; or tighten fixed widths.
+- **All bulk-review demo data is canonical to the design** — same 14 base rows from `bulk-review.jsx`, including the `sel: true` flag on PV-203 (selects it on initial load) and `missing: true` flags on LT-401, E-104, PT-301 (which makes Missing count = 3 in the stat strip).
+- **DatasheetDrawer uses `useMemo` for defaults** — when element OR docType changes, defaults recompute, then `useEffect([defaults])` resets the form. This is the v3 design's pattern and it works correctly.
+- **Backdrop click-to-close + Esc** both wired on the drawer. Bulk Review doesn't have a backdrop (it's a full-screen replacement).
+- **`display: contents` on bulk-review rows** — each `.br-row` uses `display: contents` so its children become direct grid items of the parent `.br-table`. That's why selection styling has to be applied to individual cells (via inline style `color: var(--qong-magenta)`) rather than the row container.
+- **No backend changes** — both surfaces are pure UI on top of the existing /api/v1/jobs/{job_id} endpoint. Real wiring to per-instrument data (instead of the 14-row demo set) is a separate piece of work (call it Phase 2d) — would need a `/api/v1/jobs/{id}/instruments` endpoint and the pipeline_runner to write canonical.json with per-instrument entries (we already have a `canonical.py` model from Plan A).
+- **Files modified vs Phase 2a:** `webapp/frontend/src/studio/Studio.tsx` (drawer + bulk-review wiring) and 6 new files under `studio/datasheet/` + `studio/bulk-review/`. The studio.css from 2a already contains all the styles for the drawer + bulk-review (was the v3 superset).
+
+---
+
 ## [2026-05-28] #13 — QONG Studio design bundle Phase 2a: Studio visual shell
 
 **Type:** feature

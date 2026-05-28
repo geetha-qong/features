@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Maximize, Minus, Plus } from "lucide-react";
 import { useTheme } from "../theme/ThemeContext";
+import BulkReviewScreen from "./bulk-review/BulkReviewScreen";
+import DatasheetDrawer from "./datasheet/DatasheetDrawer";
 import PidCanvas from "./PidCanvas";
 import PropertiesPanel from "./PropertiesPanel";
 import SheetRail from "./SheetRail";
@@ -67,6 +69,8 @@ export default function Studio({ project, userName, onBack }: Props) {
   const [selectedId, setSelectedId] = useState<string>("PV-203");
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [datasheetOpen, setDatasheetOpen] = useState(false);
+  const [mode, setMode] = useState<"studio" | "bulk">("studio");
 
   // Lock body scroll while studio is mounted (full-bleed surface)
   useEffect(() => {
@@ -89,15 +93,26 @@ export default function Studio({ project, userName, onBack }: Props) {
   ];
 
   function onOpenDatasheet() {
-    // Phase 2b will swap this for the real DatasheetDrawer
-    // eslint-disable-next-line no-alert
-    alert("Datasheet drawer arrives in Phase 2b — coming next session.");
+    setDatasheetOpen(true);
   }
 
   function onBulkReview() {
-    // Phase 2c will swap this for the BulkReviewScreen
-    // eslint-disable-next-line no-alert
-    alert("Bulk Review workbench arrives in Phase 2c — coming next session.");
+    setDatasheetOpen(false);
+    setMode("bulk");
+  }
+
+  if (mode === "bulk") {
+    return (
+      <BulkReviewScreen
+        project={project}
+        onBack={() => setMode("studio")}
+        onOpenInStudio={(id) => {
+          setSelectedId(id);
+          setMode("studio");
+          setDatasheetOpen(true);
+        }}
+      />
+    );
   }
 
   return (
@@ -169,6 +184,14 @@ export default function Studio({ project, userName, onBack }: Props) {
       </div>
 
       <StudioFoot />
+
+      <DatasheetDrawer
+        open={datasheetOpen}
+        onClose={() => setDatasheetOpen(false)}
+        element={sel}
+        onBulkReview={onBulkReview}
+        totalCount={68}
+      />
     </div>
   );
 }
