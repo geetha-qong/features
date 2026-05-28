@@ -1,8 +1,15 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import qongMark from "../design/assets/qong-mark.png";
 
+const FULL_BLEED_ROUTES = new Set(["/login"]);
+
 export default function Layout() {
   const loc = useLocation();
+
+  if (FULL_BLEED_ROUTES.has(loc.pathname)) {
+    return <Outlet />;
+  }
+
   const linkStyle = (path: string): React.CSSProperties => ({
     color: loc.pathname === path ? "#8B3FCE" : "#4B5563",
     textDecoration: "none",
