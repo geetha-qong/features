@@ -24,6 +24,46 @@
 
 ---
 
+## [2026-05-28] #13 — QONG Studio design bundle Phase 2a: Studio visual shell
+
+**Type:** feature
+**Stage:** webapp
+**Status:** shipped
+
+**Why:** Phase 1 (#12) shipped Dashboard + Login + theme. User then exported an updated design bundle (`design/qong-studio-v3/`) with the Studio screen polished: "Bulk Review" button added before "Save" in the top bar, "Save & continue" renamed to "Save", Issues panel replaced with "Elements on Sheet" (lists all detected elements with bidirectional canvas-list selection), and the prior horizontal datasheet tabs replaced with a vertical accordion. v3 also adds two new surfaces (DatasheetDrawer rewrite + BulkReviewScreen) but those are Phase 2b/2c. Phase 2a is the Studio visual shell on its own — clicking a tile on the Dashboard opens this Studio.
+
+**What:**
+- **Studio component split** under `webapp/frontend/src/studio/`:
+  - `types.ts` — Sheet, CanvasElement, SessionEvent, ProjectLike interfaces.
+  - `buildSheets.ts` — deterministic sheet generator (8–28 per project, status distribution).
+  - `SheetGlyph.tsx` — small SVG glyph for sheet rail thumbnails (theme-aware grid).
+  - `PidCanvas.tsx` — center canvas: prototype V-101/FT-101/P-101/PV-203/E-104 elements with edges; pan via mouse drag (3px threshold to distinguish click vs pan), wheel zoom (0.3×–4×), `.canvas-inner.animated` for smooth button-driven transitions; theme-aware colors for fill/stroke/text/grid.
+  - `SheetRail.tsx` — left rail: head (Sheets count), search, All/Issues/Pending tabs, sheet-tile list with status badges.
+  - `StudioTopBar.tsx` — back btn, QONG mark, project + sheet meta + reviewer slug, issue badge, **Bulk Review** secondary btn (new), **Save** primary btn (was "Save & continue"), `SettingsMenu variant="dark-chrome"`, more-menu (Export I/O / Share / Settings / Exit).
+  - `PropertiesPanel.tsx` — Selected Element card (tag, type, confidence bar, inflow/outflow, Confirm/Edit, Open Datasheet) + **Elements on Sheet** list (replaces Issues; bidirectional select with canvas) + This Session activity.
+  - `StudioFoot.tsx` — keyboard shortcut bar + auto-save indicator.
+  - `Studio.tsx` — orchestrator. Reads `theme` from ThemeContext, locks body scroll while mounted, manages selection/zoom/pan state, stubs Open Datasheet + Bulk Review with alert (Phase 2b/2c).
+- **Route wiring** — `routes/JobDetail.tsx` rewritten to fetch `GET /api/v1/jobs/{job_id}` and render Studio. `routes/ReviewCanvas.tsx` collapses to a thin alias re-exporting JobDetail (legacy URL preserved). Old JobDetail placeholder (deliverable download grid) removed — those URLs are still reachable directly via `/api/v1/jobs/{id}/export/{type}/{fmt}` from Plan A.
+- **Layout full-bleed routes** — `routes/Layout.tsx` now matches `/jobs/:jobId(/review)?` via regex so the Studio's own header replaces the app-nav. Existing `/` and `/signin` exact matches still apply.
+- **Studio CSS** — `webapp/frontend/src/design/studio.css` updated to v3 (2016 → 2507 lines): adds `.element-row`, accordion `.ds-section`, `.bulk-review`, `.studio-top` polish, dark-scope override under `.studio` (drawer shows in dark even when theme is light, per user "in A, background is darkmode, drawer shud also show in dark mode").
+
+**Result (if measurable):**
+- TypeScript build clean. Vite bundle 331 KB JS / 78 KB CSS (gzip 99 KB / 14 KB) — up from Phase 1's 309/68 KB.
+- Verified visually with a seeded job (Block-18-Crude-Train-2.pdf): three-pane layout, theme-aware studio chrome, sheet rail with 8 mock tiles, pan/zoom canvas with bidirectional selection, properties panel rendering all 5 detected elements with confidence pills.
+
+**Notes:**
+- **Phase 2b** (next session): port `datasheet.jsx` (459 LOC, +140 vs v2). Drawer widened to 720px, 4-col grid (`grid-auto-flow: dense`), vertical accordion sections (01 + 02 open by default, rest collapsed), 10 distinct deliverable schemas (each doc-type swaps the field set), Bulk Review pill in drawer header, dark-mode override.
+- **Phase 2c** (next session): port `bulk-review.jsx` (466 LOC, new). Full-screen workbench: deliverables nav (10 docs), instrument table with per-deliverable column schema, toggleable right detail panel (default open, `panel-right` button in top bar), "Open in Studio" returns with element selected + drawer reopened.
+- **Studio canvas elements are prototype** — V-101, FT-101, P-101, PV-203, E-104 are hardcoded in `PidCanvas.tsx` (DEMO_ELEMENTS export). Real wiring to job detections is a separate piece of work (Phase 2b or later); requires either parsing the existing valve-list CSV or storing detection JSON on Job.
+- **Body scroll lock** added in `Studio.tsx` useEffect — Studio is a single-viewport surface, prevents the page from scrolling behind the studio chrome.
+- **Datasheet types** that get an "Open Datasheet" button: Control Valve, Flow Transmitter, Block Valve, Centrifugal Pump (set in Studio.tsx). Exchangers and pumps without the magic types don't show the button — matches the design's behavior.
+- **`Datasheet Explorations.html`** in v3 bundle (uses `design-canvas.jsx` + `explorations.jsx`) is a SEPARATE bundle — NOT in QONG Studio.html scope. Skipped from Phase 2 entirely; treated as research/mockup material.
+- **lucide icons added** vs Phase 1: `arrow-left`, `arrow-up-right`, `chevron-down`, `chevron-up`, `download`, `git-pull-request`, `info`, `layout-grid`, `log-in`, `log-out`, `maximize`, `panel-right`, `pencil`, `radio`, `scan-search`, `settings-2`, `boxes`, `circle-dot`, `filter`, `share-2`, `keyboard`. All present in lucide-react 1.17.0.
+- **Production-continuity rule confirmed:** `/jobs/:jobId` (React SPA) now renders Studio. The legacy FastAPI Jinja `/jobs/{id}` HTML route in `webapp/routers/jobs.py:111` is untouched — direct URL access outside the SPA (legacy customers, email links, the dashboard route in `webapp/routers/dashboard.py`) continues to render the old Jinja template. When a user navigates from the new Dashboard tile click, the SPA's `/jobs/:jobId` wins (BrowserRouter handles it before the FastAPI server responds).
+- **Files modified:** `webapp/frontend/src/design/studio.css` (v2→v3), `webapp/frontend/src/routes/{JobDetail,ReviewCanvas,Layout}.tsx`, plus new files under `webapp/frontend/src/studio/`. No backend changes (existing `GET /api/v1/jobs/{job_id}` already provided what Studio needs).
+
+---
+
 ## [2026-05-28] #12 — QONG Studio design bundle Phase 1: Dashboard + Login + theme system
 
 **Type:** feature

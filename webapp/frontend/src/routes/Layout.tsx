@@ -4,13 +4,19 @@ import { useAuth } from "../auth/AuthContext";
 import BrandRow from "../components/BrandRow";
 import SettingsMenu from "../components/SettingsMenu";
 
-const FULL_BLEED_ROUTES = new Set(["/", "/signin"]);
+const FULL_BLEED_EXACT = new Set(["/", "/signin"]);
+const FULL_BLEED_PATTERNS = [/^\/jobs\/[^/]+(\/review)?\/?$/];
+
+function isFullBleed(pathname: string): boolean {
+  if (FULL_BLEED_EXACT.has(pathname)) return true;
+  return FULL_BLEED_PATTERNS.some((re) => re.test(pathname));
+}
 
 export default function Layout() {
   const loc = useLocation();
   const { user, logout } = useAuth();
 
-  if (FULL_BLEED_ROUTES.has(loc.pathname)) {
+  if (isFullBleed(loc.pathname)) {
     return <Outlet />;
   }
 

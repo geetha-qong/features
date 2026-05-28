@@ -1,21 +1,8 @@
-import { useParams } from "react-router-dom";
+// /jobs/:jobId/review is an alias for /jobs/:jobId (the studio) — kept so
+// any deep-linked URLs from earlier placeholders continue to work.
+// The actual studio component lives at routes/JobDetail.tsx.
+import JobDetail from "./JobDetail";
 
 export default function ReviewCanvas() {
-  const { jobId } = useParams<{ jobId: string }>();
-  return (
-    <div>
-      <div className="qs-overline" style={{ color: "#8B3FCE", marginBottom: 12 }}>
-        Plan B.2
-      </div>
-      <h1 className="qs-display" style={{ fontSize: 48, margin: 0 }}>
-        Review canvas — Job{" "}
-        <span className="qs-tag" style={{ fontSize: 32, color: "#8B3FCE" }}>{jobId}</span>
-      </h1>
-      <p style={{ color: "#4B5563", marginTop: 16, maxWidth: 640 }}>
-        The Konva-based P&amp;ID review canvas — bbox editing, tag overlays,
-        keyboard shortcuts targeting &lt;15 min/sheet reviewer flow — ships in
-        Plan B.2 once your canvas design lands.
-      </p>
-    </div>
-  );
+  return <JobDetail />;
 }

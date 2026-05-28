@@ -1,66 +1,88 @@
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
+import Studio from "../studio/Studio";
+
+/**
+ * /jobs/:jobId route — wraps the new Studio component with a real Job fetch.
+ *
+ * Production-continuity rule: this route replaces the prior JobDetail
+ * placeholder. The FastAPI Jinja-rendered /jobs/{id} HTML route in
+ * webapp/routers/jobs.py:111 is untouched and continues to serve any
+ * direct-URL access outside the SPA (legacy customers, email links, etc).
+ *
+ * Phase 2b will move the deliverable export links into the Studio top bar's
+ * "More menu → Export". For now, they remain reachable at
+ * /api/v1/jobs/{id}/export/{type}/{format}.
+ */
+interface JobResponse {
+  job_id: number;
+  status: string;
+  pid_no: string;
+  original_filename: string;
+  valve_count: number;
+}
 
 export default function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>();
-  const deliverables: Array<[string, string, string]> = [
-    ["Valve List", "valve_list", "xlsx"],
-    ["Valve List (CSV)", "valve_list", "csv"],
-    ["Instrument Index", "instrument_index", "xlsx"],
-    ["Equipment List", "equipment_list", "xlsx"],
-    ["Datasheet", "datasheet", "xlsx"],
-  ];
-  return (
-    <div>
-      <div className="qs-overline" style={{ color: "#8B3FCE", marginBottom: 12 }}>
-        Job · placeholder
-      </div>
-      <h1 className="qs-display" style={{ fontSize: 48, margin: 0 }}>
-        Job <span className="qs-tag" style={{ fontSize: 32, color: "#8B3FCE" }}>{jobId}</span>
-      </h1>
-      <p style={{ color: "#4B5563", marginTop: 16, maxWidth: 640 }}>
-        Job detail view. The links below hit the real{" "}
-        <code>POST /api/v1/jobs/{`{id}`}/export/...</code> endpoint built in
-        Plan A — they will return 200 + file once auth + ownership are wired
-        in Task 5.
-      </p>
-      <div
-        style={{
-          marginTop: 32,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-          gap: 12,
-        }}
-      >
-        {deliverables.map(([label, type, fmt]) => (
-          <a
-            key={`${type}.${fmt}`}
-            href={`/api/v1/jobs/${jobId}/export/${type}/${fmt}`}
-            style={{
-              border: "1px solid #E5E7EB",
-              borderRadius: 10,
-              padding: 16,
-              textDecoration: "none",
-              color: "#0A0B14",
-              transition: "border-color 0.12s",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#8B3FCE")}
-            onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#E5E7EB")}
-          >
-            <div style={{ fontWeight: 600 }}>{label}</div>
-            <div className="qs-tag" style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>
-              {type.toUpperCase()} · {fmt.toUpperCase()}
-            </div>
-          </a>
-        ))}
-      </div>
-      <div style={{ marginTop: 32 }}>
-        <Link
-          to={`/jobs/${jobId}/review`}
-          style={{ color: "#8B3FCE", fontWeight: 600, textDecoration: "none" }}
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [job, setJob] = useState<JobResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!jobId) return;
+    fetch(`/api/v1/jobs/${jobId}`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data: JobResponse) => {
+        if (cancelled) return;
+        setJob(data);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  if (error) {
+    return (
+      <main style={{ padding: "48px 32px", maxWidth: 720, margin: "0 auto" }}>
+        <h1 className="qs-display" style={{ fontSize: 32 }}>
+          Couldn't load job
+        </h1>
+        <p style={{ color: "var(--fg-2)", marginTop: 12 }}>{error}</p>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() => navigate("/dashboard")}
+          style={{ marginTop: 24 }}
         >
-          → Open Qong Studio review canvas (Plan B.2)
-        </Link>
-      </div>
-    </div>
+          Back to Dashboard
+        </button>
+      </main>
+    );
+  }
+
+  if (!job) {
+    return (
+      <main style={{ padding: "48px 32px", textAlign: "center", color: "var(--fg-3)" }}>
+        Loading…
+      </main>
+    );
+  }
+
+  return (
+    <Studio
+      project={{
+        id: job.job_id,
+        name: (job.original_filename || `Job ${job.job_id}`).replace(/\.pdf$/i, ""),
+        pidCount: 1,
+      }}
+      userName={user?.username || "guest"}
+      onBack={() => navigate("/dashboard")}
+    />
   );
 }
