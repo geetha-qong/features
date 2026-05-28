@@ -15,7 +15,10 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Home />} />
-          <Route path="login" element={<Login />} />
+          {/* React sign-in screen lives at /signin so /login can be a
+              pure backend proxy passthrough to FastAPI without a route
+              conflict with this SPA. */}
+          <Route path="signin" element={<Login />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="projects" element={<Projects />} />
           <Route path="projects/:projectId" element={<ProjectDetail />} />

@@ -2,7 +2,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import qongMark from "../design/assets/qong-mark.png";
 import { useAuth } from "../auth/AuthContext";
 
-const FULL_BLEED_ROUTES = new Set(["/login"]);
+const FULL_BLEED_ROUTES = new Set(["/signin"]);
 
 export default function Layout() {
   const loc = useLocation();
@@ -61,7 +61,7 @@ export default function Layout() {
               </button>
             </>
           ) : (
-            <Link to="/login" style={linkStyle("/login")}>Sign in</Link>
+            <Link to="/signin" style={linkStyle("/signin")}>Sign in</Link>
           )}
         </nav>
       </header>

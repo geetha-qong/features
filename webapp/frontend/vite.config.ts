@@ -13,7 +13,10 @@ export default defineConfig({
         target: "http://localhost:8000",
         changeOrigin: true,
       },
-      // Auth endpoints live at top-level (not /api/*), so proxy them too
+      // Auth endpoints live at top-level on the FastAPI backend.
+      // The React SPA's sign-in screen is at /signin (not /login) so we
+      // can proxy POST /login + GET /logout to FastAPI without conflicting
+      // with any React Router route.
       "/login": {
         target: "http://localhost:8000",
         changeOrigin: true,
