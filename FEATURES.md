@@ -24,6 +24,40 @@
 
 ---
 
+## [2026-05-28] #10 — Deliverables subsystem shipped (Valve List / Instrument Index / Equipment List / Datasheet generators + per-customer templates)
+
+**Type:** feature
+**Stage:** webapp, export
+**Status:** shipped
+
+**Why:** Per `docs/decisions/01-qong-studio-mvp-design.md` Plan A. The MVP
+customer experience hinges on four deliverables in per-EPC templates;
+this subsystem is the production path for all four.
+
+**What:** `webapp/deliverables/` package — Pydantic canonical schema
+(v1.0.0), per-customer JSON template format, generator registry, six
+concrete generators (Valve List CSV+XLSX, Instrument Index CSV+XLSX,
+Equipment List XLSX, Datasheet XLSX with 11-section IDS structure) and
+the `POST /api/v1/jobs/{id}/export/{type}/{format}` endpoint. Three
+customer templates landed: default (matches production columns +
+TNB-style Instrument Index), ronesans (sheet-name + font overrides),
+muk (subsetted columns). Pipeline-side `canonical.json` writing is
+intentionally out of scope for this plan — a follow-up plan will wire
+the extraction pipeline to emit canonical.json next to valve_list.csv.
+
+**Result:** End-to-end test passes: given a hand-crafted canonical.json
+fixture, the endpoint returns valid CSV/XLSX in the expected template
+(matching the customer reference files `parser.py:to_csv_dict`,
+`TNB-26E009A001_Instrument index R0.pdf`, `23E065AJ01_ASV_IDS.xlsx`).
+~56 unit tests + 5 E2E tests, all green.
+
+**Notes:** The customer_template_slug "default" is the fallback; jobs
+whose project sets no template still produce a usable deliverable.
+Companion entry to #09 (ValveListCSVGenerator) — #10 covers the
+remaining 5 generators + the API endpoint + the registry wiring.
+
+---
+
 ## [2026-05-28] #09 — ValveListCSVGenerator: stdlib csv.writer, CRLF fixture, self-registers in REGISTRY
 
 **Type:** feature

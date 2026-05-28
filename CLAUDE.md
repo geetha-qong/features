@@ -34,6 +34,7 @@ Headline metric long-term: graph isomorphism (`networkx.is_isomorphic`) — meas
 - [`docs/claude/webapp.md`](docs/claude/webapp.md) — Webapp & SaaS features, DB schema, admin/password reset, modules, testing
 - [`docs/claude/deployment.md`](docs/claude/deployment.md) — GCP VM, docker services, server security, multi-cloud migration
 - [`docs/claude/training_and_gpu.md`](docs/claude/training_and_gpu.md) — Annotation, training lessons, offline detector, Label Studio sync, GPU worker (Tailscale/Windows/CUDA/EasyOCR)
+- [`docs/claude/deliverables.md`](docs/claude/deliverables.md) — Deliverables subsystem (Valve List / Instrument Index / Equipment List / Datasheet generators + per-customer templates)
 
 ## Branches
 
