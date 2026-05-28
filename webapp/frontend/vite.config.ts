@@ -13,6 +13,15 @@ export default defineConfig({
         target: "http://localhost:8000",
         changeOrigin: true,
       },
+      // Auth endpoints live at top-level (not /api/*), so proxy them too
+      "/login": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
+      "/logout": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
     },
   },
   build: {

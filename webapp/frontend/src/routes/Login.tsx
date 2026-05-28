@@ -1,33 +1,50 @@
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Lock, Mail, ShieldCheck } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ArrowRight, Lock, User, ShieldCheck } from "lucide-react";
 import qongMark from "../design/assets/qong-mark.png";
+import { useAuth } from "../auth/AuthContext";
 
 const BRAND_GRADIENT =
   "linear-gradient(90deg, #2E3FBE 0%, #5347CC 25%, #8B3FCE 50%, #C73FBE 100%)";
 
 export default function Login() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [keepSignedIn, setKeepSignedIn] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
+  const { login } = useAuth();
+  const navigate = useNavigate();
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    // TODO Task 5: POST to /api/login (existing webapp/auth.py session endpoint)
-    console.log("[login] would submit:", { email, password, keepSignedIn });
+    setError(null);
+    setSubmitting(true);
+    try {
+      await login(username, password, keepSignedIn);
+      navigate("/dashboard");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", minHeight: "100vh" }}>
       <LeftPanel />
       <RightPanel
-        email={email}
-        setEmail={setEmail}
+        username={username}
+        setUsername={setUsername}
         password={password}
         setPassword={setPassword}
         keepSignedIn={keepSignedIn}
         setKeepSignedIn={setKeepSignedIn}
         onSubmit={onSubmit}
+        error={error}
+        submitting={submitting}
       />
     </div>
   );
@@ -162,13 +179,15 @@ function LeftPanel() {
 }
 
 interface RightPanelProps {
-  email: string;
-  setEmail: (v: string) => void;
+  username: string;
+  setUsername: (v: string) => void;
   password: string;
   setPassword: (v: string) => void;
   keepSignedIn: boolean;
   setKeepSignedIn: (v: boolean) => void;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  error: string | null;
+  submitting: boolean;
 }
 
 function RightPanel(p: RightPanelProps) {
@@ -191,15 +210,15 @@ function RightPanel(p: RightPanelProps) {
         </p>
 
         <FieldGroup
-          label="Work email"
-          icon={<Mail size={18} strokeWidth={1.8} color="#9CA3AF" />}
+          label="Username"
+          icon={<User size={18} strokeWidth={1.8} color="#9CA3AF" />}
           input={
             <input
-              type="email"
-              value={p.email}
-              onChange={(e) => p.setEmail(e.target.value)}
-              placeholder="you@operator.com"
-              autoComplete="email"
+              type="text"
+              value={p.username}
+              onChange={(e) => p.setUsername(e.target.value)}
+              placeholder="your-username"
+              autoComplete="username"
               required
               style={inputStyle}
             />
@@ -249,10 +268,13 @@ function RightPanel(p: RightPanelProps) {
 
         <button
           type="submit"
+          disabled={p.submitting}
           style={{
             marginTop: 28,
             width: "100%",
-            background: BRAND_GRADIENT,
+            background: p.submitting
+              ? "linear-gradient(90deg, #6B7280 0%, #9CA3AF 100%)"
+              : BRAND_GRADIENT,
             color: "#FFFFFF",
             border: "none",
             padding: "16px 24px",
@@ -261,19 +283,41 @@ function RightPanel(p: RightPanelProps) {
             fontWeight: 600,
             letterSpacing: "0.04em",
             textTransform: "uppercase",
-            cursor: "pointer",
+            cursor: p.submitting ? "not-allowed" : "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             gap: 8,
-            boxShadow: "0 4px 12px rgba(139, 63, 206, 0.25)",
+            boxShadow: p.submitting ? "none" : "0 4px 12px rgba(139, 63, 206, 0.25)",
             transition: "transform 0.08s, box-shadow 0.12s",
+            opacity: p.submitting ? 0.75 : 1,
           }}
-          onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.985)")}
-          onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+          onMouseDown={(e) => {
+            if (!p.submitting) e.currentTarget.style.transform = "scale(0.985)";
+          }}
+          onMouseUp={(e) => {
+            e.currentTarget.style.transform = "scale(1)";
+          }}
         >
-          Sign In <ArrowRight size={18} strokeWidth={2.2} />
+          {p.submitting ? "Signing in…" : <>Sign In <ArrowRight size={18} strokeWidth={2.2} /></>}
         </button>
+
+        {p.error && (
+          <div
+            role="alert"
+            style={{
+              marginTop: 16,
+              padding: "12px 14px",
+              background: "#FEF2F2",
+              border: "1px solid #FECACA",
+              borderRadius: 8,
+              color: "#B91C1C",
+              fontSize: 13,
+            }}
+          >
+            {p.error}
+          </div>
+        )}
 
         <div
           style={{
