@@ -1,0 +1,88 @@
+{
+  "slug": "default",
+  "customer_name": "Qong Default",
+  "deliverables": {
+    "valve_list": {
+      "sheet_name": "Valve List",
+      "columns": [
+        {"field": "pid_number", "header": "P&ID No", "order": 1},
+        {"field": "fields.dynamic_code", "header": "Dynamic Code", "order": 2},
+        {"field": "fields.category", "header": "Category", "order": 3},
+        {"field": "fields.size", "header": "Size", "order": 4},
+        {"field": "fields.area_code", "header": "Area Code", "order": 5},
+        {"field": "fields.serial_no", "header": "Serial No", "order": 6},
+        {"field": "fields.series_code", "header": "Series Code", "order": 7},
+        {"field": "fields.fluid_code", "header": "Fluid Code", "order": 8},
+        {"field": "fields.piping_class", "header": "Piping Class", "order": 9},
+        {"field": "fields.qty", "header": "Qty", "order": 10},
+        {"field": "fields.motor_actuator", "header": "Motor Actuator", "order": 11},
+        {"field": "fields.pneumatic_actuator", "header": "Pneumatic Actuator ", "order": 12},
+        {"field": "fields.solenoid", "header": "Solenoid", "order": 13},
+        {"field": "fields.line", "header": "line", "order": 14}
+      ]
+    },
+    "instrument_index": {
+      "sheet_name": "Instrument Index",
+      "columns": [
+        {"field": "fields.rev_no", "header": "Rev. No", "order": 1},
+        {"field": "fields.unit_number", "header": "Unit Number", "order": 2},
+        {"field": "fields.loop_name", "header": "Loop Name", "order": 3},
+        {"field": "tag", "header": "Tag Number", "order": 4},
+        {"field": "fields.instrument_type", "header": "Instrument Type", "order": 5},
+        {"field": "fields.service_description", "header": "Service Description", "order": 6},
+        {"field": "pid_number", "header": "P&ID No.", "order": 7},
+        {"field": "fields.line_no", "header": "Line No.", "order": 8},
+        {"field": "fields.equipment_no", "header": "Equipment No.", "order": 9},
+        {"field": "fields.location", "header": "Location", "order": 10},
+        {"field": "fields.system", "header": "System", "order": 11},
+        {"field": "fields.technical_room", "header": "Technical Room", "order": 12},
+        {"field": "fields.io_type", "header": "IO Type", "order": 13},
+        {"field": "fields.signal_type", "header": "Signal Type", "order": 14},
+        {"field": "fields.signal_level", "header": "Signal Level", "order": 15},
+        {"field": "fields.io_grouping", "header": "IO Grouping", "order": 16},
+        {"field": "fields.external_power_supply", "header": "External Power Supply", "order": 17},
+        {"field": "fields.analog_range_low_scale", "header": "Analog Range Low Scale", "order": 18},
+        {"field": "fields.analog_range_high_scale", "header": "Analog Range High Scale", "order": 19},
+        {"field": "fields.analog_range_eu", "header": "Analog Range EU", "order": 20},
+        {"field": "fields.alarm_high_high", "header": "High High Alarm Limit", "order": 21},
+        {"field": "fields.alarm_high", "header": "High Alarm Limit", "order": 22},
+        {"field": "fields.alarm_low", "header": "Low Alarm Limit", "order": 23},
+        {"field": "fields.alarm_low_low", "header": "Low Low Alarm Limit", "order": 24},
+        {"field": "fields.junction_box_panel", "header": "Junction Box / Panel", "order": 25},
+        {"field": "fields.multi_cable_type", "header": "Multi-Cable Type", "order": 26},
+        {"field": "fields.pair_no", "header": "Pair No.", "order": 27},
+        {"field": "vendor_match.vendor_name", "header": "Manufacturer", "order": 28},
+        {"field": "vendor_match.product_name", "header": "Model No", "order": 29},
+        {"field": "fields.datasheet_ref", "header": "Inst. Datasheet", "order": 30},
+        {"field": "fields.hookup_drawing", "header": "Hook-up Drawing", "order": 31},
+        {"field": "fields.remark", "header": "Remark", "order": 32}
+      ]
+    },
+    "equipment_list": {
+      "sheet_name": "Equipment List",
+      "columns": [
+        {"field": "fields.unit_number", "header": "Unit Number", "order": 1},
+        {"field": "tag", "header": "Equipment Tag", "order": 2},
+        {"field": "fields.equipment_type", "header": "Equipment Type", "order": 3},
+        {"field": "fields.service_duty", "header": "Service Duty", "order": 4},
+        {"field": "fields.capacity", "header": "Capacity", "order": 5},
+        {"field": "pid_number", "header": "P&ID No.", "order": 6},
+        {"field": "fields.location", "header": "Location", "order": 7},
+        {"field": "vendor_match.vendor_name", "header": "Manufacturer", "order": 8},
+        {"field": "vendor_match.product_name", "header": "Model No", "order": 9},
+        {"field": "fields.remark", "header": "Remark", "order": 10}
+      ]
+    },
+    "datasheet": {
+      "sheet_name": "Datasheet",
+      "columns": [
+        {"field": "tag", "header": "Tag Number", "order": 1},
+        {"field": "fields.service_description", "header": "Service", "order": 2},
+        {"field": "pid_number", "header": "P&ID No.", "order": 3},
+        {"field": "vendor_match.vendor_name", "header": "Manufacturer", "order": 4},
+        {"field": "vendor_match.product_name", "header": "Model", "order": 5},
+        {"field": "vendor_match.part_number", "header": "Part No.", "order": 6}
+      ]
+    }
+  }
+}
