@@ -46,6 +46,48 @@ def test_discover_jobs_finds_legacy_and_orgscoped(tmp_path):
     assert job_ids == [5, 39, 41, 42]
 
 
+def test_discover_jobs_handles_dual_use_path(tmp_path):
+    """Regression test: production job_outputs/2/ is BOTH a legacy job
+    (has its own valve_list.csv from the era of flat layout) AND an
+    org dir for org_id=2's later jobs (job_outputs/2/{6,7,8}/).
+
+    `discover_jobs` must yield BOTH the parent job AND the children."""
+    # Job 2 lives at the parent (legacy)
+    _make_legacy_job(tmp_path, 2)
+    # Org 2's jobs 6, 7, 8 live underneath it
+    (tmp_path / "2" / "6").mkdir()
+    (tmp_path / "2" / "7").mkdir()
+    (tmp_path / "2" / "8").mkdir()
+    for jid in (6, 7, 8):
+        with (tmp_path / "2" / str(jid) / "valve_list.csv").open("w", newline="") as f:
+            csv.writer(f).writerows([
+                ['P&ID No','Dynamic Code','Category','Size','Area Code','Serial No','Series Code','Fluid Code','Piping Class','Qty','Motor Actuator','Pneumatic Actuator ','Solenoid','line'],
+                ['P-X','-','GL','2','62',str(300000 + jid),'-','G','AC-PP','1','-','-','-','2"-G-X-AC-PP'],
+            ])
+
+    jobs = list(backfill_canonical.discover_jobs(tmp_path))
+    job_ids = sorted(j.job_id for j in jobs)
+    assert job_ids == [2, 6, 7, 8], f"expected [2, 6, 7, 8], got {job_ids}"
+
+
+def test_discover_jobs_ignores_exports_and_tmp_subdirs(tmp_path):
+    """exports/ and tmp/ subdirectories (created by deliverables generator
+    + pipeline scratch space) must NOT be confused with job dirs even if
+    they contain a valve_list.csv."""
+    job_dir = _make_legacy_job(tmp_path, 1)
+    (job_dir / "exports").mkdir()
+    # The deliverables generator legitimately writes valve_list.csv into exports/
+    with (job_dir / "exports" / "valve_list.csv").open("w") as f:
+        f.write("does not matter")
+    (job_dir / "tmp").mkdir()
+    with (job_dir / "tmp" / "valve_list.csv").open("w") as f:
+        f.write("does not matter")
+
+    jobs = list(backfill_canonical.discover_jobs(tmp_path))
+    job_ids = sorted(j.job_id for j in jobs)
+    assert job_ids == [1]  # 'exports' and 'tmp' must not appear as job ids
+
+
 def test_backfill_writes_canonical_for_legacy(tmp_path):
     job_dir = _make_legacy_job(tmp_path, 7)
     results = backfill_canonical.backfill_all(tmp_path)

@@ -43,25 +43,39 @@ class BackfillResult:
 def discover_jobs(root: Path) -> Iterator[DiscoveredJob]:
     """Yield every job directory that has valve_list.csv.
 
-    Supports both legacy flat (job_outputs/{job_id}/) and org-scoped
-    (job_outputs/{org_id}/{job_id}/) layouts.
+    Supports three real-world layouts seen in production job_outputs/:
+      - Legacy flat:        job_outputs/{job_id}/
+      - Org-scoped:         job_outputs/{org_id}/{job_id}/
+      - Dual-use:           job_outputs/{X}/  AND  job_outputs/{X}/{job_id}/
+        (where X is BOTH a legacy job_id AND a later org_id reusing the
+        same numeric path — observed: job_outputs/2/ has valve_list.csv
+        for the legacy job 2 AND contains 6/, 7/, 8/ for org 2's jobs.)
+
+    The fix: always check the parent for a CSV AND always descend into
+    subdirs. Never `continue` past one layer.
     """
     if not root.exists():
         return
+    # Skip subdirs whose name looks like a non-job folder produced by other
+    # code paths (e.g. 'exports' created by the deliverables generator).
+    NON_JOB_SUBDIR_NAMES = {"exports", "tmp"}
+
     for child in sorted(root.iterdir()):
-        if not child.is_dir():
+        if not child.is_dir() or child.name in NON_JOB_SUBDIR_NAMES:
             continue
-        # Case A: child is a job dir (legacy)
+        # Case A: this dir itself is a job dir (legacy flat or dual-use)
         if (child / "valve_list.csv").exists():
             try:
                 job_id = int(child.name)
             except ValueError:
-                continue
-            yield DiscoveredJob(job_dir=child, job_id=job_id)
-            continue
-        # Case B: child is an org dir containing job subdirs
+                pass
+            else:
+                yield DiscoveredJob(job_dir=child, job_id=job_id)
+        # Case B: ALSO descend — this dir may be an org dir with job subdirs.
+        # The dual-use case (job_outputs/2/ has BOTH a CSV and job subdirs)
+        # means Case A and Case B can both match.
         for grandchild in sorted(child.iterdir()):
-            if not grandchild.is_dir():
+            if not grandchild.is_dir() or grandchild.name in NON_JOB_SUBDIR_NAMES:
                 continue
             if (grandchild / "valve_list.csv").exists():
                 try:
