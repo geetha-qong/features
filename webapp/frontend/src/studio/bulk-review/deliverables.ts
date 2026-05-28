@@ -4,6 +4,9 @@ export interface Deliverable {
   name: string;
   total: number;
   done: number;
+  /** True for the 4 deliverables locked in for Phase 1 of the agency MVP.
+   *  Rendered first and visually highlighted in the workbench nav. */
+  phase1?: boolean;
 }
 
 export interface ColumnDef {
@@ -21,13 +24,16 @@ export interface DetailGroup {
   rows: Array<[string, string]>;
 }
 
+// Phase 1 deliverables first (highlighted as primary in the workbench nav).
+// Order matches the datasheet drawer's DOC_TYPES so customers see the same
+// sequence in both surfaces.
 export const DELIVERABLES: Deliverable[] = [
-  { key: "index", icon: "list-checks", name: "Instrument Index", total: 182, done: 182 },
-  { key: "datasheet", icon: "file-text", name: "Instrument Datasheet", total: 68, done: 32 },
+  { key: "index", icon: "list-checks", name: "Instrument Index", total: 182, done: 182, phase1: true },
+  { key: "datasheet", icon: "file-text", name: "Instrument Datasheet", total: 68, done: 32, phase1: true },
+  { key: "valves", icon: "git-pull-request", name: "Valve List", total: 52, done: 38, phase1: true },
+  { key: "io", icon: "list", name: "I/O List", total: 204, done: 204, phase1: true },
   { key: "narrative", icon: "scroll-text", name: "Control Narrative", total: 24, done: 16 },
   { key: "cande", icon: "git-merge", name: "Cause & Effect", total: 40, done: 11 },
-  { key: "io", icon: "list", name: "I/O List", total: 204, done: 204 },
-  { key: "valves", icon: "git-pull-request", name: "Valve List", total: 52, done: 38 },
   { key: "lines", icon: "git-branch", name: "Line List", total: 96, done: 0 },
   { key: "equip", icon: "boxes", name: "Equipment List", total: 22, done: 18 },
   { key: "loop", icon: "repeat", name: "Loop Schedule", total: 30, done: 9 },

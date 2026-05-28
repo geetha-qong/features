@@ -17,27 +17,32 @@ export interface DocType {
   key: DocTypeKey;
   name: string;
   icon: string;
+  /** True for the 4 deliverables locked in for Phase 1 of the agency MVP.
+   *  Rendered first and visually highlighted. */
+  phase1?: boolean;
 }
 
 export type DocTypeKey =
-  | "datasheet"
   | "index"
+  | "datasheet"
+  | "valves"
+  | "io"
   | "narrative"
   | "cande"
-  | "io"
-  | "valves"
   | "lines"
   | "equip"
   | "loop"
   | "tags";
 
+// Phase 1 deliverables first (highlighted as primary). The remaining six are
+// secondary — still selectable, but visually de-emphasized.
 export const DOC_TYPES: DocType[] = [
-  { key: "datasheet", name: "Instrument Datasheet", icon: "file-text" },
-  { key: "index", name: "Instrument Index", icon: "list-checks" },
+  { key: "index", name: "Instrument Index", icon: "list-checks", phase1: true },
+  { key: "datasheet", name: "Instrument Datasheet", icon: "file-text", phase1: true },
+  { key: "valves", name: "Valve List", icon: "git-pull-request", phase1: true },
+  { key: "io", name: "I/O List", icon: "list", phase1: true },
   { key: "narrative", name: "Control Narrative", icon: "scroll-text" },
   { key: "cande", name: "Cause & Effect", icon: "git-merge" },
-  { key: "io", name: "I/O List", icon: "list" },
-  { key: "valves", name: "Valve List", icon: "git-pull-request" },
   { key: "lines", name: "Line List", icon: "git-branch" },
   { key: "equip", name: "Equipment List", icon: "boxes" },
   { key: "loop", name: "Loop Schedule", icon: "repeat" },
@@ -89,18 +94,120 @@ export const SCHEMAS: Record<DocTypeKey, SectionDef[]> = {
     },
   ],
 
+  // Instrument Index schema mirrors the column structure of a real RCC
+  // INST INDEX deliverable (57-col XLSX, e.g. C15-40-SCJV-MJ-5000103187-001).
+  // Grouped into 11 accordion sections so the drawer stays scannable;
+  // every column from the customer's index ends up here.
   index: [
     {
-      title: "Index Row",
+      title: "Identification",
       fields: [
+        { key: "sNo", label: "S.No", w: "xs", extracted: true, conf: 0.99 },
+        { key: "itemNo", label: "Item No", w: "sm", extracted: true, conf: 0.92 },
         { key: "tag", label: "Tag No", w: "xs", extracted: true, conf: 0.97 },
-        { key: "instType", label: "Type", w: "sm", extracted: true, conf: 0.93 },
-        { key: "loopNo", label: "Loop #", w: "xs", extracted: true, conf: 0.88 },
-        { key: "disc", label: "Discipline", w: "xs", extracted: true, conf: 0.9 },
+        { key: "vpRevNo", label: "VP Rev", w: "xs", extracted: false },
+        { key: "reqNo", label: "Req No", w: "sm", extracted: true, conf: 0.86 },
+      ],
+    },
+    {
+      title: "Process & Location",
+      fields: [
+        { key: "unitNo", label: "Unit No", w: "xs", extracted: true, conf: 0.95 },
         { key: "service", label: "Service", w: "md", extracted: true, conf: 0.74 },
-        { key: "pid", label: "P&ID", w: "sm", extracted: true, conf: 0.99 },
+        { key: "loopNo", label: "Loop No", w: "sm", extracted: true, conf: 0.88 },
+        { key: "pid", label: "P&ID No", w: "sm", extracted: true, conf: 0.99 },
+        { key: "processFunction", label: "Process Function", w: "sm", extracted: true, conf: 0.81 },
         { key: "lineNo", label: "Line No", w: "sm", extracted: true, conf: 0.86 },
-        { key: "loc", label: "Location", w: "sm", extracted: false },
+        { key: "pipingClass", label: "Piping Class", w: "xs", extracted: true, conf: 0.78 },
+        { key: "locationName", label: "Location", w: "sm", extracted: false },
+      ],
+    },
+    {
+      title: "Type Classification",
+      fields: [
+        { key: "instType", label: "Inst Type", w: "xs", extracted: true, conf: 0.93 },
+        { key: "instTypeDesc", label: "Inst Type Description", w: "md", extracted: true, conf: 0.86 },
+        { key: "instType2", label: "Inst Type 2", w: "xs", extracted: true, conf: 0.84 },
+        { key: "type2Desc", label: "Type 2 Description", w: "md", extracted: true, conf: 0.78 },
+      ],
+    },
+    {
+      title: "I/O & Signal",
+      fields: [
+        { key: "ioType", label: "I/O Type", w: "xs", extracted: true, conf: 0.92 },
+        { key: "subIoType", label: "Sub I/O Type", w: "xs", extracted: false },
+        { key: "signalType", label: "Signal Type", w: "sm", extracted: true, conf: 0.9 },
+        { key: "system", label: "System", w: "xs", extracted: false },
+        { key: "subSystem", label: "Sub-System", w: "xs", extracted: false },
+        { key: "ioLocation", label: "I/O Location", w: "sm", extracted: false },
+      ],
+    },
+    {
+      title: "Hardware",
+      fields: [
+        { key: "isType", label: "IS Type", w: "xs", extracted: false },
+        { key: "make", label: "Make", w: "sm", extracted: false },
+        { key: "model", label: "Model", w: "sm", extracted: false },
+        { key: "externalPower", label: "External Power", w: "xs", extracted: false },
+      ],
+    },
+    {
+      title: "Calibration Range",
+      fields: [
+        { key: "calbRangeMin", label: "Calib Min", w: "xs", extracted: false },
+        { key: "calbRangeMax", label: "Calib Max", w: "xs", extracted: false },
+        { key: "calbRangeUnit", label: "Unit", w: "xs", extracted: false },
+      ],
+    },
+    {
+      title: "Measuring Range",
+      fields: [
+        { key: "measuringRangeMin", label: "Measuring Min", w: "xs", extracted: false },
+        { key: "measuringRangeMax", label: "Measuring Max", w: "xs", extracted: false },
+        { key: "measuringRangeUnit", label: "Unit", w: "xs", extracted: false },
+      ],
+    },
+    {
+      title: "Alarms & Trips",
+      fields: [
+        { key: "alarmHHH", label: "Alarm HHH", w: "xs", extracted: false },
+        { key: "alarmHH", label: "Alarm HH", w: "xs", extracted: false },
+        { key: "alarmH", label: "Alarm H", w: "xs", extracted: false },
+        { key: "alarmL", label: "Alarm L", w: "xs", extracted: false },
+        { key: "alarmLL", label: "Alarm LL", w: "xs", extracted: false },
+        { key: "alarmLLL", label: "Alarm LLL", w: "xs", extracted: false },
+        { key: "tripMultiply", label: "Trip Multiply", w: "xs", extracted: false },
+      ],
+    },
+    {
+      title: "Scope of Supply",
+      fields: [
+        { key: "scopeOfSupply", label: "Scope of Supply", w: "sm", extracted: false },
+        { key: "scopeOfWiring", label: "Scope of Wiring", w: "sm", extracted: false },
+        { key: "scopeOfInstall", label: "Scope of Install", w: "sm", extracted: false },
+        { key: "scopeOfAirConn", label: "Scope of Air Conn", w: "sm", extracted: false },
+        { key: "tracing", label: "Tracing", w: "xs", extracted: false },
+        { key: "externalPowerSow", label: "External Power SOW", w: "sm", extracted: false },
+        { key: "pidControlAction", label: "PID Control Action", w: "sm", extracted: false },
+      ],
+    },
+    {
+      title: "Status & Failure",
+      fields: [
+        { key: "status0", label: "Status 0", w: "xs", extracted: false },
+        { key: "status1", label: "Status 1", w: "xs", extracted: false },
+        { key: "failureAction", label: "Failure Action", w: "sm", extracted: false },
+      ],
+    },
+    {
+      title: "Documentation",
+      fields: [
+        { key: "calReportRequirement", label: "Cal Report Reqd?", w: "xs", extracted: false },
+        { key: "calReportDocNo", label: "Cal Report Doc No", w: "sm", extracted: false },
+        { key: "calReportSubmit", label: "Cal Report Submit", w: "sm", extracted: false },
+        { key: "silCertiRequirement", label: "SIL Certi Reqd?", w: "xs", extracted: false },
+        { key: "silCertiSubmit", label: "SIL Certi Submit", w: "sm", extracted: false },
+        { key: "remarks", label: "Remarks", w: "full", extracted: false },
       ],
     },
   ],
