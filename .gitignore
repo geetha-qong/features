@@ -54,6 +54,9 @@ datasets/**/*.cache
 # Label Studio export archives (large, regenerable from LS)
 annotate/exports/*.zip
 
+# VC / investor data room — kept locally, never pushed
+data_room/
+
 # Playwright session data
 .playwright-mcp/
 themes/screenshots/
