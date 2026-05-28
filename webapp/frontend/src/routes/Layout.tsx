@@ -2,7 +2,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import qongMark from "../design/assets/qong-mark.png";
 import { useAuth } from "../auth/AuthContext";
 
-const FULL_BLEED_ROUTES = new Set(["/signin"]);
+const FULL_BLEED_ROUTES = new Set(["/", "/signin"]);
 
 export default function Layout() {
   const loc = useLocation();
