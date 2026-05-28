@@ -24,6 +24,22 @@
 
 ---
 
+## [2026-05-28] #11 — Marketing landing page ported into React SPA (Plan B Phase 1 Task 6)
+
+**Type:** feature
+**Stage:** webapp
+**Status:** shipped
+
+**Why:** Plan B Phase 1 final task. The Home route was a placeholder; the team needed a full marketing-site composition in the SPA so sales/demo links (`/`) show the real brand. Also needed to prove the JSX design-system UI kit (in `design/QONG Design System/ui_kits/marketing-site/`) ports cleanly to TypeScript.
+
+**What:** Created `webapp/frontend/src/marketing/` with 7 files: `Drive.tsx`, `Social.tsx`, `Hero.tsx`, `Sections.tsx` (About, Features, Problems, Process, CoreEngine, Advantages, Sectors, FAQ, CTAStrip), `Footer.tsx`, `MarketingNav.tsx`, `marketing.css`. Replaced `routes/Home.tsx` entirely. Added `/` to `FULL_BLEED_ROUTES` in `Layout.tsx` so the marketing page is edge-to-edge. Commit `41db788`.
+
+**Result (if measurable):** tsc + vite build clean. Bundle size 283 KB JS / 18 KB CSS (grew ~18 KB from marketing components). "Beyond Plant", "Oil & Gas", "Instrument Index" present in the JS bundle.
+
+**Notes:** Drive mockup animates via a `setInterval` — functional, not a real product. CTA buttons link to `/signin` or `mailto:hello@qongsystems.com`. Nav links for About/Careers/Contact do in-page anchor scroll only (not separate routes — those are post-Phase-1 surfaces).
+
+---
+
 ## [2026-05-28] #10 — Deliverables subsystem shipped (Valve List / Instrument Index / Equipment List / Datasheet generators + per-customer templates)
 
 **Type:** feature
