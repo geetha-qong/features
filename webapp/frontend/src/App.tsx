@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "./theme/ThemeContext";
+import RequireAuth from "./auth/RequireAuth";
 import Layout from "./routes/Layout";
 import Home from "./routes/Home";
 import Login from "./routes/Login";
@@ -30,25 +31,32 @@ function AppRoutes() {
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
+          {/* Public surfaces */}
           <Route index element={<Home />} />
           {/* React sign-in screen lives at /signin so /login can be a
               pure backend proxy passthrough to FastAPI without a route
               conflict with this SPA. */}
           <Route path="signin" element={<Login />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="projects" element={<Projects />} />
-          <Route path="projects/:projectId" element={<ProjectDetail />} />
-          <Route path="jobs/:jobId" element={<JobDetail />} />
-          <Route path="jobs/:jobId/review" element={<ReviewCanvas />} />
-          <Route path="admin" element={<AdminLayout />}>
-            <Route index element={<AdminDashboard />} />
-            <Route path="dashboard" element={<AdminDashboard />} />
-            <Route path="users" element={<AdminUsers />} />
-            <Route path="feedback" element={<AdminFeedback />} />
-            <Route path="credits" element={<AdminCredits />} />
-            <Route path="plans" element={<AdminPlans />} />
-            <Route path="label-studio" element={<AdminLabelStudio />} />
+
+          {/* Protected surfaces — RequireAuth bounces logged-out users to
+              /signin?next=... before the inner routes render. */}
+          <Route element={<RequireAuth />}>
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="projects" element={<Projects />} />
+            <Route path="projects/:projectId" element={<ProjectDetail />} />
+            <Route path="jobs/:jobId" element={<JobDetail />} />
+            <Route path="jobs/:jobId/review" element={<ReviewCanvas />} />
+            <Route path="admin" element={<AdminLayout />}>
+              <Route index element={<AdminDashboard />} />
+              <Route path="dashboard" element={<AdminDashboard />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="feedback" element={<AdminFeedback />} />
+              <Route path="credits" element={<AdminCredits />} />
+              <Route path="plans" element={<AdminPlans />} />
+              <Route path="label-studio" element={<AdminLabelStudio />} />
+            </Route>
           </Route>
+
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

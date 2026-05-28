@@ -26,6 +26,34 @@ export default defineConfig({
         target: "http://localhost:8000",
         changeOrigin: true,
       },
+      // /jobs/:id has a URL collision: the SPA's React Router owns the HTML
+      // route (Studio at /jobs/:jobId), while FastAPI owns the asset routes
+      // (/jobs/:id/tiles/*, /pdf, /download*, /annotated-pdf, /status).
+      // In dev both must work behind one origin. The bypass function lets
+      // HTML requests fall through to Vite (so React Router gets the route)
+      // while images / downloads / poll JSON proxy to FastAPI.
+      "/jobs": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+        bypass: (req) => {
+          const accept = String(req.headers.accept || "");
+          // Top-level navigation that wants HTML → let Vite serve the SPA.
+          if (accept.indexOf("text/html") >= 0) return req.url;
+          // Everything else (img, fetch with default Accept, JSON) → proxy.
+          return undefined;
+        },
+      },
+      // The Jinja /annotate page (annotator surface) is still backend-served.
+      "/annotate": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
+      // Backend-only HTML surfaces that the SPA might link to (e.g. /account
+      // dropdown). Proxy so Vite doesn't serve the SPA over them.
+      "/account": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
     },
   },
   build: {

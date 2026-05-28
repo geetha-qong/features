@@ -303,7 +303,15 @@ export default function Dashboard() {
       <CreateProjectModal
         open={creating}
         onClose={() => setCreating(false)}
-        onCreated={() => setReloadKey((k) => k + 1)}
+        onCreated={(firstJobId) => {
+          // Refresh dashboard data so the new tile shows on return; then
+          // jump straight into the new project's studio (chat1.md design
+          // intent — gives the user clear feedback that the upload worked).
+          setReloadKey((k) => k + 1);
+          if (firstJobId != null) {
+            navigate(`/jobs/${firstJobId}`);
+          }
+        }}
       />
     </div>
   );

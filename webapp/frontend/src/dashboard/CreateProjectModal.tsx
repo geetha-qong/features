@@ -6,7 +6,10 @@ import { useAuth } from "../auth/AuthContext";
 interface CreateProjectModalProps {
   open: boolean;
   onClose: () => void;
-  onCreated: () => void;
+  /** Called with the id of the first newly-created job after a successful
+   *  upload. Dashboard uses it to navigate straight into the new project's
+   *  studio (per the chat1.md design intent). */
+  onCreated: (firstJobId: number | null) => void;
 }
 
 interface QueuedFile {
@@ -64,6 +67,7 @@ export default function CreateProjectModal({ open, onClose, onCreated }: CreateP
     setSubmitting(true);
     setError(null);
     setSessionExpired(false);
+    let firstJobId: number | null = null;
     try {
       for (const qf of files) {
         const fd = new FormData();
@@ -74,8 +78,6 @@ export default function CreateProjectModal({ open, onClose, onCreated }: CreateP
           credentials: "include",
         });
         if (res.status === 401) {
-          // Session expired — refresh AuthContext so the SPA reflects logged-out
-          // state, then surface a friendly "session expired" UX (vs a raw 401).
           await refresh().catch(() => undefined);
           setSessionExpired(true);
           return;
@@ -92,8 +94,18 @@ export default function CreateProjectModal({ open, onClose, onCreated }: CreateP
           const detail = await res.text().catch(() => "");
           throw new Error(`Upload failed (${res.status}): ${detail.slice(0, 200)}`);
         }
+        // Capture the first newly created job id so the caller can jump
+        // straight to its Studio (the design's preferred post-upload UX).
+        try {
+          const body = (await res.json()) as { job_id?: number };
+          if (firstJobId == null && typeof body.job_id === "number") {
+            firstJobId = body.job_id;
+          }
+        } catch {
+          /* response wasn't JSON — ignore */
+        }
       }
-      onCreated();
+      onCreated(firstJobId);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

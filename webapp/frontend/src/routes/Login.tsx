@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowRight,
@@ -29,6 +29,7 @@ export default function Login() {
 
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -40,7 +41,12 @@ export default function Login() {
     setSubmitting(true);
     try {
       await login(username, password, remember);
-      navigate("/dashboard");
+      // If RequireAuth bounced the user here with `?next=`, route them back
+      // to that protected page after login (defends against open-redirect by
+      // requiring the path to start with "/" and not "//").
+      const rawNext = searchParams.get("next") || "";
+      const safeNext = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/dashboard";
+      navigate(safeNext, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
