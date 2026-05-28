@@ -24,6 +24,22 @@
 
 ---
 
+## [2026-05-28] #09 — ValveListCSVGenerator: stdlib csv.writer, CRLF fixture, self-registers in REGISTRY
+
+**Type:** feature
+**Stage:** export
+**Status:** shipped
+
+**Why:** Plan `2026-05-27-deliverables-template-engine.md` Task 9 — first concrete deliverable generator to exercise the Generator/REGISTRY/TemplateLoader/field_resolver stack end-to-end. Needed to prove byte-exact output before XLSX variant is added.
+
+**What:** New file `webapp/deliverables/valve_list.py` — `ValveListCSVGenerator(Generator)` filters entities to `entity_class == "valve"`, orders columns by `ColumnDef.order`, writes CRLF CSV via `csv.writer`, self-registers in `REGISTRY` at import time. Fixture `tests/unit/deliverables/fixtures/expected_valve_list_default.csv` (315 bytes, 3 CRLF lines) pinned via Python csv.writer for byte-exact comparison. `.gitattributes` added so git checks out the fixture with `eol=crlf` on all platforms.
+
+**Result:** 4 pytest tests pass: byte-equality fixture, filter-to-valves-only (instrument/equipment rows excluded), trailing-space header preservation, class attrs. Commit `ac2cde8`.
+
+**Notes:** `.gitattributes` `eol=crlf` rule is critical — without it a fresh clone on Linux/Mac would check out LF and the byte-equality test would fail. The `"8""-G-62151004-AC-PP"` double-double-quote is csv-module standard escaping; do not hand-edit that fixture.
+
+---
+
 ## [2026-05-27] #08 — Qong Studio MVP scope locked: agency beachhead, 4 deliverables, Aug '26, Level-2 vendor inclusion via separate Laravel portal
 
 **Type:** decision, architecture
