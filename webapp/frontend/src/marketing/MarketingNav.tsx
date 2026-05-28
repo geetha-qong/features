@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import qongMark from "../design/assets/qong-mark.png";
+import { useAuth } from "../auth/AuthContext";
 
 interface MarketingNavProps {
   /** active section key (for in-page scroll highlighting) */
@@ -18,6 +19,7 @@ const NAV_LINKS: [string, string][] = [
 
 export default function MarketingNav({ active = "home" }: MarketingNavProps) {
   const [current, setCurrent] = useState(active);
+  const { user } = useAuth();
 
   const handleAnchorClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>, key: string) => {
@@ -56,13 +58,23 @@ export default function MarketingNav({ active = "home" }: MarketingNavProps) {
           ))}
         </div>
 
-        <Link
-          to="/signin"
-          className="mkt-btn mkt-btn-primary mkt-btn-sm"
-          style={{ marginLeft: 8 }}
-        >
-          Request Demo
-        </Link>
+        {user ? (
+          <Link
+            to="/dashboard"
+            className="mkt-btn mkt-btn-primary mkt-btn-sm"
+            style={{ marginLeft: 8 }}
+          >
+            Go to Dashboard
+          </Link>
+        ) : (
+          <Link
+            to="/signin"
+            className="mkt-btn mkt-btn-primary mkt-btn-sm"
+            style={{ marginLeft: 8 }}
+          >
+            Request Demo
+          </Link>
+        )}
       </nav>
     </div>
   );

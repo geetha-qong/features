@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ArrowRight, FileText, UploadCloud, X } from "lucide-react";
+import { useAuth } from "../auth/AuthContext";
 
 interface CreateProjectModalProps {
   open: boolean;
@@ -21,7 +23,10 @@ export default function CreateProjectModal({ open, onClose, onCreated }: CreateP
   const [over, setOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const navigate = useNavigate();
+  const { refresh } = useAuth();
 
   useEffect(() => {
     if (open) {
@@ -58,9 +63,8 @@ export default function CreateProjectModal({ open, onClose, onCreated }: CreateP
     }
     setSubmitting(true);
     setError(null);
+    setSessionExpired(false);
     try {
-      // Upload each file as its own job via POST /api/v1/jobs. The first file
-      // becomes the named project, the rest are queued as additional jobs.
       for (const qf of files) {
         const fd = new FormData();
         fd.append("file", qf.file);
@@ -69,6 +73,21 @@ export default function CreateProjectModal({ open, onClose, onCreated }: CreateP
           body: fd,
           credentials: "include",
         });
+        if (res.status === 401) {
+          // Session expired — refresh AuthContext so the SPA reflects logged-out
+          // state, then surface a friendly "session expired" UX (vs a raw 401).
+          await refresh().catch(() => undefined);
+          setSessionExpired(true);
+          return;
+        }
+        if (res.status === 402) {
+          throw new Error(
+            "Not enough credits to process this PDF. Visit /account/billing or contact admin.",
+          );
+        }
+        if (res.status === 422) {
+          throw new Error("That file isn't a valid PDF.");
+        }
         if (!res.ok) {
           const detail = await res.text().catch(() => "");
           throw new Error(`Upload failed (${res.status}): ${detail.slice(0, 200)}`);
@@ -183,10 +202,39 @@ export default function CreateProjectModal({ open, onClose, onCreated }: CreateP
               </div>
             )}
           </div>
-          {error && (
+          {sessionExpired && (
+            <div
+              style={{
+                background: "var(--warn-soft)",
+                color: "var(--warn)",
+                border: "1px solid var(--warn)",
+                padding: 14,
+                borderRadius: 8,
+                marginTop: 8,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+              role="alert"
+            >
+              <div>
+                <strong>Your session has expired.</strong> Sign in again to upload.
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => navigate("/signin")}
+              >
+                Sign in
+              </button>
+            </div>
+          )}
+          {error && !sessionExpired && (
             <div
               className="err"
               style={{ color: "var(--error)", marginTop: 4, fontSize: 13 }}
+              role="alert"
             >
               {error}
             </div>

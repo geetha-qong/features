@@ -137,7 +137,152 @@ def test_job_status_own_job(client, db_session, user, api_key_pair):
     assert data["status"] == "done"
     assert data["valve_count"] == 5
     assert data["credits_consumed"] == 0  # no ledger rows
-    assert data["csv_url"] is None
+
+
+# ── GET /api/v1/jobs/{id}/sheets ──────────────────────────────────────────────
+
+def test_sheets_not_found(client, user, api_key_pair):
+    full_key, _ = api_key_pair
+    resp = client.get(
+        "/api/v1/jobs/99999/sheets",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_sheets_empty_when_no_tiles(client, db_session, user, api_key_pair):
+    """Job with no tile directory returns sheet_count=0, sheets=[]."""
+    job = models.Job(
+        user_id=user.id, pid_no="T-100", status="done",
+        original_filename="x.pdf", stored_filename="y.pdf",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    full_key, _ = api_key_pair
+    resp = client.get(
+        f"/api/v1/jobs/{job.id}/sheets",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["job_id"] == job.id
+    assert data["sheet_count"] == 0
+    assert data["sheets"] == []
+
+
+def test_sheets_access_denied_for_other_user(client, db_session, user, api_key_pair):
+    """A user cannot list sheets for someone else's job (super_admin can)."""
+    other = models.User(
+        username="other_one", password_hash="x", credits_remaining=5, is_active=True,
+    )
+    db_session.add(other)
+    db_session.commit()
+    job = models.Job(
+        user_id=other.id, pid_no="T-101", status="done",
+        original_filename="x.pdf", stored_filename="y.pdf",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    full_key, _ = api_key_pair
+    resp = client.get(
+        f"/api/v1/jobs/{job.id}/sheets",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 403
+
+
+# ── GET /api/v1/jobs/{id}/detections ──────────────────────────────────────────
+
+def test_detections_empty_when_no_gpu_callback(client, db_session, user, api_key_pair):
+    job = models.Job(
+        user_id=user.id, pid_no="T-200", status="done", valve_count=3,
+        original_filename="x.pdf", stored_filename="y.pdf",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    full_key, _ = api_key_pair
+    resp = client.get(
+        f"/api/v1/jobs/{job.id}/detections",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["valve_count"] == 3
+    assert data["detections"] == []
+    assert data["detection_count"] == 0
+    assert data["valves"] == []
+
+
+def test_detections_parses_gpu_callback_json(client, db_session, user, api_key_pair):
+    import json as _json
+    job = models.Job(
+        user_id=user.id, pid_no="T-201", status="done", valve_count=2,
+        original_filename="x.pdf", stored_filename="y.pdf",
+        gpu_detections=_json.dumps([
+            {"bbox": [10, 20, 30, 40], "label": "PT-101", "confidence": 0.91},
+            {"bbox": [50, 60, 70, 80], "label": "FT-201", "confidence": 0.85},
+        ]),
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    full_key, _ = api_key_pair
+    resp = client.get(
+        f"/api/v1/jobs/{job.id}/detections",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["detection_count"] == 2
+    assert data["detections"][0]["label"] == "PT-101"
+    assert data["detections"][0]["bbox"] == [10, 20, 30, 40]
+
+
+def test_detections_survives_malformed_gpu_json(client, db_session, user, api_key_pair):
+    job = models.Job(
+        user_id=user.id, pid_no="T-202", status="done",
+        original_filename="x.pdf", stored_filename="y.pdf",
+        gpu_detections="not json at all",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    full_key, _ = api_key_pair
+    resp = client.get(
+        f"/api/v1/jobs/{job.id}/detections",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["detections"] == []
+
+
+def test_detections_includes_valve_rows(client, db_session, user, api_key_pair):
+    job = models.Job(
+        user_id=user.id, pid_no="T-203", status="done", valve_count=1,
+        original_filename="x.pdf", stored_filename="y.pdf",
+    )
+    db_session.add(job)
+    db_session.commit()
+    db_session.refresh(job)
+    db_session.add(models.ValveRow(
+        job_id=job.id, pid_no="T-203", category="GLOBE",
+        size='4"', line="P-12-101", qty=1,
+    ))
+    db_session.commit()
+
+    full_key, _ = api_key_pair
+    resp = client.get(
+        f"/api/v1/jobs/{job.id}/detections",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["valves"]) == 1
+    assert data["valves"][0]["category"] == "GLOBE"
+    assert data["valves"][0]["line"] == "P-12-101"
 
 
 # ── POST /api/v1/jobs ──────────────────────────────────────────────────────────

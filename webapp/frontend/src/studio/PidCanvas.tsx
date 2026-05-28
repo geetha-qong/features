@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { DetectionItem } from "./api";
 
 interface PidElement {
   id: string;
@@ -43,9 +44,33 @@ interface Props {
   pan: { x: number; y: number };
   setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   dark: boolean;
+  /**
+   * Real PDF tile image for the active sheet. When provided, it's drawn as the
+   * canvas background and prototype SVG elements are hidden. Detections (if
+   * any) are overlaid as rectangles in the same coordinate space.
+   */
+  tileImageUrl?: string | null;
+  /** Backend-supplied valve / instrument detections to overlay on the tile. */
+  detections?: DetectionItem[];
+  /** Number of structured valve rows in the DB — shown in the canvas footer. */
+  valveCount?: number;
+  /** valve_count stored on the Job row (may be > rows if data not yet seeded). */
+  valveCountTotal?: number;
 }
 
-export default function PidCanvas({ selectedId, onSelect, zoom, setZoom, pan, setPan, dark }: Props) {
+export default function PidCanvas({
+  selectedId,
+  onSelect,
+  zoom,
+  setZoom,
+  pan,
+  setPan,
+  dark,
+  tileImageUrl,
+  detections,
+  valveCount,
+  valveCountTotal,
+}: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const innerRef = useRef<HTMLDivElement | null>(null);
   const [animated, setAnimated] = useState(true);
@@ -103,6 +128,10 @@ export default function PidCanvas({ selectedId, onSelect, zoom, setZoom, pan, se
     if (!pannedRef.current) cb();
   };
 
+  // When a real tile is available, show it + detection overlay. Prototype SVG
+  // elements (V-101, FT-101, …) are hidden so customers see their real data.
+  const useReal = !!tileImageUrl;
+
   return (
     <div ref={wrapRef} className="canvas-wrap" onMouseDown={onMouseDown}>
       <div
@@ -110,7 +139,29 @@ export default function PidCanvas({ selectedId, onSelect, zoom, setZoom, pan, se
         className={`canvas-inner ${animated ? "animated" : ""}`}
         style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
       >
-        <svg viewBox="0 0 700 360" className="pid-svg">
+        {useReal && (
+          <img
+            src={tileImageUrl!}
+            alt="P&ID tile"
+            style={{
+              maxWidth: "min(100%, 1200px)",
+              maxHeight: "70vh",
+              objectFit: "contain",
+              display: "block",
+              margin: "0 auto",
+              borderRadius: 4,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+              userSelect: "none",
+              pointerEvents: "none",
+            }}
+            draggable={false}
+          />
+        )}
+        {useReal && detections && detections.length > 0 && (
+          <DetectionOverlay detections={detections} />
+        )}
+        {!useReal && (
+          <svg viewBox="0 0 700 360" className="pid-svg">
           <defs>
             <pattern id="canvas-grid" width="20" height="20" patternUnits="userSpaceOnUse">
               <path d="M 20 0 L 0 0 0 20" fill="none" stroke={gridStroke} strokeOpacity={gridOp} strokeWidth="0.6" />
@@ -335,8 +386,98 @@ export default function PidCanvas({ selectedId, onSelect, zoom, setZoom, pan, se
             </text>
           </g>
         </svg>
+        )}
+        {useReal && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: "8px 14px",
+              fontSize: 12,
+              color: dark ? "#9498AE" : "#6B6F8A",
+              fontFamily: "JetBrains Mono, monospace",
+              textAlign: "center",
+            }}
+          >
+            {valveCount !== undefined && valveCount > 0
+              ? `${valveCount} valves on this sheet`
+              : valveCountTotal && valveCountTotal > 0
+                ? `${valveCountTotal} valves total — detection coords not yet available`
+                : "Valve list not yet generated for this job"}
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Renders detection rectangles on top of the tile image. Coords are expected
+ * to be in the tile's pixel space (the same image used as the canvas
+ * background), so we render the SVG with `viewBox` set to the bbox extent of
+ * the detections and absolutely position it over the image.
+ *
+ * If the detection shapes are absent or unrecognizable, we silently render
+ * nothing — never crash the canvas because the GPU worker hasn't called back.
+ */
+function DetectionOverlay({ detections }: { detections: DetectionItem[] }) {
+  const valid = detections.filter((d) => Array.isArray(d.bbox) && d.bbox.length === 4);
+  if (valid.length === 0) return null;
+
+  const xs = valid.flatMap((d) => [d.bbox![0], d.bbox![2]]);
+  const ys = valid.flatMap((d) => [d.bbox![1], d.bbox![3]]);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  const w = Math.max(1, maxX - minX);
+  const h = Math.max(1, maxY - minY);
+
+  return (
+    <svg
+      viewBox={`${minX} ${minY} ${w} ${h}`}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        margin: "auto",
+        maxWidth: "min(100%, 1200px)",
+        maxHeight: "70vh",
+        pointerEvents: "none",
+      }}
+      preserveAspectRatio="xMidYMid meet"
+    >
+      {valid.map((d, i) => {
+        const [x1, y1, x2, y2] = d.bbox!;
+        return (
+          <g key={i}>
+            <rect
+              x={x1}
+              y={y1}
+              width={x2 - x1}
+              height={y2 - y1}
+              fill="none"
+              stroke="#FF4DA8"
+              strokeWidth={Math.max(1, w / 400)}
+              strokeDasharray={Math.max(2, w / 200) + " " + Math.max(2, w / 200)}
+            />
+            {d.label && (
+              <text
+                x={x1}
+                y={y1 - Math.max(2, h / 100)}
+                fontSize={Math.max(8, w / 100)}
+                fontFamily="JetBrains Mono, monospace"
+                fontWeight="700"
+                fill="#FF4DA8"
+              >
+                {d.label}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 

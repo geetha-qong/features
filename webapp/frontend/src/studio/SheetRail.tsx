@@ -1,6 +1,7 @@
 import { Check, Search } from "lucide-react";
 import SheetGlyph from "./SheetGlyph";
 import type { Sheet } from "./types";
+import type { RealSheet } from "./api";
 
 interface Props {
   sheets: Sheet[];
@@ -8,9 +9,33 @@ interface Props {
   onActivate: (idx: number) => void;
   projectId: number;
   dark: boolean;
+  /**
+   * Real tile thumbnails from the backend (one per detected PID tile crop).
+   * When present, they replace the generated SheetGlyph SVGs in the rail.
+   * When null/empty, the prototype glyphs are used (legacy / no-data fallback).
+   */
+  realSheets?: RealSheet[];
 }
 
-export default function SheetRail({ sheets, activeSheet, onActivate, projectId, dark }: Props) {
+export default function SheetRail({
+  sheets,
+  activeSheet,
+  onActivate,
+  projectId,
+  dark,
+  realSheets,
+}: Props) {
+  const hasReal = realSheets && realSheets.length > 0;
+  const renderSheets = hasReal
+    ? realSheets!.map((r) => ({
+        id: r.id,
+        name: r.label,
+        label: r.label,
+        status: "ok" as const,
+        issues: 0,
+        thumbUrl: r.url,
+      }))
+    : sheets.map((s) => ({ ...s, thumbUrl: undefined as string | undefined }));
   return (
     <aside className="sheet-rail">
       <div className="rail-head">
@@ -27,7 +52,7 @@ export default function SheetRail({ sheets, activeSheet, onActivate, projectId, 
         <button>Pending</button>
       </div>
       <div className="rail-scroll">
-        {sheets.map((s, i) => (
+        {renderSheets.map((s, i) => (
           <div
             key={s.id}
             className={`sheet-tile ${i === activeSheet ? "active" : ""}`}
@@ -35,7 +60,24 @@ export default function SheetRail({ sheets, activeSheet, onActivate, projectId, 
             data-comment-anchor={`sheet-${s.id}`}
           >
             <div className="tile-thumb">
-              <SheetGlyph seed={s.id + projectId * 7} dim={i !== activeSheet} dark={dark} />
+              {s.thumbUrl ? (
+                <img
+                  src={s.thumbUrl}
+                  alt={s.label}
+                  className="sheet-glyph"
+                  style={{
+                    width: "100%",
+                    height: "auto",
+                    aspectRatio: "4 / 3",
+                    objectFit: "cover",
+                    display: "block",
+                    opacity: i === activeSheet ? 1 : 0.6,
+                  }}
+                  loading="lazy"
+                />
+              ) : (
+                <SheetGlyph seed={s.id + projectId * 7} dim={i !== activeSheet} dark={dark} />
+              )}
               {s.status === "issues" && <span className="tile-badge issues">{s.issues}</span>}
               {s.status === "review" && <span className="tile-badge review">{s.issues}</span>}
               {s.status === "pending" && <span className="tile-badge pending">·</span>}

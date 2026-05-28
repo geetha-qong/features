@@ -192,6 +192,112 @@ async def api_list_jobs(
     }
 
 
+# ── GET /api/v1/jobs/{id}/sheets ───────────────────────────────────────────────
+
+@router.get("/jobs/{job_id}/sheets")
+async def api_job_sheets(
+    job_id: int,
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+):
+    """List tile filenames for the SPA studio sheet rail.
+
+    Each entry maps directly to /jobs/{job_id}/tiles/{filename} which the
+    Label Studio tile-serving endpoint already exposes. The SPA renders
+    these as <img> in the sheet rail (replacing the prototype SheetGlyph).
+    """
+    from webapp.config import get_job_dir
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != current_user.id and current_user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    job_dir = get_job_dir(job)
+    tmp_dir = job_dir / "tmp"
+    tiles = sorted(tmp_dir.glob("tile_p*_r*_c*.png")) if tmp_dir.exists() else []
+
+    sheets = []
+    for idx, t in enumerate(tiles):
+        # Extract page/row/col from tile_p{page}_r{row}_c{col}.png
+        stem = t.stem  # tile_p0_r1_c2
+        sheets.append({
+            "id": idx + 1,
+            "filename": t.name,
+            "url": f"/jobs/{job_id}/tiles/{t.name}",
+            "label": stem.replace("tile_", "Sheet "),
+        })
+
+    return {
+        "job_id": job_id,
+        "pid_no": job.pid_no,
+        "sheet_count": len(sheets),
+        "sheets": sheets,
+    }
+
+
+# ── GET /api/v1/jobs/{id}/detections ───────────────────────────────────────────
+
+@router.get("/jobs/{job_id}/detections")
+async def api_job_detections(
+    job_id: int,
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+):
+    """Return parsed GPU detections + ValveRow CSV data for canvas overlay.
+
+    `detections` (may be null/empty if the GPU worker hasn't called back
+    yet) contains the bounding-box positions to render on the PDF tile.
+    `valves` is the structured CSV the customer downloads (no coords).
+
+    The SPA studio canvas uses `detections` to draw overlay rectangles when
+    available, and shows a fallback list from `valves` when not.
+    """
+    import json as _json
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != current_user.id and current_user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    detections = []
+    if job.gpu_detections:
+        try:
+            parsed = _json.loads(job.gpu_detections)
+            if isinstance(parsed, list):
+                detections = parsed
+        except (ValueError, TypeError):
+            detections = []
+
+    valve_rows = db.query(models.ValveRow).filter(models.ValveRow.job_id == job_id).all()
+    valves = [
+        {
+            "id": v.id,
+            "pid_no": v.pid_no,
+            "category": v.category,
+            "size": v.size,
+            "serial_no": v.serial_no,
+            "fluid_code": v.fluid_code,
+            "piping_class": v.piping_class,
+            "qty": v.qty,
+            "line": v.line,
+            "motor_actuator": v.motor_actuator,
+            "pneumatic_actuator": v.pneumatic_actuator,
+            "solenoid": v.solenoid,
+        }
+        for v in valve_rows
+    ]
+
+    return {
+        "job_id": job_id,
+        "status": job.status,
+        "valve_count": job.valve_count or 0,
+        "detections": detections,
+        "detection_count": len(detections),
+        "valves": valves,
+    }
+
+
 # ── GET /api/v1/jobs/{id} ──────────────────────────────────────────────────────
 
 @router.get("/jobs/{job_id}")

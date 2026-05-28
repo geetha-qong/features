@@ -9,6 +9,7 @@ import SheetRail from "./SheetRail";
 import StudioFoot from "./StudioFoot";
 import StudioTopBar from "./StudioTopBar";
 import { buildSheets } from "./buildSheets";
+import { getJobDetections, getJobSheets, type JobDetectionsResp, type JobSheetsResp } from "./api";
 import type { CanvasElement, ProjectLike, SessionEvent } from "./types";
 
 /**
@@ -71,6 +72,37 @@ export default function Studio({ project, userName, onBack }: Props) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [datasheetOpen, setDatasheetOpen] = useState(false);
   const [mode, setMode] = useState<"studio" | "bulk">("studio");
+
+  // Real backend data — falls back to prototype when unavailable so the studio
+  // never breaks on jobs without tiles/detections (e.g. seed data, brand-new
+  // uploads still being processed).
+  const [sheetsResp, setSheetsResp] = useState<JobSheetsResp | null>(null);
+  const [detResp, setDetResp] = useState<JobDetectionsResp | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getJobSheets(project.id)
+      .then((r) => {
+        if (!cancelled) setSheetsResp(r);
+      })
+      .catch(() => {
+        if (!cancelled) setSheetsResp(null);
+      });
+    getJobDetections(project.id)
+      .then((r) => {
+        if (!cancelled) setDetResp(r);
+      })
+      .catch(() => {
+        if (!cancelled) setDetResp(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id]);
+
+  const realSheets = sheetsResp?.sheets;
+  const activeTileUrl =
+    realSheets && realSheets[activeSheet]?.url ? realSheets[activeSheet].url : null;
 
   // Lock body scroll while studio is mounted (full-bleed surface)
   useEffect(() => {
@@ -135,6 +167,7 @@ export default function Studio({ project, userName, onBack }: Props) {
           onActivate={setActiveSheet}
           projectId={project.id}
           dark={dark}
+          realSheets={realSheets}
         />
 
         <section className="canvas-col">
@@ -146,6 +179,10 @@ export default function Studio({ project, userName, onBack }: Props) {
             pan={pan}
             setPan={setPan}
             dark={dark}
+            tileImageUrl={activeTileUrl}
+            detections={detResp?.detections}
+            valveCount={detResp?.valves.length ?? 0}
+            valveCountTotal={detResp?.valve_count ?? 0}
           />
           <div className="zoom-ctl">
             <button

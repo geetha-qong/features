@@ -60,3 +60,4 @@ data_room/
 # Playwright session data
 .playwright-mcp/
 themes/screenshots/
+docker-compose.override.yml
