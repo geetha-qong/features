@@ -15,8 +15,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from webapp.main import app
+from webapp.auth import get_current_user
 from webapp.database import Base, get_db
-from webapp.models import Job
+from webapp.models import Job, User
 
 
 @pytest.fixture(scope="function")
@@ -38,15 +39,34 @@ def test_db():
 
 
 @pytest.fixture(scope="function")
-def client(test_db):
-    """TestClient with get_db overridden to use the in-memory test DB."""
+def current_user(test_db):
+    """Persist a test User (id=1) for the auth dependency override."""
+    user = User(
+        id=1,
+        username="agency-reviewer",
+        email="reviewer@example.com",
+        password_hash="x",  # not exercised
+        role="user",
+    )
+    test_db.add(user)
+    test_db.commit()
+    return user
+
+
+@pytest.fixture(scope="function")
+def client(test_db, current_user):
+    """TestClient with get_db + get_current_user overridden."""
     def override_get_db():
         try:
             yield test_db
         finally:
             pass
 
+    def override_get_current_user():
+        return current_user
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -149,3 +169,82 @@ def test_export_job_without_canonical_returns_404(client, test_db, tmp_path):
 
     response = client.post(f"/api/v1/jobs/{job.id}/export/valve_list/csv")
     assert response.status_code == 404
+
+
+def test_export_other_users_job_returns_404(client, test_db, tmp_path):
+    """IDOR guard: a job owned by user_id=2 cannot be exported by user_id=1.
+    Returns 404 (not 403) to avoid leaking existence."""
+    job_dir = tmp_path / "9997"
+    job_dir.mkdir()
+    csv_path = job_dir / "valve_list.csv"
+    csv_path.write_text("")
+    canonical = {
+        "job_id": 9997,
+        "canonical_schema_version": "1.0.0",
+        "customer_template_slug": "default",
+        "entities": [],
+    }
+    (job_dir / "canonical.json").write_text(json.dumps(canonical))
+
+    # Job owned by a DIFFERENT user (id=2), but the authenticated test user is id=1.
+    other_user = User(
+        id=2,
+        username="another-agency",
+        email="other@example.com",
+        password_hash="x",
+        role="user",
+    )
+    test_db.add(other_user)
+    job = Job(
+        id=9997,
+        user_id=2,
+        original_filename="confidential.pdf",
+        stored_filename="confidential.pdf",
+        output_csv_path=str(csv_path),
+    )
+    test_db.add(job)
+    test_db.commit()
+
+    response = client.post(f"/api/v1/jobs/{job.id}/export/valve_list/csv")
+    assert response.status_code == 404
+    # The endpoint MUST NOT leak that the job exists at all.
+    assert "confidential" not in response.text.lower()
+
+
+def test_export_super_admin_can_access_any_job(client, test_db, current_user, tmp_path):
+    """super_admin role bypasses the per-user ownership check."""
+    current_user.role = "super_admin"
+    test_db.commit()
+
+    job_dir = tmp_path / "9996"
+    job_dir.mkdir()
+    csv_path = job_dir / "valve_list.csv"
+    csv_path.write_text("")
+    canonical = {
+        "job_id": 9996,
+        "canonical_schema_version": "1.0.0",
+        "customer_template_slug": "default",
+        "entities": [],
+    }
+    (job_dir / "canonical.json").write_text(json.dumps(canonical))
+
+    other_user = User(
+        id=3,
+        username="agency-three",
+        email="three@example.com",
+        password_hash="x",
+        role="user",
+    )
+    test_db.add(other_user)
+    job = Job(
+        id=9996,
+        user_id=3,
+        original_filename="other.pdf",
+        stored_filename="other.pdf",
+        output_csv_path=str(csv_path),
+    )
+    test_db.add(job)
+    test_db.commit()
+
+    response = client.post(f"/api/v1/jobs/{job.id}/export/valve_list/csv")
+    assert response.status_code == 200

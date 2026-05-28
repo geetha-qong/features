@@ -8,6 +8,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
+from webapp import models
+from webapp.auth import get_current_user
 from webapp.database import get_db
 from webapp.deliverables.job_loader import (
     JobCanonicalNotFound,
@@ -35,7 +37,7 @@ CONTENT_TYPES = {
     responses={
         200: {"description": "Deliverable bytes"},
         400: {"description": "Unknown deliverable type or format"},
-        404: {"description": "Job or canonical.json not found"},
+        404: {"description": "Job or canonical.json not found / not owned by caller"},
     },
 )
 def export_deliverable(
@@ -43,9 +45,14 @@ def export_deliverable(
     deliverable_type: str,
     file_format: str,
     db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
 ) -> Response:
     job: Optional[Job] = db.get(Job, job_id)
     if job is None or not job.output_csv_path:
+        raise HTTPException(status_code=404, detail=f"job {job_id} not found")
+    # IDOR guard: jobs are scoped per-user; only the owner or a super_admin can export.
+    # Return 404 (not 403) to avoid leaking the existence of jobs owned by others.
+    if job.user_id != current_user.id and current_user.role != "super_admin":
         raise HTTPException(status_code=404, detail=f"job {job_id} not found")
 
     try:
