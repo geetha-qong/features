@@ -10,6 +10,10 @@ services:
       - ./uploads:/app/uploads
       - ./job_outputs:/app/job_outputs
       - webapp_db:/app/data
+      # Dev bind-mounts: live-mount source + tests so iteration doesn't need rebuild.
+      # In production these mounts shadow the baked-in COPY layer with the same files (no drift).
+      - ./webapp:/app/webapp
+      - ./tests:/app/tests
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - SECRET_KEY=${SECRET_KEY}

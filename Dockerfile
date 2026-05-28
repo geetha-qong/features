@@ -3,8 +3,8 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y gcc libgl1 libglib2.0-0 libxcb1 && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt requirements-webapp.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-webapp.txt
+COPY requirements.txt requirements-webapp.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-webapp.txt -r requirements-dev.txt
 
 COPY . .
 RUN mkdir -p uploads job_outputs
