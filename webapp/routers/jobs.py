@@ -8,14 +8,13 @@ from pathlib import Path
 from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from webapp import models
 from webapp.auth import get_current_user
 from webapp.config import JOB_OUTPUT_DIR, UPLOAD_DIR, get_job_dir, get_user_upload_dir
 from webapp.database import SessionLocal, get_db
-from webapp.jinja import templates
 from webapp.queue import get_cpu_queue
 from webapp.watchdog import STALE_HEARTBEAT_SECONDS
 
@@ -108,69 +107,11 @@ async def upload_pdf(
     return RedirectResponse(url="/dashboard", status_code=303)
 
 
-@router.get("/jobs/{job_id}", response_class=HTMLResponse)
-async def job_detail(
-    job_id: int,
-    request: Request,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    job = db.query(models.Job).filter(models.Job.id == job_id).first()
-    if not job or not _can_access_job(job, current_user):
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    valve_rows = (
-        db.query(models.ValveRow).filter(models.ValveRow.job_id == job_id).all()
-        if job.status == "done"
-        else []
-    )
-    feedbacks = (
-        db.query(models.Feedback)
-        .filter(models.Feedback.job_id == job_id)
-        .order_by(models.Feedback.created_at.desc())
-        .all()
-    )
-    job_runs = (
-        db.query(models.JobRun)
-        .filter(models.JobRun.job_id == job_id)
-        .order_by(models.JobRun.attempt_num.desc())
-        .all()
-    )
-    # Decode stage_timings JSON for each run so the template doesn't need to
-    runs_view = []
-    for r in job_runs:
-        try:
-            timings = json.loads(r.stage_timings) if r.stage_timings else []
-        except Exception:
-            timings = []
-        duration = None
-        if r.started_at and r.ended_at:
-            duration = round((r.ended_at - r.started_at).total_seconds(), 1)
-        runs_view.append({
-            "id": r.id,
-            "attempt_num": r.attempt_num,
-            "rq_id": r.rq_id,
-            "status": r.status,
-            "current_stage": r.current_stage,
-            "started_at": r.started_at,
-            "ended_at": r.ended_at,
-            "duration_seconds": duration,
-            "last_heartbeat_at": r.last_heartbeat_at,
-            "error_msg": r.error_msg,
-            "killer": r.killer,
-            "stage_timings": timings,
-        })
-    return templates.TemplateResponse(
-        "job_detail.html",
-        {
-            "request": request,
-            "user": current_user,
-            "job": job,
-            "valve_rows": valve_rows,
-            "feedbacks": feedbacks,
-            "job_runs": runs_view,
-        },
-    )
+# Phase 4 cutover: the legacy Jinja GET /jobs/{job_id} HTML route has been
+# removed. The React SPA's /jobs/:jobId (webapp/frontend/src/routes/JobDetail
+# .tsx → Studio) takes over at the same URL via the catch-all SPA mount.
+# The API endpoints below (/jobs/{id}/status, /pdf, /download, /tiles, etc.)
+# are untouched and continue to serve all existing customers + the SPA.
 
 
 @router.get("/jobs/{job_id}/status")

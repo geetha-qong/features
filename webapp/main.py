@@ -7,8 +7,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from webapp.database import Base, engine, run_migrations, SessionLocal
-from webapp.routers import auth, dashboard, jobs, feedback
-from webapp.routers import admin as admin_router
+from webapp.routers import auth, jobs, feedback
+from webapp.routers import annotate as annotate_router
 from webapp.routers import account as account_router
 from webapp.routers import api_v1 as api_v1_router
 from webapp.routers import api_v1_admin as api_v1_admin_router
@@ -96,10 +96,9 @@ app.mount("/imgs", StaticFiles(directory=_imgs_dir), name="imgs")
 
 # Register routers
 app.include_router(auth.router)
-app.include_router(dashboard.router)
 app.include_router(jobs.router)
 app.include_router(feedback.router)
-app.include_router(admin_router.router)
+app.include_router(annotate_router.router)
 app.include_router(account_router.router)
 app.include_router(api_v1_router.router)
 app.include_router(api_v1_admin_router.router)
@@ -121,14 +120,6 @@ async def healthz():
     return JSONResponse(status, status_code=200 if status["status"] == "ok" else 503)
 
 
-@app.get("/")
-async def root(request: Request):
-    token = request.cookies.get("access_token")
-    if token:
-        return RedirectResponse(url="/dashboard")
-    return RedirectResponse(url="/login")
-
-
 @app.get("/jobs/{job_id}/tiles/{filename}")
 async def serve_tile(job_id: int, filename: str):
     """Serve tile PNG images — used by Label Studio to load task images."""
@@ -146,3 +137,34 @@ async def serve_tile(job_id: int, filename: str):
     if not tile_path.exists() or tile_path.suffix != ".png":
         raise HTTPException(status_code=404, detail="Tile not found")
     return FileResponse(str(tile_path), media_type="image/png")
+
+
+# ── SPA static mount + catch-all ──────────────────────────────────────────────
+# Serves the Vite-built React SPA from webapp/frontend/dist/. Mount registered
+# AFTER all API/auth routers so explicit FastAPI routes win; the catch-all
+# only fires for paths the backend doesn't claim — letting React Router
+# handle /, /dashboard, /admin/*, /jobs/:id, /signin, etc.
+_SPA_DIST = Path(__file__).parent / "frontend" / "dist"
+if (_SPA_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(_SPA_DIST / "assets")), name="spa_assets")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_fallback(full_path: str):
+    """Serve dist/index.html for any unmatched GET so React Router can handle
+    SPA navigation (refresh on /admin/users, /jobs/123, etc.). API and explicit
+    routes registered above this point win because FastAPI matches in order.
+    """
+    index = _SPA_DIST / "index.html"
+    if index.exists():
+        return FileResponse(str(index), media_type="text/html")
+    # Local dev without a build: tell the user to run `npm run build` or use
+    # Vite dev server (port 5173). Don't surprise them with a 404.
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "SPA not built",
+            "hint": "Run `cd webapp/frontend && npm run build` to populate dist/, "
+                    "or use Vite dev server at http://localhost:5173/.",
+        },
+    )
