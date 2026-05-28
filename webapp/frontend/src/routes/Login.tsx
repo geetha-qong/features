@@ -64,7 +64,7 @@ function LeftPanel() {
         <div className="qs-overline" style={{ color: "#C73FBE", marginBottom: 24 }}>
           Next-Engineered for Oil &amp; Gas
         </div>
-        <h1 className="qs-display" style={{ fontSize: 64, margin: 0, lineHeight: 0.95 }}>
+        <h1 className="qs-display" style={{ fontSize: 64, margin: 0, lineHeight: 0.95, color: "#ECEEF5" }}>
           READ YOUR{" "}
           <span className="qs-gradient-text">P&amp;ID</span>.<br />
           GENERATE THE REST.
