@@ -1,28 +1,15 @@
 @import "./tokens.css";
+@import "./studio.css";
 
 /* JetBrains Mono for engineering tags — loaded from Google Fonts CDN per
    the design system convention (saves us shipping another woff2). */
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap");
 
-* {
-  box-sizing: border-box;
-}
-
-html, body {
-  margin: 0;
-  padding: 0;
-  font-family: "Outfit", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-  color: var(--ink-1000, #0A0B14);
-  background: var(--ink-50, #FFFFFF);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-#root {
-  min-height: 100vh;
-}
+/* tokens.css sets body font-family, color, background via --fg/--bg so the
+   light/dark theme attribute on documentElement drives them. Don't override
+   those here — only own structural resets. */
+html, body { margin: 0; padding: 0; }
+#root { min-height: 100vh; }
 
 /* Engineering tag utility class (e.g. <span class="qs-tag">PT-101</span>) */
 .qs-tag {

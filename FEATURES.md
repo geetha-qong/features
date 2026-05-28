@@ -24,6 +24,42 @@
 
 ---
 
+## [2026-05-28] #12 — QONG Studio design bundle Phase 1: Dashboard + Login + theme system
+
+**Type:** feature
+**Stage:** webapp
+**Status:** shipped
+
+**Why:** User exported a fresh design bundle from Claude Design (`design/qong-studio-v2/`) covering 4 surfaces (Login, Projects/Dashboard, Studio, Datasheet drawer) plus a Settings popover with light/dark theming. Previous Dashboard.tsx was an "Awaiting design" placeholder. User explicitly asked for projects-as-tiles dashboard now, full design later. Phase 1 ships Dashboard + Login refresh + theming infrastructure; Studio + Datasheet deferred to Phase 2.
+
+**What:**
+- **Design tokens unchanged** — existing `webapp/frontend/src/design/tokens.css` was already identical to the bundle's `colors_and_type.css` (full semantic layer for `--fg`, `--surface`, `--border`, both light + dark themes). Only fix: `global.css` no longer hardcodes body bg/color so theme attribute wins.
+- **Studio CSS imported** — copied bundle's `app.css` (2016 lines) verbatim to `webapp/frontend/src/design/studio.css`; imported from `global.css`.
+- **Theme system** — new `webapp/frontend/src/theme/ThemeContext.tsx` with localStorage persistence (key `qong.theme`), prefers-color-scheme fallback. `App.tsx` wraps router with `<ThemeProvider>`. SettingsMenu in nav lets user toggle.
+- **Shared components** — `components/BrandRow.tsx`, `components/SettingsMenu.tsx` (gear icon + iOS-style toggle popover), `components/PidThumb.tsx` (generative SVG P&ID thumbnail per seed).
+- **New backend endpoint** — `GET /api/v1/jobs` in `webapp/routers/api_v1.py` returns `{jobs: [{id, name, pid_no, status, valve_count, created_at, owner_username}]}` for the current user (or all jobs for super_admin). Joins User for owner_username — no ORM relationship existed.
+- **Dashboard rebuilt** — `routes/Dashboard.tsx` replaces placeholder with full ProjectsPage: stats strip, search + filter chips, sidebar OR grid OR list (layout persisted to localStorage `qong.dashboard.layout`), `ProjectCard`/`ProjectRow` components, empty state, loading state. Wired to `/api/v1/jobs`.
+- **CreateProjectModal** — `dashboard/CreateProjectModal.tsx` with name/client/discipline + drag-drop PDF dropzone; uploads via existing `POST /api/v1/jobs` (one job per file, sequentially); ESC closes.
+- **Login refreshed** — `routes/Login.tsx` rewritten to use bundle's `.login-screen`/`.login-brand`/`.login-card`/`.extract-viz`/`.airgap-chip` classes instead of inline styles. Keeps existing auth wiring (`useAuth().login()` POST `/login`). Variant A (Split) only; Variant B deferred.
+- **Layout nav** — `routes/Layout.tsx` rebuilt to use bundle's `.app-nav`/`.breadcrumbs`/`.icon-btn`/`.nav-actions` classes; includes `<SettingsMenu />` so users can flip theme from any page.
+
+**Result (if measurable):**
+- TypeScript build: 0 errors. Bundle: 309 KB JS / 68 KB CSS (gzipped 94 KB JS / 12 KB CSS).
+- Curl verification: `GET /api/v1/jobs` returns 200 with `{"jobs": []}` for admin (no jobs in dev DB); `POST /login` → 303; Vite proxy forwards `/api/v1/jobs` correctly.
+- 4 of 7 designed surfaces remain placeholders: Studio (Phase 2), Datasheet drawer (Phase 2), Projects route (delegates to Dashboard), Login Variant B (Cinematic — Phase 2 maybe).
+
+**Notes:**
+- **Design bundle staged** at `design/qong-studio-v2/` (extracted from gzip tarball at `/tmp/qong-design-bundle/`). Source files: `project/{app.jsx,screens.jsx,studio.jsx,datasheet.jsx,app.css}` + `design-system/`. Keep this folder around — Phase 2 needs `studio.jsx` and `datasheet.jsx`.
+- **lucide-react 1.16.0 → 1.17.0** — bumped to get modern icon names (`chevron-right`, `panel-left`, `git-branch`, `cpu`, `zap`, `arrow-up-right`). 1.17.0 is the actual latest on npm (3924 icons) despite the suspicious version number.
+- **Vite binds to IPv6 only by default** (`::1`, not `127.0.0.1`). Curl tests must use `http://localhost:5173` (IPv6 resolver hits) or `http://[::1]:5173`. Bit me during smoke test.
+- **One Job = one tile** in the Dashboard — no `projects` table added (user confirmed in scoping). When agency MVP needs multi-PID-per-project, that's a separate plan (FK migration, endpoint changes).
+- **Body of CreateProjectModal uploads files sequentially**, not in parallel. Simpler error handling; can parallelize when we hit volume.
+- **Owner_username via outer join** — Job model has no SQLAlchemy `relationship("User")` defined, so `job.user.username` would NameError. The dashboard endpoint does `db.query(Job, User.username).outerjoin(User)` instead. Worth adding a real relationship if more endpoints need it.
+- **Project name maps to original_filename** with `.pdf` stripped; client maps to owner_username. When the projects-table refactor happens, both get proper fields.
+- **Files modified:** `webapp/routers/api_v1.py` (+30 lines), `webapp/frontend/src/{design/global.css,design/studio.css (new),theme/ThemeContext.tsx (new),components/{BrandRow,SettingsMenu,PidThumb}.tsx (new),dashboard/{types.ts,ProjectCard,ProjectRow,CreateProjectModal}.tsx (new),routes/{Dashboard,Login,Layout}.tsx,App.tsx}`. Two files inflated (Login from inline-styles to design classes, Dashboard from 15 → 290 LOC); rest are net-new.
+
+---
+
 ## [2026-05-28] #11 — Marketing landing page ported into React SPA (Plan B Phase 1 Task 6)
 
 **Type:** feature

@@ -154,6 +154,44 @@ async def api_create_job(
     )
 
 
+# ── GET /api/v1/jobs ───────────────────────────────────────────────────────────
+
+@router.get("/jobs")
+async def api_list_jobs(
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+    limit: int = 100,
+):
+    """List jobs owned by the current user (or all jobs for super_admin), newest first.
+
+    Used by the QONG Studio Dashboard to render the projects tile grid.
+    Shape is intentionally close to what the UI needs so the frontend only
+    has to compute cosmetic fields (relative time, avatar colors).
+    """
+    q = (
+        db.query(models.Job, models.User.username)
+        .outerjoin(models.User, models.Job.user_id == models.User.id)
+    )
+    if current_user.role != "super_admin":
+        q = q.filter(models.Job.user_id == current_user.id)
+    rows = q.order_by(models.Job.created_at.desc()).limit(limit).all()
+
+    return {
+        "jobs": [
+            {
+                "id": j.id,
+                "name": j.original_filename or f"Job {j.id}",
+                "pid_no": j.pid_no or "UNKNOWN",
+                "status": j.status,
+                "valve_count": j.valve_count or 0,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "owner_username": owner_username,
+            }
+            for j, owner_username in rows
+        ]
+    }
+
+
 # ── GET /api/v1/jobs/{id} ──────────────────────────────────────────────────────
 
 @router.get("/jobs/{job_id}")

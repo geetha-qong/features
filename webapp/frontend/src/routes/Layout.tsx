@@ -1,6 +1,8 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
-import qongMark from "../design/assets/qong-mark.png";
+import { Search, Bell, ChevronRight } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
+import BrandRow from "../components/BrandRow";
+import SettingsMenu from "../components/SettingsMenu";
 
 const FULL_BLEED_ROUTES = new Set(["/", "/signin"]);
 
@@ -12,62 +14,50 @@ export default function Layout() {
     return <Outlet />;
   }
 
-  const linkStyle = (path: string): React.CSSProperties => ({
-    color: loc.pathname === path ? "#8B3FCE" : "#4B5563",
-    textDecoration: "none",
-    fontWeight: loc.pathname === path ? 600 : 500,
-    padding: "6px 10px",
-    borderRadius: 6,
-    transition: "background 0.12s",
-  });
+  const seg = loc.pathname.split("/").filter(Boolean)[0] || "dashboard";
+  const breadcrumbLabel = seg.charAt(0).toUpperCase() + seg.slice(1);
+
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "16px 32px",
-          borderBottom: "1px solid #E5E7EB",
-          gap: 32,
-        }}
-      >
-        <Link to="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
-          <img src={qongMark} alt="QONG" style={{ width: 28, height: 28 }} />
-          <span className="qs-display" style={{ fontSize: 18, color: "#0A0B14" }}>
-            QONG <span className="qs-gradient-text">STUDIO</span>
-          </span>
+    <div className="app-root">
+      <header className="app-nav">
+        <Link to="/dashboard" style={{ textDecoration: "none" }}>
+          <BrandRow size={26} />
         </Link>
-        <nav style={{ display: "flex", gap: 4, marginLeft: "auto", alignItems: "center" }}>
-          <Link to="/dashboard" style={linkStyle("/dashboard")}>Dashboard</Link>
-          <Link to="/projects" style={linkStyle("/projects")}>Projects</Link>
+        <div className="nav-divider"></div>
+        <div className="breadcrumbs">
+          <span>Workspace</span>
+          <ChevronRight size={12} strokeWidth={1.6} />
+          <span className="current">{breadcrumbLabel}</span>
+        </div>
+        <div className="spacer"></div>
+        <div className="nav-actions">
+          <button className="icon-btn" title="Search">
+            <Search size={18} strokeWidth={1.6} />
+          </button>
+          <button className="icon-btn" title="Notifications">
+            <Bell size={18} strokeWidth={1.6} />
+          </button>
+          <SettingsMenu />
+          <div style={{ width: 8 }}></div>
           {user ? (
-            <>
-              <span style={{ color: "#4B5563", fontSize: 14, padding: "6px 10px" }}>
-                {user.email}
-              </span>
-              <button
-                onClick={async () => { await logout(); }}
-                style={{
-                  background: "none",
-                  border: "1px solid #E5E7EB",
-                  padding: "6px 14px",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  color: "#4B5563",
-                  fontSize: 14,
-                }}
-              >
-                Sign out
-              </button>
-            </>
+            <div
+              className="avatar"
+              title={`${user.username} — sign out`}
+              onClick={() => {
+                void logout();
+              }}
+              style={{ cursor: "pointer" }}
+            >
+              {user.username.slice(0, 2).toUpperCase()}
+            </div>
           ) : (
-            <Link to="/signin" style={linkStyle("/signin")}>Sign in</Link>
+            <Link to="/signin" className="btn btn-secondary btn-sm">
+              Sign in
+            </Link>
           )}
-        </nav>
+        </div>
       </header>
-      <main style={{ flex: 1, padding: "48px 32px", maxWidth: 1200, margin: "0 auto", width: "100%" }}>
-        <Outlet />
-      </main>
+      <Outlet />
     </div>
   );
 }

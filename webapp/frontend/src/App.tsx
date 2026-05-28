@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from "./theme/ThemeContext";
 import Layout from "./routes/Layout";
 import Home from "./routes/Home";
 import Login from "./routes/Login";
@@ -10,6 +11,14 @@ import ReviewCanvas from "./routes/ReviewCanvas";
 import NotFound from "./routes/NotFound";
 
 export default function App() {
+  return (
+    <ThemeProvider>
+      <AppRoutes />
+    </ThemeProvider>
+  );
+}
+
+function AppRoutes() {
   return (
     <BrowserRouter>
       <Routes>
@@ -30,3 +39,4 @@ export default function App() {
     </BrowserRouter>
   );
 }
+
