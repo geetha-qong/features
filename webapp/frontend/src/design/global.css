@@ -1,0 +1,58 @@
+@import "./tokens.css";
+
+/* JetBrains Mono for engineering tags — loaded from Google Fonts CDN per
+   the design system convention (saves us shipping another woff2). */
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap");
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: "Outfit", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink-1000, #0A0B14);
+  background: var(--ink-50, #FFFFFF);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Engineering tag utility class (e.g. <span class="qs-tag">PT-101</span>) */
+.qs-tag {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Overline utility — Barlow Condensed ALL CAPS, ~16% tracking. */
+.qs-overline {
+  font-family: "Barlow Condensed", "Outfit", sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.875rem;
+}
+
+/* Hero / display headlines — Barlow Condensed heavy. */
+.qs-display {
+  font-family: "Barlow Condensed", "Outfit", sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  line-height: 0.95;
+}
+
+/* Brand gradient applied as text fill (for hero lockups). */
+.qs-gradient-text {
+  background: linear-gradient(90deg, #2E3FBE 0%, #5347CC 25%, #8B3FCE 50%, #C73FBE 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
