@@ -11,6 +11,8 @@ from webapp.routers import auth, dashboard, jobs, feedback
 from webapp.routers import admin as admin_router
 from webapp.routers import account as account_router
 from webapp.routers import api_v1 as api_v1_router
+from webapp.routers import exports as exports_router
+import webapp.deliverables  # noqa: F401 — populates generator registry
 from webapp.config import JOB_OUTPUT_DIR, get_job_dir
 from webapp.watchdog import start_watchdog
 
@@ -99,6 +101,7 @@ app.include_router(feedback.router)
 app.include_router(admin_router.router)
 app.include_router(account_router.router)
 app.include_router(api_v1_router.router)
+app.include_router(exports_router.router)
 
 
 @app.get("/healthz")
