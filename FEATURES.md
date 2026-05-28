@@ -24,6 +24,55 @@
 
 ---
 
+## [2026-05-28] #15 — Phase 3: Admin features ported to React with full test coverage
+
+**Type:** feature
+**Stage:** webapp
+**Status:** shipped (React UI lives alongside legacy Jinja; Jinja deletion deferred to a follow-up after prod SPA deployment)
+
+**Why:** User asked: *"on our main branch, we had created admin login with feature to add new users and approve and give them role. is that converted into new react ui?"* — answer was no, only customer-facing surfaces were ported in Phase 1+2. They then said: *"spin up phase 3, and port with testing and make sure we don't miss old users or projects."* So Phase 3 ports the 6 admin surfaces from Jinja to React, with full E2E + component-test coverage, and verified data continuity (every existing User/Job/Plan/Feedback row surfaces in the new UI).
+
+**What — backend:**
+- **`webapp/routers/api_v1_admin.py`** (NEW, 19 endpoints) — JSON API mirroring the legacy Jinja /admin/* forms. Cookie auth via existing `require_super_admin` dep. Endpoints: users CRUD + role/tier/activate/deactivate/grant-credits, dashboard KPIs, credits ledger, feedback list+update, plans list+create+toggle, label-studio list+sync-labels+sync-job. Same SQLAlchemy queries — zero schema changes.
+- **`webapp/routers/api_v1.py`** — `/api/v1/account` now returns `id`, `email`, and `role` (was only username/credits/tier). Fixed a real bug surfaced by Playwright A/B test: AuthContext fell back to `data.tier` when `data.role` was missing, treating super_admin as "trial" and 403-ing the admin out of /admin/*. SECURITY: role must come from the server explicitly — never derived from tier or any other client-readable field.
+- **`webapp/main.py`** — registers the new api_v1_admin router.
+
+**What — frontend:**
+- **`webapp/frontend/src/admin/types.ts`** — TS interfaces for all admin resources.
+- **`webapp/frontend/src/admin/api.ts`** — typed fetch helpers for every endpoint. `HttpError` class, opaque-redirect detection for 401 handling, cookie credentials.
+- **`webapp/frontend/src/admin/AdminLayout.tsx`** — left rail with 6 admin nav links + role gate (renders 403 page if `user.role !== "super_admin"`).
+- **6 surface components:**
+  - `AdminUsers.tsx` + `CreateUserModal.tsx` + `EditUserModal.tsx` — list, create, edit (role/tier/activate/deactivate/grant-credits/delete with self-deletion blocked).
+  - `AdminDashboard.tsx` — KPI stat-strip (8 cards) + recent transactions table.
+  - `AdminFeedback.tsx` — status-filter chips + items list + per-item status dropdown + admin notes. Reuses the iter-2 security fix: only renders an `<a href>` when page_url starts with http(s).
+  - `AdminCredits.tsx` — read-only ledger with username search + sign filter (granted/consumed/all).
+  - `AdminPlans.tsx` + inline `CreatePlanModal` — list/create/toggle.
+  - `AdminLabelStudio.tsx` — completed-jobs table with LS-stats column + sync-job action + global sync-labels action. Banner when LS not configured.
+- **`webapp/frontend/src/auth/AuthContext.tsx`** — role now read strictly from `data.role` (never tier).
+- **`webapp/frontend/src/routes/Layout.tsx`** — Shield icon in nav for super_admin only, links to /admin.
+- **`webapp/frontend/src/App.tsx`** — `/admin/*` nested routes under AdminLayout.
+
+**Tests:**
+- **`tests/e2e/test_admin_api.py`** (NEW, 43 tests) — every endpoint × {super_admin success, regular user 403, no auth 303}; business rules (cannot demote/deactivate/delete self, invalid role/tier/amount rejected, feedback filter validation, plan toggle round-trip, LS configured/unconfigured paths). All 43 pass.
+- **`tests/unit/test_api_v1.py`** — existing 7 tests still pass (account endpoint shape change is backwards-compatible).
+- **Vitest + React Testing Library wired** in `vite.config.ts` (`test:` block) + `src/test/setup.ts` (RTL cleanup + jest-dom). Added devDeps: `vitest`, `@testing-library/{react,jest-dom,user-event}`, `jsdom`.
+- **6 component test files** (`src/admin/Admin*.test.tsx`) — 17 tests total covering: table renders, search/filter behaviour, modal opens, API calls fire with correct arguments, error banners, defense-in-depth (`javascript:` page_url not rendered as href).
+- Total: 157 backend tests pass, 18 frontend component tests pass (smoke + 6 admin surfaces).
+
+**Result (if measurable):**
+- TypeScript build: 0 errors.
+- Vite production bundle: 402 KB JS / 79 KB CSS (gzip 115 / 14 KB). +37 KB JS vs Phase 2 (the admin surfaces + lucide icons + Vitest infra in dev).
+- A/B verified against legacy Jinja: both admin and seeded alice appear in /admin/users with identical data (role, tier, credits, status); seeded feedback appears with the safe https URL link.
+
+**Notes:**
+- **Legacy Jinja /admin/* routes NOT deleted in this commit.** User chose "Delete Jinja routes + templates after the React port is verified" — but verification is currently dev-only. The SPA isn't wired into prod yet (prod still serves Jinja at dev.qongsystems.com). Deleting Jinja now would 404 prod admin access. Plan: prod-deploy the SPA, A/B verify once more, then a separate small commit drops the 6 Jinja templates + the legacy route handlers from `webapp/routers/admin.py`.
+- **The `/annotate` route stays** — it's annotator-role (not super_admin) and the Phase 3 port covers only super_admin surfaces. Annotators continue to use the Jinja landing.
+- **The role-bug fix in `/api/v1/account`** is *also* relevant for the future deactivate-doesn't-revoke-session security finding noted in the security review. When that fix lands, `get_current_user` will need to check `is_active`; this endpoint's response will then accurately reflect it.
+- **Dependency continuity check:** existing `webapp/credits.py:grant()` is reused by the grant-credits endpoint (same ledger row creation as the legacy Jinja). Existing `webapp/label_studio_client.py` helpers (is_configured, get_or_create_project, push_tiles, delete_all_tasks, sync_all_label_configs, get_project_stats) all reused unchanged.
+- **Files touched/created:** ~25 files. New: 1 backend router, 1 backend E2E test file, 6 admin React components + 3 modal components, 6 component test files, 1 Vitest setup file, 1 admin scaffolding (types + api + AdminLayout). Modified: `webapp/main.py`, `webapp/routers/api_v1.py`, `webapp/frontend/src/App.tsx`, `webapp/frontend/src/auth/AuthContext.tsx`, `webapp/frontend/src/routes/Layout.tsx`, `webapp/frontend/vite.config.ts`, `webapp/frontend/package.json` (+ lock).
+
+---
+
 ## [2026-05-28] #14 — QONG Studio Phase 2b+2c: DatasheetDrawer + BulkReviewScreen
 
 **Type:** feature

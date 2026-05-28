@@ -233,11 +233,18 @@ async def api_account(
     current_user: models.User = Depends(_get_api_user),
     db: Session = Depends(get_db),
 ):
-    """Return current user's credits and tier."""
+    """Return current user's credits, tier, and role.
+
+    `role` is consumed by the SPA to gate /admin/* routes — must be the
+    authoritative server-side value, never derived from anything client-side.
+    """
     return {
+        "id": current_user.id,
         "username": current_user.username,
+        "email": current_user.email,
         "credits_remaining": credits_module.get_balance(current_user),
         "tier": current_user.tier or "trial",
+        "role": current_user.role or "user",
     }
 
 

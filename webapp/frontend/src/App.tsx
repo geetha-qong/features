@@ -9,6 +9,13 @@ import ProjectDetail from "./routes/ProjectDetail";
 import JobDetail from "./routes/JobDetail";
 import ReviewCanvas from "./routes/ReviewCanvas";
 import NotFound from "./routes/NotFound";
+import AdminLayout from "./admin/AdminLayout";
+import AdminUsers from "./admin/AdminUsers";
+import AdminDashboard from "./admin/AdminDashboard";
+import AdminFeedback from "./admin/AdminFeedback";
+import AdminCredits from "./admin/AdminCredits";
+import AdminPlans from "./admin/AdminPlans";
+import AdminLabelStudio from "./admin/AdminLabelStudio";
 
 export default function App() {
   return (
@@ -33,6 +40,15 @@ function AppRoutes() {
           <Route path="projects/:projectId" element={<ProjectDetail />} />
           <Route path="jobs/:jobId" element={<JobDetail />} />
           <Route path="jobs/:jobId/review" element={<ReviewCanvas />} />
+          <Route path="admin" element={<AdminLayout />}>
+            <Route index element={<AdminDashboard />} />
+            <Route path="dashboard" element={<AdminDashboard />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="feedback" element={<AdminFeedback />} />
+            <Route path="credits" element={<AdminCredits />} />
+            <Route path="plans" element={<AdminPlans />} />
+            <Route path="label-studio" element={<AdminLabelStudio />} />
+          </Route>
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

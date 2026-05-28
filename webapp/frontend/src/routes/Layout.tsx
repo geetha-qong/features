@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { Search, Bell, ChevronRight } from "lucide-react";
+import { Search, Bell, ChevronRight, Shield } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import BrandRow from "../components/BrandRow";
 import SettingsMenu from "../components/SettingsMenu";
@@ -43,6 +43,11 @@ export default function Layout() {
           <button className="icon-btn" title="Notifications">
             <Bell size={18} strokeWidth={1.6} />
           </button>
+          {user?.role === "super_admin" && (
+            <Link to="/admin/users" className="icon-btn" title="Admin" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+              <Shield size={18} strokeWidth={1.6} />
+            </Link>
+          )}
           <SettingsMenu />
           <div style={{ width: 8 }}></div>
           {user ? (

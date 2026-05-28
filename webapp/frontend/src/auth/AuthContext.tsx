@@ -41,7 +41,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           id: data.id ?? 0,
           username: data.username,
           email: data.email ?? data.username,
-          role: data.role ?? data.tier ?? "user",
+          // role MUST come from the server explicitly — never fall back to
+          // data.tier (was a bug; would render super_admin as "trial").
+          role: typeof data.role === "string" ? data.role : "user",
         });
       } else {
         setUser(null);
