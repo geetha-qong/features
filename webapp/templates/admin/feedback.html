@@ -26,7 +26,10 @@
       <div class="text-muted small mt-1">
         {% set u = users_map.get(item.user_id) %}
         {{ u.username if u else 'Anonymous' }} · {{ item.created_at | to_ist }}
-        {% if item.page_url %} · <a href="{{ item.page_url }}" target="_blank" class="text-muted">{{ item.page_url }}</a>{% endif %}
+        {# SECURITY: defense-in-depth — the submission handler already strips non-http(s) URLs,
+           but render only http(s) here too so a stale row (or any direct DB write) cannot
+           introduce javascript:/data: in an href that the admin will click. #}
+        {% if item.page_url and (item.page_url.startswith('http://') or item.page_url.startswith('https://')) %} · <a href="{{ item.page_url }}" target="_blank" rel="noopener noreferrer nofollow" class="text-muted">{{ item.page_url }}</a>{% endif %}
       </div>
     </div>
     <span class="badge {% if item.status == 'new' %}bg-danger{% elif item.status == 'in_progress' %}bg-warning text-dark{% elif item.status == 'resolved' %}bg-success{% else %}bg-secondary{% endif %}">

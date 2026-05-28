@@ -2,9 +2,10 @@
 import secrets
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from webapp import models
@@ -68,15 +69,17 @@ async def account_api_keys(
         "request": request,
         "user": current_user,
         "keys": keys,
+        "new_key": None,
     })
 
 
-@router.post("/account/api-keys/create")
+@router.post("/account/api-keys/create", response_class=HTMLResponse)
 async def account_create_api_key(
+    request: Request,
     name: str = Form(...),
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
-):
+) -> Response:
     random_part = secrets.token_hex(16)   # 32 hex chars
     full_key = f"qk_{random_part}"
     prefix = full_key[:8]                 # "qk_" + first 5 hex chars
@@ -91,11 +94,26 @@ async def account_create_api_key(
     db.add(api_key)
     db.commit()
 
-    # Full key passed once via URL param — never stored in plaintext again
-    return RedirectResponse(
-        url=f"/account/api-keys?new_key={full_key}",
-        status_code=303,
+    # SECURITY: render the new key directly in the POST response body — do NOT
+    # 303-redirect with the key in a URL query param. URL parameters land in
+    # nginx access logs, browser history, and Referer headers; the request body
+    # does not. If the user refreshes, the browser will prompt for resubmit;
+    # that is the correct UX for a non-idempotent "create" endpoint.
+    keys = (
+        db.query(models.ApiKey)
+        .filter(
+            models.ApiKey.user_id == current_user.id,
+            models.ApiKey.revoked_at.is_(None),
+        )
+        .order_by(models.ApiKey.created_at.desc())
+        .all()
     )
+    return templates.TemplateResponse("account/api_keys.html", {
+        "request": request,
+        "user": current_user,
+        "keys": keys,
+        "new_key": full_key,
+    })
 
 
 @router.post("/account/api-keys/{key_id}/revoke")
@@ -172,12 +190,26 @@ async def feedback_submit(
     if not subject.strip() or not message.strip():
         raise HTTPException(status_code=400, detail="Subject and message are required")
 
+    # SECURITY: page_url is rendered as href in /admin/feedback. Jinja autoescape
+    # neutralizes quote-breakout but does NOT block javascript:/data:/vbscript:
+    # schemes — those execute in the admin's origin if clicked. Allow-list http(s)
+    # only and drop anything else, so the rendered href is always safe.
+    cleaned_url: Optional[str] = None
+    raw_url = page_url.strip()[:500]
+    if raw_url:
+        try:
+            parsed = urlparse(raw_url)
+        except ValueError:
+            parsed = None
+        if parsed and parsed.scheme.lower() in ("http", "https") and parsed.netloc:
+            cleaned_url = raw_url
+
     item = models.UserFeedback(
         user_id=user_id,
         category=category,
         subject=subject.strip()[:255],
         message=message.strip(),
-        page_url=page_url.strip()[:500] or None,
+        page_url=cleaned_url,
     )
     db.add(item)
     db.commit()

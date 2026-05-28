@@ -6,7 +6,10 @@
   <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createKeyModal">+ New Key</button>
 </div>
 
-{% set new_key = request.query_params.get('new_key') %}
+{# SECURITY: new_key is passed only via template context from the POST handler.
+   We deliberately DO NOT read from request.query_params — URL params land in
+   nginx access logs, browser history, and Referer headers. See FEATURES.md
+   entry on the API-key-redirect-leak fix. #}
 {% if new_key %}
 <div class="alert alert-success">
   <strong>Key created!</strong> Copy it now — it will never be shown again.<br>
