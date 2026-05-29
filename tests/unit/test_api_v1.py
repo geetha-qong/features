@@ -298,6 +298,23 @@ def test_upload_non_pdf_rejected(client, user, api_key_pair):
     assert "PDF" in resp.json()["detail"]
 
 
+def test_upload_html_spoofing_pdf_extension_rejected(client, user, api_key_pair):
+    """A file with .pdf extension but HTML content must be rejected by the
+    %PDF- magic-byte check. Without this, PyMuPDF lenient-parses the HTML as
+    a blank 1-page PDF and produces a useless 'done' job with empty tiles
+    — exactly what bit us when Playwright accidentally uploaded the Vite SPA
+    catch-all's index.html instead of a real PDF."""
+    full_key, _ = api_key_pair
+    html_payload = b"<!doctype html><html><body>not a pdf</body></html>"
+    resp = client.post(
+        "/api/v1/jobs",
+        headers={"Authorization": f"Bearer {full_key}"},
+        files={"file": ("test.pdf", io.BytesIO(html_payload), "application/pdf")},
+    )
+    assert resp.status_code == 422
+    assert "%PDF-" in resp.json()["detail"]
+
+
 def test_upload_insufficient_credits(client, db_session, user, api_key_pair):
     """User with 0 credits cannot submit a job."""
     user.credits_remaining = 0

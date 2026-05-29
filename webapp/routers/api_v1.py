@@ -86,6 +86,22 @@ async def api_create_job(
     with dest.open("wb") as buf:
         shutil.copyfileobj(file.file, buf)
 
+    # Reject content that doesn't start with the PDF magic header — PyMuPDF
+    # is lenient and would otherwise treat HTML / spoofed-extension files as
+    # blank 1-page PDFs, producing useless empty tiles + a "done" job with
+    # zero valves. Reading the first 5 bytes is O(1).
+    try:
+        with dest.open("rb") as fh:
+            header = fh.read(5)
+    except OSError:
+        header = b""
+    if not header.startswith(b"%PDF-"):
+        dest.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=422,
+            detail="File is not a valid PDF (missing %PDF- header).",
+        )
+
     # Pre-flight: count pages → required credits
     try:
         doc = fitz.open(str(dest))
