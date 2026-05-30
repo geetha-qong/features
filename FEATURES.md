@@ -24,6 +24,22 @@
 
 ---
 
+## [2026-05-30] #16 — AWS QA environment provisioned at qa.qongsystems.com (TLS live, app bring-up paused)
+
+**Type:** infra
+**Stage:** infra
+**Status:** experimental — TLS live, docker compose not yet running
+
+**Why:** `feature/digital-twin` is 14 commits ahead of `dev` (Phase 1–4 SPA cutover, deliverable reorder, admin port, %PDF- magic byte, two design specs). Deploying directly to `dev.qongsystems.com` on GCP risks current customers who use it for valve list extraction. Need a parallel URL to validate the branch end-to-end before promoting. AWS chosen because the team is migrating off GCP — QA also doubles as the AWS-learning lab. Cloud-agnostic shape (no RDS/ECS/ALB) so the pattern transfers cleanly to dev/prod later.
+
+**What:** Single `t3.medium` EC2 (`i-04be6af1fb7929a0c`) in `ap-south-1`, IMDSv2-required, IAM role `may26-ec2-ssm-role`, public IP `43.205.96.86`, 30 GB encrypted root + 50 GB gp3 data EBS (`vol-06bdf1fab12bd2971`) at `/mnt/qong-data`. nginx 1.24 terminates TLS using a Cloudflare Origin Certificate (SAN `qa.qongsystems.com` + `*.qongsystems.com`, valid until 2041). Cloudflare proxy ON, SSL mode Full (strict), nginx allowlist restricts ingress to CF IP ranges only. SG `sg-0ece96660d8ee00bc` opens 443 from anywhere; no public 22 (SSM only). Reuses shared VPC `vpc-0c9453aafa64f6e40` and the existing `may26-ec2-ssm-role` instance profile. SSM Parameter Store namespace `/may26aws/qong-qa/*` for secrets (6 SecureString params, 5 of 6 populated). Specs at `docs/superpowers/specs/2026-05-29-aws-qa-environment-design.md`.
+
+**Result (if measurable):** `https://qa.qongsystems.com/healthz` returns `200 ok` through the full Cloudflare→nginx stack. `/` returns 503 placeholder (docker compose not yet up). Monthly cost: ~$36/mo running, ~$6/mo if stopped.
+
+**Notes:** Bring-up paused mid-session. ONE blocker before docker compose can come up: `/may26aws/qong-qa/openrouter-api-key` still holds the placeholder value `PLACEHOLDER_REPLACE_VIA_CONSOLE`. Once set, PHASE 2 (clone + override compose + render `.env.qa` from SSM + `docker compose up` + swap nginx 503 for `proxy_pass http://127.0.0.1:8000`) runs in ~15 min. EC2 deploy key SHA256 fingerprint `g49BJAfltEoDkdnpokihv7Bt31X6sWF2vsSEfH72rvA` added to `Qong-Systems/qong_product` deploy keys by user. **Origin Certificate private key was pasted in chat — rotate the cert** after end-to-end test passes; blast radius is limited (CF-edge↔origin only, no public CA trust) but best practice is to rotate. AWS account `449901518037` is treated as production per `../../../may26aws/CLAUDE.md` PROD RULES; every mutation in future sessions still needs same-turn user approval. Resource inventory should be appended to `may26aws/CLAUDE.md` once bring-up succeeds so the account-wide registry stays accurate. Full handoff in `SESSION_STATE.md`.
+
+---
+
 ## [2026-05-28] #15 — Phase 3: Admin features ported to React with full test coverage
 
 **Type:** feature
