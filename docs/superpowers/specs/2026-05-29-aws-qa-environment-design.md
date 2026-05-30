@@ -32,11 +32,12 @@ Once QA proves stable, the same image is promoted to `dev.qongsystems.com` on AW
 
 ## Constraints
 
-1. **Cloud-agnostic.** Everything except the EC2 instance, EBS volume, ALB, ACM, and Route53 must be portable. No RDS, no ElastiCache, no ECS, no SQS, no Secrets Manager (use docker `env_file` from a `.env` checked-out via secure mechanism — see Secrets section).
+1. **Cloud-agnostic.** Everything except the EC2 instance, EBS volume, ALB, and ACM must be portable. DNS is on Cloudflare (already vendor-neutral). No RDS, no ElastiCache, no ECS, no SQS, no Secrets Manager (use docker `env_file` populated from SSM Parameter Store at deploy time — see Secrets section).
 2. **Cost-conscious.** Target: under $60/month for QA. (One `t3.medium` = ~$30; EBS 50GB gp3 = ~$4; ALB = ~$18; total ~$52.)
-3. **Same docker-compose.yml as GCP dev.** No QA-specific compose. Override via `docker-compose.override.yml` only for QA-specific port bindings (e.g., dropping Tailscale on QA).
+3. **Same docker-compose.yml as GCP dev.** No QA-specific compose. Override via `docker-compose.override.qa.yml` only for QA-specific port bindings (e.g., dropping Tailscale on QA).
 4. **Zero impact on current GCP dev.** Customers using `dev.qongsystems.com` see no behavior change while we set this up.
-5. **Domain.** `qa.qongsystems.com` — new Route53 hosted zone OR new record under existing zone (depends on what we already manage; investigation step in plan).
+5. **Domain.** `qa.qongsystems.com` — CNAME in Cloudflare DNS pointing at the AWS ALB. Orange-cloud (proxy) **OFF** — must be DNS-only mode, otherwise CF proxy + ACM cert collide.
+6. **may26aws PROD RULES apply.** Account `449901518037` is treated as production. Every AWS mutation needs same-turn user approval. Verify identity with `aws sts get-caller-identity --profile tnbqong` before any `create-*` / `put-*` / `update-*` call. No `--force`, no `--skip-final-snapshot`.
 
 ---
 
@@ -93,28 +94,33 @@ Once QA proves stable, the same image is promoted to `dev.qongsystems.com` on AW
 ### 1. EC2 Instance
 
 - **Type:** `t3.medium` (2 vCPU, 4 GB RAM). Matches GCP dev sizing.
-- **AMI:** Ubuntu Server 24.04 LTS (matches GCP).
-- **Region:** `ap-southeast-1` (Singapore) — same region as GCP `asia-southeast1-c`, for latency parity and to keep the team's mental model.
-- **Storage:** 30 GB gp3 root volume for OS + docker images; 50 GB gp3 EBS volume mounted at `/mnt/qong-data` for app data.
-- **Access:** SSH via AWS Systems Manager Session Manager (no public port 22, no SSH keys floating around). Equivalent to GCP IAP tunnel.
-- **IAM Role:** `qong-qa-ec2-role` with:
-  - `AmazonSSMManagedInstanceCore` (for SSM access)
-  - S3 read-only on `qong-qa-uploads-backup` bucket (for nightly backup target)
+- **AMI:** Ubuntu Server 24.04 LTS — **`ami-0c54f8b78468b2ba2`** (the AMI already in use by `i-0326414bf17cdae36` hermes).
+- **Region:** `ap-south-1` (Mumbai), AZ `ap-south-1a` to keep EBS attach simple.
+- **Storage:** 30 GB gp3 encrypted root volume for OS + docker images; 50 GB gp3 encrypted EBS volume mounted at `/mnt/qong-data` for app data.
+- **Access:** SSM Session Manager only (no public port 22, no SSH keys). Matches hermes-agent / GPU-host pattern in this account.
+- **IAM Role:** **reuse `may26-ec2-ssm-role`** — already exists with `AmazonSSMManagedInstanceCore`, `CloudWatchAgentServerPolicy`, and the `may26-parameter-store-read` inline policy granting `ssm:GetParameter*` on `/may26aws/*` + `kms:Decrypt`. No new IAM role needed; just reuse the existing instance profile.
+- **IMDS:** v2 required (`HttpTokens=required`, `HttpPutResponseHopLimit=2`) — matches account convention.
 
 ### 2. Networking
 
-- **VPC:** Default VPC in the region (no custom VPC for QA — overkill).
-- **Subnets:** Two public subnets in two AZs (ALB requirement) + EC2 in one of them.
-- **Security Groups:**
-  - `qong-qa-alb-sg`: inbound 443/80 from `0.0.0.0/0`.
-  - `qong-qa-ec2-sg`: inbound 8080 from `qong-qa-alb-sg` only. No public ports.
-- **ALB:** Application Load Balancer, single target group → EC2:8080.
-- **ACM cert:** `qa.qongsystems.com` issued via DNS validation in Route53.
+- **VPC:** Default VPC **`vpc-0c9453aafa64f6e40`** (172.31.0.0/16) — already shared by hermes + GPU. No new VPC.
+- **Subnets:** Three public subnets exist; we use two for ALB and place EC2 in `subnet-0eecf25001fad5cc9` (ap-south-1a).
+  - `subnet-0eecf25001fad5cc9` (ap-south-1a, 172.31.32.0/20) — EC2 here
+  - `subnet-0e6616f423210bbe6` (ap-south-1b, 172.31.0.0/20) — ALB here
+  - `subnet-0be74990d09f828d6` (ap-south-1c, 172.31.16.0/20) — ALB here
+- **Security Groups (NEW — do not reuse `sg-06e5c4ffda8304d6d` which is egress-only + Ollama-specific):**
+  - `qong-qa-alb-sg`: inbound 443/80 from `0.0.0.0/0`. Outbound: to `qong-qa-ec2-sg:8080` only.
+  - `qong-qa-ec2-sg`: inbound 8080 from `qong-qa-alb-sg` only. No public ports. Outbound: all (for docker pulls, OpenRouter API, etc.).
+- **ALB:** Application Load Balancer, two-AZ (1b + 1c), single target group → EC2:8080 on `subnet-0eecf25001fad5cc9` (1a).
+- **ACM cert:** `qa.qongsystems.com` issued via **DNS validation in Cloudflare** (user adds the CNAME). Cert lives in ACM `ap-south-1`.
 
-### 3. DNS
+### 3. DNS (Cloudflare)
 
-- **Route53 hosted zone:** check whether `qongsystems.com` is already managed there. If yes, add `qa` A-record (alias to ALB). If no, the user owns the apex DNS elsewhere — add a delegation or just an A record pointing to the ALB.
-- **DNS for `dev.qongsystems.com`** unchanged — still points to GCP VM.
+`qongsystems.com` is on Cloudflare. Two records the user adds:
+
+1. **ACM validation CNAME** — emitted by `aws acm request-certificate`. Looks like `_<hash>.qa.qongsystems.com → _<hash>.<acm-region>.acm-validations.aws`. Add as a normal CNAME, **orange-cloud OFF** (must be DNS-only). Stays in place forever so the cert auto-renews.
+2. **`qa.qongsystems.com` → ALB DNS name** (e.g., `qong-qa-alb-12345.ap-south-1.elb.amazonaws.com`). **Orange-cloud OFF.** Why: with proxy ON, Cloudflare terminates TLS with its own cert and re-encrypts to the origin — our ACM cert never sees the request, breaking validation. DNS-only mode passes the SNI through cleanly.
+- **DNS for `dev.qongsystems.com`** unchanged — still points to GCP VM IP.
 
 ### 4. Application (docker compose)
 
@@ -142,7 +148,13 @@ The EBS volume is mounted at `/mnt/qong-data` and contains:
 - **Method:** SSM Parameter Store (free for standard params). Bootstrap script reads SSM at deploy time and renders `.env.qa` on the instance.
 - **Why not Secrets Manager:** $0.40/secret/month adds up; SSM standard params are free and sufficient for QA.
 - **Why not committed `.env`:** never commit secrets.
-- **Param names:** `/qong/qa/openrouter-api-key`, `/qong/qa/secret-key`, `/qong/qa/ls-api-key`, `/qong/qa/postgres-password`.
+- **Namespace:** **`/may26aws/qong-qa/*`** — matches the account's existing convention (other services live under `/may26aws/<service>/`). The `may26-parameter-store-read` inline policy on `may26-ec2-ssm-role` already permits the instance to read this namespace.
+- **Param names** (created at provisioning, user fills in values):
+  - `/may26aws/qong-qa/openrouter-api-key` (SecureString)
+  - `/may26aws/qong-qa/secret-key` (SecureString, FastAPI JWT signing)
+  - `/may26aws/qong-qa/ls-api-key` (SecureString, Label Studio)
+  - `/may26aws/qong-qa/postgres-password` (SecureString)
+  - `/may26aws/qong-qa/minio-root-user` + `/may26aws/qong-qa/minio-root-password` (SecureString)
 
 ### 7. Deploy Pipeline
 
@@ -300,14 +312,12 @@ Production would add ~$30 for a second AZ + redundancy; QA stays single AZ.
 
 ---
 
-## Open Questions for User
+## Resolved (was: Open Questions for User) — 2026-05-30
 
-These need answers before plan execution starts:
-
-1. **AWS account & access** — does Qong-Systems already own an AWS account? If yes, who has admin? If no, who creates it? (Need root account email + MFA setup before any IaC.)
-2. **Route53 ownership** — is `qongsystems.com` apex in Route53 today, or with a third-party registrar (Namecheap, GoDaddy, Squarespace)? Determines DNS step.
-3. **GitHub Actions OIDC vs IAM user** — preference? OIDC is more secure (short-lived creds) but takes 30 extra min to wire up. IAM user with rotated secret is faster.
-4. **Region confirmation** — `ap-southeast-1` (Singapore) OK, or do we want `us-east-1` (cheaper, but worse latency for the team)?
+1. **AWS account & access** — ✅ Account exists: **`449901518037`** (INNOARTHI PRIVATE LIMITED). IAM user `tnb-qong` has `AdministratorAccess`. Profile name: **`tnbqong`**. Account is **treated as production** per `../../../may26aws/CLAUDE.md` — every mutation requires same-turn approval + cost estimate.
+2. **DNS ownership** — ✅ **Cloudflare** (NOT Route53). Apex zone `qongsystems.com` is on Cloudflare. Implication: ACM cert is still on AWS but validated via a CNAME the user adds to Cloudflare. ALB attached via Cloudflare CNAME with **orange-cloud OFF** (DNS-only) — proxying through Cloudflare would conflict with AWS-managed cert.
+3. **GitHub Actions auth** — Decision deferred. Initial bootstrap uses local CLI + SSM. Wire OIDC after first successful manual deploy proves the topology works. Faster path to a live URL today.
+4. **Region** — ✅ **`ap-south-1` (Mumbai)** — matches existing infra in the same account. Avoids cross-region SG/VPC complications.
 
 ---
 
