@@ -19,23 +19,23 @@
 
 services:
   web:
+    # Deliberately omit ./webapp + ./tests bind-mounts (which the base compose
+    # has for local-dev fast-iteration). QA uses the baked-in dist + source
+    # from the multi-stage Dockerfile instead — see Dockerfile and FEATURES.md
+    # #18 for the 2026-06-01 incident where the bind-mount shadowed a missing
+    # dist/ and bricked the SPA bootstrap.
     volumes:
       - /mnt/qong-data/uploads:/app/uploads
       - /mnt/qong-data/job_outputs:/app/job_outputs
-      # Keep webapp_db named volume from base — SQLite is unused on QA
-      # (DATABASE_URL points to postgres), so this is just dead-weight tolerance.
+      # webapp_db (SQLite) volume is unused on QA (DATABASE_URL → postgres)
+      # but harmless to leave declared so the named volume isn't orphaned.
       - webapp_db:/app/data
-      # Keep source bind-mount from base so deploys can `git pull && docker compose restart web`
-      # without rebuilding the image.
-      - ./webapp:/app/webapp
-      - ./tests:/app/tests
 
   cpu-worker:
     volumes:
       - /mnt/qong-data/uploads:/app/uploads
       - /mnt/qong-data/job_outputs:/app/job_outputs
       - webapp_db:/app/data
-      - ./webapp:/app/webapp
 
   postgres:
     volumes:

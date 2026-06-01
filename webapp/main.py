@@ -145,8 +145,16 @@ async def serve_tile(job_id: int, filename: str):
 # only fires for paths the backend doesn't claim — letting React Router
 # handle /, /dashboard, /admin/*, /jobs/:id, /signin, etc.
 _SPA_DIST = Path(__file__).parent / "frontend" / "dist"
-if (_SPA_DIST / "assets").exists():
-    app.mount("/assets", StaticFiles(directory=str(_SPA_DIST / "assets")), name="spa_assets")
+# Mount unconditionally with check_dir=False so registration doesn't depend on
+# whether dist/ exists at import time. If the SPA isn't built yet, StaticFiles
+# returns a real 404 for /assets/* — which is correct: a 404 with no body, not
+# the catch-all serving index.html as text/html (browsers refuse to load HTML
+# as an ES module, breaking SPA bootstrap entirely — bug we hit on QA bring-up).
+app.mount(
+    "/assets",
+    StaticFiles(directory=str(_SPA_DIST / "assets"), check_dir=False),
+    name="spa_assets",
+)
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
