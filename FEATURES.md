@@ -24,6 +24,36 @@
 
 ---
 
+## [2026-06-01] #18 — QA SPA bootstrap fixed (Playwright caught what curl missed); 4 root-causes addressed
+
+**Type:** bugfix
+**Stage:** infra | webapp
+**Status:** shipped
+
+**Why:** After FEATURES #17 declared QA "live" (all HTTP smoke checks green), Playwright revealed the SPA was actually broken in real browsers: `/assets/index-Ck0HogSN.js` returned `text/html` instead of JavaScript, breaking the strict-MIME ES-module bootstrap. Four overlapping root-causes had to be unwound to fully fix it.
+
+**What:**
+
+1. **Import-time SPA mount gate (`webapp/main.py:148`)** — `if (_SPA_DIST/"assets").exists()` ran at module import. When web container started before `npm run build`, the mount was never registered, so the catch-all served `index.html` for every `/assets/*` URL. Fixed by mounting unconditionally with `StaticFiles(..., check_dir=False)` — missing files now return real 404s, not HTML-as-JS.
+
+2. **Dockerfile didn't bake the SPA** — `webapp/frontend/dist/` is gitignored, Dockerfile had no node stage. Every deploy required a host-side `npm ci && npm run build` before `docker compose up`, easy to forget. Fixed with a multi-stage Dockerfile (`node:20-alpine AS frontend` builds dist, copied into the python runtime stage via `COPY --from=frontend`).
+
+3. **Compose volume merge silently shadowed the baked dist** — Docker Compose CONCATENATES volume lists between base and override files (it does NOT replace them). Base `docker-compose.yml` had `./webapp:/app/webapp` for local-dev hot-reload; the QA override couldn't suppress it. Result: host `/opt/qong/webapp/frontend/dist` (empty) shadowed the baked dist from step #2. Fixed by moving dev bind-mounts out of base into a new `docker-compose.override.yml` (auto-loaded only when `docker compose up` is invoked without `-f`; explicit-`-f` QA stack skips it). Removed `docker-compose.override.yml` from `.gitignore` since it's now the canonical dev override; per-developer customization moves to `docker-compose.local.yml` (still gitignored).
+
+4. **Cloudflare cached the broken text/html response under the JS asset URL** — CF auto-caches common static-asset extensions regardless of `Content-Type`. After fixing the origin, the cached HIT for `/assets/index-Ck0HogSN.js` continued serving the bad response. Fixed by adding a small `window.__QONG_BUILD__ = "2026-06-01T12:20Z"` side-effect in `webapp/frontend/src/main.tsx` — survives Vite minification (it's an assignment, not a comment), changes bundle bytes, produces a new content hash (`index-C_wqiXGd.js`), new asset URL, new CF cache key, MISS. Bump the date string in this line on any future incident where CF caches a wrong response under a hash we need to retire. Long-term, wire `BUILD_ID` via a vite `define` from a CI env var (deferred — see Notes).
+
+Also **added `tests/smoke/qa_smoke.mjs`** — standalone Node ESM script using Playwright. Launches headless Chromium, asserts no unexpected console errors, no bad MIME types on `.js`/`.css` requests, no failed network requests, non-empty DOM. Filters the expected `/api/v1/account` 401 anonymous check. Header docs invocation in a future `deploy-qa.yml` workflow. Would have caught this entire bug class on the first deploy.
+
+**Result (if measurable):** `https://qa.qongsystems.com/` loads cleanly in browser — `window.__QONG_BUILD__` reads `"2026-06-01T12:20Z"` (confirms users see the THIS-deploy bundle), React mounts, all asset MIME types correct, only the expected 401 in console.
+
+**Notes:**
+- The bind-mount-vs-baked-dist conflict is a one-time setup issue, not a runtime one — but the consequence is total SPA failure with no clear error in HTTP-level checks. The takeaway: any future post-deploy smoke MUST be browser-based, not curl-based. `tests/smoke/qa_smoke.mjs` enforces this.
+- **`BUILD_ID` via CI env var** — proper long-term solution. Edit `vite.config.ts` to add `define: { __BUILD_ID__: JSON.stringify(process.env.BUILD_ID || "dev") }`. Reference it from `main.tsx`. CI passes `BUILD_ID=$GITHUB_SHA` per deploy → unique hash per commit, predictable per-source-state. Until that lands, the date-string in `main.tsx` is bumped by hand on demand.
+- **Removed `docker-compose.override.yml` from .gitignore** — used to be per-developer local file; now it IS the canonical dev override (with the bind-mounts). Per-developer overrides go in `docker-compose.local.yml` (still gitignored).
+- **Compose volume merge rule** is one of the gnarlier foot-guns. There's no documented way to suppress a base-defined volume from an override; the only workaround is structural (base = production-minimal, env-specific overrides add what each env needs). Future schema/refactor work should keep this invariant.
+
+---
+
 ## [2026-06-01] #17 — AWS QA app live at qa.qongsystems.com; local stack switched from SQLite → Postgres
 
 **Type:** infra
