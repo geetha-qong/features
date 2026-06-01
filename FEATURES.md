@@ -24,6 +24,33 @@
 
 ---
 
+## [2026-06-01] #17 — AWS QA app live at qa.qongsystems.com; local stack switched from SQLite → Postgres
+
+**Type:** infra
+**Stage:** infra | webapp
+**Status:** shipped
+
+**Why:** Two threads converged this session. First, local was still on SQLite while production (`dev.qongsystems.com`) and QA (`qa.qongsystems.com`) both target Postgres — that mismatch meant Postgres-only bugs surfaced in QA after passing locally. Second, the AWS QA bring-up (FEATURES #16) was stuck on a placeholder OpenRouter SSM key. User set a real QA key, unblocking PHASE 2.
+
+**What:**
+- *Local stack:* `.env` populated with 9 missing keys (POSTGRES/REDIS/MINIO/STORAGE/GPU_CALLBACK), `DATABASE_URL=postgresql://qong:...@postgres:5432/qong`. New `postgres/init/01-create-label-studio-db.sql` runs on first Postgres boot to create the `label_studio` DB that Label Studio expects (compose's `POSTGRES_DB=qong` would otherwise leave it missing). `web` now has `depends_on: postgres (healthy) + redis (started)` so `run_migrations()` can't race. Tailscale port lines on web:8000 and redis:6379 commented out in base compose (no Tailscale on local Mac or AWS) — when this branch merges to `dev`, these need to come back for the GCP VM that talks to the Windows GPU box. Commits `4dd9d3e` and `b9e8def`.
+- *QA bring-up:* OpenRouter SSM param replaced (Version 2). New `docker-compose.override.qa.yml` binds `/mnt/qong-data/{postgres,minio,uploads,job_outputs}` to the EBS data volume so QA data survives EC2 replacement, and disables `nginx` / `label-studio-mcp` / `trainer` services that conflict with host nginx or aren't needed in QA. `.env.qa` rendered on EC2 by SSM-driven script reading 7 SecureString params (added `/may26aws/qong-qa/redis-password` — spec missed it). AWS CLI v2 installed on EC2 (PHASE 1 bootstrap missed it). SPA built in-place via `npm ci && npm run build` (Dockerfile doesn't include a frontend build step — see Notes). nginx `qong-qa` site swapped from 503 placeholder to `proxy_pass http://127.0.0.1:8000` with `X-Forwarded-*` headers, WS upgrade headers, and 600s read timeout for long-running PDF endpoints.
+
+**Result (if measurable):**
+- `https://qa.qongsystems.com/healthz` → 200, `/` → 200 (SPA serving), `/api/v1/account` → 401 (auth gating works)
+- Public registration round-trip succeeded; user landed in QA Postgres with `id=1, role=super_admin` (first-user auto-promotion in `webapp/routers/auth.py:107`)
+- Build time on t3.medium: ~4 min docker compose build + ~50s npm install + 5s vite build = under 6 min total
+- Marginal cost of this bring-up: <$0.10 (EC2 was already running)
+
+**Notes:**
+- *Dockerfile gap:* SPA build is not part of the image. Today it works because the bind-mount `./webapp:/app/webapp` exposes the host-built `dist/` to the container. Long-term fix: add a multi-stage Dockerfile that runs `npm ci && npm run build` in a node stage, then copies `dist/` into the python stage. Until then, every deploy must rebuild the SPA on-host before `docker compose up`.
+- *Tailscale binding regression risk:* base `docker-compose.yml` no longer binds `100.127.190.88:*`. When merging `feature/digital-twin` → `dev`, restore those two `ports:` lines (or move them into a `docker-compose.override.dev.yml`) so the Windows GPU worker can still reach the GCP web container.
+- *Smoke-test user `qa-smoke-2026-06-01`:* created as first user → got auto-promoted to super_admin. Real first human user on QA will NOT get admin — manually demote/delete the smoke user before onboarding real users.
+- *Cloudflare Origin Cert rotation still pending* (private key was pasted in chat 2026-05-29). Limited blast radius (CF↔origin only, not public CA trust) but rotate when convenient.
+- *Local admin password:* `admin` / `6GvVUz9HqaMeO1Bq` on `http://localhost:8000`. Saved in user auto-memory at `memory/reference_local_admin_password.md`. Local Postgres ≠ QA Postgres ≠ GCP dev Postgres — three independent DBs.
+
+---
+
 ## [2026-05-30] #16 — AWS QA environment provisioned at qa.qongsystems.com (TLS live, app bring-up paused)
 
 **Type:** infra
