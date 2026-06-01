@@ -3,10 +3,23 @@ __pycache__/
 *.pyo
 .git/
 .env
+.env.qa
 tmp/
 uploads/
 job_outputs/
 webapp.db
+data/
 *.egg-info/
 .venv/
 venv/
+
+# Frontend — let the multi-stage Dockerfile build these fresh inside the
+# image. Sending host artifacts confuses vite's caching and can poison
+# the build with stale chunks (the bug that briefly made every QA build
+# emit a cache-buster-stamped bundle on 2026-06-01).
+webapp/frontend/node_modules/
+webapp/frontend/dist/
+
+# Test snapshots / screenshots
+.playwright-mcp/
+*.png

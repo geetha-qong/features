@@ -10,10 +10,11 @@ services:
       - ./uploads:/app/uploads
       - ./job_outputs:/app/job_outputs
       - webapp_db:/app/data
-      # Dev bind-mounts: live-mount source + tests so iteration doesn't need rebuild.
-      # In production these mounts shadow the baked-in COPY layer with the same files (no drift).
-      - ./webapp:/app/webapp
-      - ./tests:/app/tests
+      # NOTE: Local-dev source bind-mounts (./webapp, ./tests) live in
+      # docker-compose.override.yml — auto-loaded by `docker compose up`
+      # but skipped when using explicit `-f` (e.g. the QA stack).
+      # Per Compose's volume-list-concatenation rule, putting them in
+      # base would shadow the baked-in SPA dist on QA. See FEATURES #18.
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - SECRET_KEY=${SECRET_KEY}
