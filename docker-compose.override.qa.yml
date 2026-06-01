@@ -1,0 +1,56 @@
+# QA override — applied on AWS EC2 alongside docker-compose.yml.
+#
+# Usage on the EC2:
+#   docker compose -f docker-compose.yml -f docker-compose.override.qa.yml \
+#                  --env-file .env.qa up -d
+#
+# What this override does (only QA-specific deltas — base compose is otherwise reused):
+#
+# 1. Disable services that conflict with EC2's host-level services or aren't
+#    needed on QA. They get `profiles: [disabled]` so they don't start unless
+#    someone explicitly opts in with `--profile disabled`.
+#      - nginx        → host nginx already terminates TLS via CF Origin Cert
+#      - label-studio-mcp → local-only Claude Code MCP server
+#      - trainer      → YOLO training (runs on GPU box only)
+#
+# 2. Re-map data volumes from named volumes / repo-local bind mounts to the
+#    EBS data volume mounted at /mnt/qong-data. This means QA data survives
+#    EC2 instance replacement (the EBS volume is independent).
+
+services:
+  web:
+    volumes:
+      - /mnt/qong-data/uploads:/app/uploads
+      - /mnt/qong-data/job_outputs:/app/job_outputs
+      # Keep webapp_db named volume from base — SQLite is unused on QA
+      # (DATABASE_URL points to postgres), so this is just dead-weight tolerance.
+      - webapp_db:/app/data
+      # Keep source bind-mount from base so deploys can `git pull && docker compose restart web`
+      # without rebuilding the image.
+      - ./webapp:/app/webapp
+      - ./tests:/app/tests
+
+  cpu-worker:
+    volumes:
+      - /mnt/qong-data/uploads:/app/uploads
+      - /mnt/qong-data/job_outputs:/app/job_outputs
+      - webapp_db:/app/data
+      - ./webapp:/app/webapp
+
+  postgres:
+    volumes:
+      - /mnt/qong-data/postgres:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+
+  minio:
+    volumes:
+      - /mnt/qong-data/minio:/data
+
+  nginx:
+    profiles: [disabled]
+
+  label-studio-mcp:
+    profiles: [disabled]
+
+  trainer:
+    profiles: [disabled]
