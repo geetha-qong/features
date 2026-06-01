@@ -60,4 +60,7 @@ data_room/
 # Playwright session data
 .playwright-mcp/
 themes/screenshots/
-docker-compose.override.yml
+# (docker-compose.override.yml is now committed — provides local-dev
+#  bind-mounts. Per-developer customization should go in
+#  docker-compose.local.yml which IS gitignored:)
+docker-compose.local.yml

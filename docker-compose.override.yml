@@ -1,0 +1,22 @@
+# Local-dev override — auto-loaded by `docker compose up` (no -f needed).
+#
+# Provides the bind-mounts that let you `git pull && docker compose restart web`
+# without rebuilding the image during local iteration. These USED to live in
+# base docker-compose.yml but were moved out on 2026-06-01 (FEATURES #18)
+# because Compose concatenates volume lists between base + override, so they
+# would have shadowed the baked SPA dist on QA / dev where iteration speed
+# is not the priority.
+#
+# Workflow:
+#   - Local:  `docker compose up -d`                                       → loads base + this file (auto)
+#   - QA:     `docker compose -f docker-compose.yml -f docker-compose.override.qa.yml --env-file .env.qa up -d`  → skips this file (explicit -f disables auto-load)
+
+services:
+  web:
+    volumes:
+      - ./webapp:/app/webapp
+      - ./tests:/app/tests
+
+  cpu-worker:
+    volumes:
+      - ./webapp:/app/webapp
