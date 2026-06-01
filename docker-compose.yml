@@ -5,7 +5,7 @@ services:
     build: .
     ports:
       - "127.0.0.1:8000:8000"
-      - "100.127.190.88:8000:8000"   # Tailscale — GPU worker on Windows reads tiles + callback via this
+      # - "100.127.190.88:8000:8000"   # Tailscale — disabled locally (Tailscale not up); GPU worker on Windows reads tiles + callback via this when enabled
     volumes:
       - ./uploads:/app/uploads
       - ./job_outputs:/app/job_outputs
@@ -31,6 +31,11 @@ services:
       - WEBAPP_BASE_URL=${WEBAPP_BASE_URL:-https://dev.qongsystems.com}
       - GPU_INTERNAL_BASE_URL=${GPU_INTERNAL_BASE_URL:-http://100.127.190.88:8000}
       - TZ=Asia/Kolkata
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   # ── Label Studio (annotation tool) ────────────────────────────────────────
@@ -177,6 +182,7 @@ services:
       - POSTGRES_DB=qong
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U qong"]
       interval: 10s
@@ -191,7 +197,7 @@ services:
     image: redis:7-alpine
     ports:
       - "127.0.0.1:6379:6379"
-      - "100.127.190.88:6379:6379"   # Tailscale — GPU worker on Windows reads this
+      # - "100.127.190.88:6379:6379"   # Tailscale — disabled locally (Tailscale not up); GPU worker on Windows reads this when enabled
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
     healthcheck:
       test: ["CMD", "sh", "-c", "redis-cli -a \"$$REDIS_PASSWORD\" ping"]
