@@ -158,7 +158,15 @@ async def serve_tile(job_id: int, filename: str):
     tile_path = get_job_dir(job) / "tmp" / filename
     if not tile_path.exists() or tile_path.suffix != ".png":
         raise HTTPException(status_code=404, detail="Tile not found")
-    return FileResponse(str(tile_path), media_type="image/png", headers=_TILE_CORS_HEADERS)
+    # Setting headers via FileResponse's `headers=` kwarg was silently dropping
+    # the CORS keys (Starlette 0.x quirk where FileResponse calls
+    # `set_stat_headers()` after init_headers and the path through `setdefault`
+    # doesn't seem to land them on the wire for image/* media types). Setting
+    # them post-construction via `.headers[k]=v` is the reliable form.
+    resp = FileResponse(str(tile_path), media_type="image/png")
+    for k, v in _TILE_CORS_HEADERS.items():
+        resp.headers[k] = v
+    return resp
 
 
 # ── SPA static mount + catch-all ──────────────────────────────────────────────
