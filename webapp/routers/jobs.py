@@ -260,6 +260,15 @@ _TILE_CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
     "Access-Control-Max-Age": "86400",
+    # `Vary: Origin` tells caches (CF, browser) that the response varies by
+    # the Origin request header — so subsequent requests with different
+    # Origins get fetched separately rather than reusing a CORS-less cached
+    # response. Critical: without this, the first non-CORS request locks in
+    # a CORS-less response for all subsequent requesters until TTL expires.
+    "Vary": "Origin",
+    # Short cache TTL so a future no-CORS slip (e.g. another env hitting the
+    # tile during bootstrap) doesn't lock CF for 4 hours.
+    "Cache-Control": "public, max-age=300",
 }
 
 
