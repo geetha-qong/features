@@ -50,6 +50,13 @@ services:
     # /ls/* which 404 on this nginx.
     environment:
       LABEL_STUDIO_HOST: https://ls-dev.qongsystems.com
+      # Django CSRF middleware checks that POST requests' Origin / Referer
+      # is in this allowlist. Without it, every login POST returns 403
+      # "CSRF verification failed". LS reads the LABEL_STUDIO_-prefixed var
+      # preferentially over the standard CSRF_TRUSTED_ORIGINS, so we need
+      # the prefixed name. Base compose ships an old dev.qongsystems.com
+      # value that doesn't match this subdomain.
+      LABEL_STUDIO_CSRF_TRUSTED_ORIGINS: https://ls-dev.qongsystems.com
 
   nginx:            { profiles: [disabled] }
   label-studio-mcp: { profiles: [disabled] }
