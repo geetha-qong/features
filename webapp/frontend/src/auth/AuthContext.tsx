@@ -77,18 +77,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       redirect: "manual", // don't auto-follow the 303; we handle navigation ourselves
     });
     // fetch with redirect:"manual" gives status 0 + type "opaqueredirect" for a 3xx.
-    // Any 4xx means the server returned an HTML error page — extract visible text.
+    // 4xx → JSON body `{ detail: "..." }` from FastAPI HTTPException.
+    // (Pre-2026-06-02 the backend returned a Jinja-rendered HTML error page;
+    // login.html was removed alongside GET /login, so the error is now JSON.)
     if (res.status >= 400) {
       let message = `Login failed (${res.status})`;
       try {
-        const html = await res.text();
-        // The Jinja error box contains the message as plain text between tags
-        const match = html.match(/class="error-box"[^>]*>([\s\S]*?)<\/div>/);
-        if (match) {
-          message = match[1].replace(/<[^>]+>/g, "").trim();
+        const data = await res.json();
+        if (data && typeof data.detail === "string" && data.detail.trim()) {
+          message = data.detail.trim();
         }
       } catch {
-        // ignore parse failures
+        // ignore parse failures — fall back to the generic message above
       }
       throw new Error(message);
     }
@@ -97,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
-    // GET /logout deletes the cookie and returns 303 → /login
+    // GET /logout deletes the cookie and returns 303 → /signin
     await fetch("/logout", { credentials: "include" }).catch(() => {});
     setUser(null);
   }

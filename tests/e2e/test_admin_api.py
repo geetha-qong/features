@@ -90,11 +90,16 @@ def auth_as(client):
     ("GET", "/api/v1/admin/plans"),
     ("GET", "/api/v1/admin/label-studio"),
 ])
-def test_no_auth_redirects_to_login(client, method, path):
-    """get_current_user raises 303 → /login when no cookie present."""
+def test_no_auth_redirects_to_signin(client, method, path):
+    """get_current_user raises 303 → /signin when no cookie present.
+
+    Updated 2026-06-02: was /login (Jinja). After login.html removal, the SPA
+    /signin route is the sole login surface; the legacy /login GET still 303s
+    to /signin for bookmark compatibility, but middleware goes straight there.
+    """
     resp = client.request(method, path, follow_redirects=False)
     assert resp.status_code == 303
-    assert resp.headers.get("location") == "/login"
+    assert resp.headers.get("location") == "/signin"
 
 
 @pytest.mark.parametrize("method,path", [

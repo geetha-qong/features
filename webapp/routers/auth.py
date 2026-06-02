@@ -1,19 +1,28 @@
-"""Auth routes: /login, /register (public with approval), /logout."""
-import re
+"""Auth routes: POST /login, GET /logout.
 
-from fastapi import APIRouter, Depends, Form, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+Public self-registration was removed 2026-06-02 — see FEATURES.md #19. New
+users are created by a super_admin via `POST /api/v1/admin/users` (already
+serving the React Admin UI's user-creation modal). First-user bootstrap on a
+fresh DB is handled by a one-off SSM-direct script that inserts a super_admin
+row directly via SQLAlchemy (template kept at `/tmp/qa_user_reset.sh` in the
+2026-06-02 session memory; do NOT commit any password to this repo).
+
+The Jinja `/login` GET page and `login.html` template were removed the same
+day. The SPA's `/signin` route is now the sole login surface. POST /login
+remains as the auth endpoint (cookie-set + 303 to /dashboard on success); on
+failure it returns JSON `{"detail": ...}` for the SPA's AuthContext to parse.
+Legacy unauth-middleware redirects in `webapp/auth.py` 303 to `/signin`.
+"""
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from webapp import models
-from webapp.auth import create_access_token, get_current_user, hash_password, verify_password
-from webapp.config import COOKIE_SECURE, MIN_PASSWORD_LENGTH
+from webapp.auth import create_access_token, verify_password
+from webapp.config import COOKIE_SECURE
 from webapp.database import get_db
-from webapp.jinja import templates
 
 router = APIRouter()
-
-_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 
 
 def _set_auth_cookie(response, token):
@@ -26,9 +35,10 @@ def _set_auth_cookie(response, token):
     )
 
 
-@router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+@router.get("/login")
+async def login_redirect():
+    # Legacy bookmark/redirect target. Forwards to the SPA's /signin route.
+    return RedirectResponse(url="/signin", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/login")
@@ -40,16 +50,11 @@ async def login(
 ):
     user = db.query(models.User).filter(models.User.username == username).first()
     if not user or not verify_password(password, user.password_hash):
-        return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Invalid username or password"},
-            status_code=400,
-        )
+        raise HTTPException(status_code=400, detail="Invalid username or password")
     if not user.is_active:
-        return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Your account is pending approval. Please contact the administrator."},
+        raise HTTPException(
             status_code=403,
+            detail="Your account is pending approval. Please contact the administrator.",
         )
     token = create_access_token({"sub": user.username})
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
@@ -57,98 +62,8 @@ async def login(
     return response
 
 
-@router.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request, db: Session = Depends(get_db)):
-    try:
-        current_user = get_current_user(request, db)
-    except Exception:
-        current_user = None
-    return templates.TemplateResponse("register.html", {"request": request, "user": current_user})
-
-
-@router.post("/register")
-async def register(
-    request: Request,
-    username: str = Form(...),
-    email: str = Form(""),
-    password: str = Form(...),
-    db: Session = Depends(get_db),
-):
-    try:
-        current_user = get_current_user(request, db)
-    except Exception:
-        current_user = None
-
-    username = (username or "").strip()
-    if not _USERNAME_RE.match(username):
-        return templates.TemplateResponse(
-            "register.html",
-            {"request": request, "error": "Username must be 3-32 chars, letters/digits/._- only", "user": current_user},
-            status_code=400,
-        )
-    if len(password) < MIN_PASSWORD_LENGTH:
-        return templates.TemplateResponse(
-            "register.html",
-            {"request": request, "error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters", "user": current_user},
-            status_code=400,
-        )
-
-    if db.query(models.User).filter(models.User.username == username).first():
-        return templates.TemplateResponse(
-            "register.html",
-            {"request": request, "error": "Username already taken", "user": current_user},
-            status_code=400,
-        )
-
-    is_first_user = db.query(models.User).count() == 0
-    # First user → super_admin, active immediately.
-    # Super_admin creating via this form → active immediately.
-    # Public self-registration → pending approval (is_active=False).
-    if is_first_user:
-        role, is_active = "super_admin", True
-    elif current_user and current_user.role == "super_admin":
-        role, is_active = "user", True
-    else:
-        role, is_active = "user", False  # requires admin approval
-
-    user = models.User(
-        username=username,
-        email=email or None,
-        password_hash=hash_password(password),
-        role=role,
-        is_active=is_active,
-    )
-    db.add(user)
-    db.commit()
-
-    # Record signup trial credits in the ledger (column default already gives 10 credits;
-    # this creates the audit row so ledger invariant holds from day 1)
-    from webapp import credits as credits_module
-    credits_module.grant(user, 10, reason="signup_grant", db=db)
-
-    # Super_admin creating via /register form — stay logged in, go to dashboard
-    if current_user and current_user.role == "super_admin":
-        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
-
-    if is_first_user:
-        new_token = create_access_token({"sub": user.username})
-        response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
-        _set_auth_cookie(response, new_token)
-        return response
-
-    # Self-registered: show pending approval message
-    return templates.TemplateResponse(
-        "register.html",
-        {
-            "request": request,
-            "user": None,
-            "success": "Account created! Your account is pending approval by an administrator before you can log in.",
-        },
-    )
-
-
 @router.get("/logout")
 async def logout():
-    response = RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    response = RedirectResponse(url="/signin", status_code=status.HTTP_303_SEE_OTHER)
     response.delete_cookie("access_token")
     return response

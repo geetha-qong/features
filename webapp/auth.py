@@ -32,18 +32,18 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> models.User:
     token = request.cookies.get("access_token")
     if not token:
-        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
+        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/signin"})
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: Optional[str] = payload.get("sub")
         if username is None:
-            raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
+            raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/signin"})
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
+        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/signin"})
 
     user = db.query(models.User).filter(models.User.username == username).first()
     if user is None:
-        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/login"})
+        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/signin"})
     return user
 
 
