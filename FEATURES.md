@@ -24,6 +24,62 @@
 
 ---
 
+## [2026-06-02] #22 — SPA marketing pages removed; IP-direct access redirects; GCP VMs stopped
+
+**Type:** feature | infra | decision
+**Stage:** webapp | infra
+**Status:** shipped
+
+**Why:** Three threads converged in the tail end of the AWS-migration session. (1) User wanted `dev.qongsystems.com` to be engineering-app-only — "we don't need any UI like home, about, contact pages on this instance … we will have first page as login page and then our studio will start. website is already hosted on diff server". (2) User noticed origins are reachable by bare-IP and asked to "check and redirect but don't allow IP opening directly in browser". (3) With the AWS cutover live (FEATURES #21), the GCP VMs were burning ~$60/mo for nothing — user asked to stop them. None of these are dramatic in isolation but each tightened the production posture and saved real money.
+
+**What:**
+
+1. **Marketing pages deleted from the SPA** (commit `9fb2692`):
+   - DELETE `webapp/frontend/src/marketing/` (7 files: `Drive.tsx`, `Footer.tsx`, `Hero.tsx`, `MarketingNav.tsx`, `Sections.tsx`, `Social.tsx`, `marketing.css`)
+   - DELETE `webapp/frontend/src/routes/Home.tsx` (was the marketing landing — Hero + Sections + Footer composition)
+   - NEW `webapp/frontend/src/routes/RootRedirect.tsx`: calls `useAuth()`, waits for the loading flag to settle, then `<Navigate replace>` to `/dashboard` if there's a session or `/signin` if anon
+   - `App.tsx`: `<Route index>` swapped from `<Home />` → `<RootRedirect />`
+   - `Layout.tsx`: dropped `/` from `FULL_BLEED_EXACT` since the root now renders nothing (the redirect fires immediately after auth resolves)
+   - `Login.tsx`: "Request access" CTA changed from `<Link to="/">` (which would now bounce visitors back to /signin in a feels-like-loop) to `<a href="https://qongsystems.com" target="_blank">` — points at the external marketing site
+   - `RequireAuth.tsx` docstring no longer references "marketing /"
+   - Unused `Link` import dropped from `Login.tsx`
+
+2. **IP-direct access redirects to the canonical hostname** (nginx-only, no code in repo):
+   - Both dev and QA `nginx` `default_server` blocks rewritten on the EC2 hosts (idempotent overwrite, after a first-attempt regex-strip left duplicate `default_server` lines and broke `nginx -t`).
+   - New behaviour: any request hitting the bare EIP (or with a wrong/empty Host header) returns `301 Location: https://{dev|qa}.qongsystems.com$request_uri`. Replaces the prior `return 444` silent connection drop.
+   - Cert presented for HTTPS-via-IP is `*.qongsystems.com` (the CF Origin Cert from `/etc/ssl/qong-{env}/origin.crt`); browsers show a name-mismatch warning before the redirect, which is acceptable friction since CF-fronted access is the supported path.
+   - Verified externally from a non-CF IP (my mac): `http://13.204.52.248/` → 301, `https://13.204.52.248/` → 301, both pointing at `https://dev.qongsystems.com/`. QA HTTP-via-IP is also closed at the SG level (port 80 not open on QA's `sg-0ece96660d8ee00bc`), so it times out instead of redirecting — defense in depth.
+
+3. **GCP VMs stopped** (no code; gcloud state change):
+   - `gcloud compute instances stop qong-dev-server qong-intake-server --zone=asia-southeast1-c`
+   - Both VMs in TERMINATED state. Disks persist (~$2.40/mo for the 50 GB dev disk + ~$1/mo for the 20 GB intake disk). Daily snapshots continue. GCS buckets `qong-backups` + `qong-intake-data` untouched.
+   - GCP ephemeral external IPs released on stop — if VMs restart, new IPs will be assigned. The Cloudflare A-record currently points at the AWS EIP `13.204.52.248`, so the GCP IPs being different on restart is irrelevant for rollback (we'd just update CF to whatever the new IP is).
+
+4. **Dev super_admin password reset** (post-`pg_dumpall`-restore housekeeping):
+   - The dev Postgres was restored from the GCP dump on 2026-06-02 (FEATURES #21 Phase 2). The `users` table preserved the GCP-era bcrypt hashes for all 8 users including `admin`, but the GCP `admin` password was unknown to me (it had been set on the old dev VM before this session began).
+   - Reset via `docker compose exec web python3` calling `webapp.auth.hash_password(...)`. Saved as `reference_dev_admin_password.md` in user auto-memory.
+
+**Result (if measurable):**
+- Live SPA bundle on both dev and QA: `index-COLjBvIo.js`, **0 occurrences of "About" / marketing strings** (verified via `curl + grep`). Previous QA bundle `index-ChMrWMB0.js` had 4× "About".
+- Playwright on `https://dev.qongsystems.com/`: anonymous visit redirects to `/signin` (full-bleed, no app header), `hasMarketingNav: false`, "Request access" link points at `https://qongsystems.com`, `window.__QONG_BUILD__ === "9fb2692"`.
+- Origin redirect verified from my mac (non-CF IP):
+  - `http://13.204.52.248/` → `301 https://dev.qongsystems.com/`
+  - `https://13.204.52.248/` (k) → `301 https://dev.qongsystems.com/`
+  - `https://43.205.96.86/` (k) → `301 https://qa.qongsystems.com/`
+  - `http://43.205.96.86/` → timeout (SG closed on 80 for QA)
+- Cost delta: **−$60/mo** (GCP compute → $0, disks/snapshots stay at ~$2.50/mo). Net total monthly run-rate: ~$74/mo (was ~$102/mo at session start, +$36/mo for the new AWS dev EC2 since session start, −$63/mo from stopping GCP).
+- Dev admin auth verified end-to-end through Cloudflare: `POST /login` → 303 → `/dashboard`, then `GET /api/v1/account` returns `{id: 1, username: "admin", role: "super_admin", credits_remaining: 999, tier: "enterprise"}` (data exactly as it was on GCP).
+
+**Notes:**
+- *Login page's left brand panel is still there.* `Login.tsx` renders a two-pane screen — sign-in form on the right, brand panel on the left with the "Read your P&ID. Generate the rest." headline + a `Live Extraction · Demo` tile (FT-201 / PT-101 / etc.) + version chip. The user hasn't asked for that to go (yet); if they do, the left `<aside class="login-brand">` block is the surgical removal target. Tracked as a future option in SESSION_STATE.
+- *nginx configs live on the EC2 hosts, NOT in this repo.* If we ever rebuild from scratch we'll need to recreate them from the `docs/superpowers/specs/2026-05-29-aws-qa-environment-design.md` notes or extract from the running hosts via SSM. Worth a future refactor: ship the canonical configs at `deploy/nginx/qong-{env}.conf` and have the EC2 user-data script `cp` them at boot.
+- *The first nginx-rewrite attempt left duplicate `default_server` lines.* The Python script used a regex that matched `# Block bare-IP` comment headers; dev's nginx config had the bare blocks WITHOUT the comment, so the strip-and-replace became append-only. nginx -t failed, `systemctl reload` was rejected, and the old `return 444` config kept serving traffic — masking the fact that nothing had changed until the external curl test surfaced it. **Lesson:** for nginx config edits, prefer idempotent full-file rewrites over regex-stitching.
+- *GCP rollback path is still open* and explicitly tested in this session's exit notes. To roll back: `gcloud compute instances start qong-dev-server qong-intake-server` (new ephemeral IPs), then update the Cloudflare A-record for `dev.qongsystems.com` from `13.204.52.248` to the new GCP IP. The AWS dev box can be left running as a warm secondary or stopped to save costs while GCP is primary.
+- *Memory file added for dev admin* — `reference_dev_admin_password.md` joins the local + QA admin reference files. The MEMORY.md index lists all three.
+- *Phase 4 (GCP decommission) deliberately deferred.* The 7-day soak window is conservative; we could shorten if we trust the rollback path won't be needed. The GCP daily snapshots will keep accumulating until Phase 4 deletes them.
+
+---
+
 ## [2026-06-02] #21 — AWS migration Phases 1-3: dev moved from GCP to AWS; DNS cut over
 
 **Type:** infra
