@@ -24,6 +24,72 @@
 
 ---
 
+## [2026-06-02] #19 — Jinja → SPA consistency sweep; public signup removed; 4 surfaces ported
+
+**Type:** architecture | feature | bugfix
+**Stage:** webapp
+**Status:** shipped
+
+**Why:** Two user asks converged: (a) "we don't need public signup — remove the /register URL", and (b) "remove any pending jinja form from our app … make new in SPA, to have consistent app". The pre-existing Jinja surface had drifted into a hybrid state — the React SPA covered /dashboard, /projects, /jobs, /admin/*, but user-facing /account, /account/api-keys, /account/billing, and /feedback were still Jinja form-POSTs against `webapp/templates/*`. Clicking "Account" in the SPA's AccountMenu navigated to a Jinja-rendered page, which is a UX inconsistency and a maintenance trap (two divergent UI stacks for a single product surface). Public /register was also still exposed at the HTTP layer despite the React Admin UI's `CreateUserModal` shipping in Phase 3 — meaning the same admin-creates-user flow existed twice (Jinja form-POST and the SPA's POST /api/v1/admin/users), with the public arm an unwanted attack surface.
+
+**What:** Three-stage sweep on `feature/digital-twin`, two commits (`e84ccb6`, `0e846d3`):
+
+1. **Public signup + Jinja /login removed** (`e84ccb6`):
+   - DELETE `webapp/routers/auth.py` @router.get/post('/register')
+   - DELETE `webapp/templates/{register,login}.html`
+   - GET /login → 303 redirect to /signin (legacy bookmark compat only)
+   - POST /login: error path returns JSON `{detail: ...}` (was Jinja-rendered HTML); SPA's `AuthContext.tsx` updated to parse JSON instead of regex-scraping `class="error-box"`
+   - GET /logout: redirects to /signin (was /login)
+   - `webapp/auth.py`: unauth-middleware 303 Location header /login → /signin (4 callsites)
+   - `webapp/templates/base.html`: navbar "Login" link /login → /signin
+   - `tests/e2e/test_admin_api.py` assertion updated to /signin
+   - First-user bootstrap on a fresh DB is now a one-off SSM-direct SQLAlchemy script (template kept in 2026-06-02 session memory; pattern used to create QA's super_admin `tarun` after deleting the smoke user `qa-smoke-2026-06-01` via cascade-delete on `credit_transactions`).
+
+2. **Account, API Keys, Billing, Feedback ported to SPA** (`0e846d3`):
+   - Backend (`webapp/routers/api_v1.py`):
+     - GET `/api/v1/account/transactions` — recent credit txns for current user
+     - GET `/api/v1/account/api-keys` — list non-revoked keys (never exposes full value)
+     - POST `/api/v1/account/api-keys` — create with one-time plaintext reveal in JSON body
+     - DELETE `/api/v1/account/api-keys/{id}` — revoke (204; user-scoped, 404 on other-user-key)
+     - GET `/api/v1/account/billing` — balance + tier + active plans
+     - POST `/api/v1/feedback` — anon-allowed; same javascript:/data:/vbscript: page_url scrub as the pre-existing Jinja handler
+   - Frontend:
+     - `webapp/frontend/src/account/{api,types}.ts` — typed call helpers mirroring `admin/api.ts`
+     - `webapp/frontend/src/routes/Account.tsx` — profile + transactions + billing combined
+     - `webapp/frontend/src/routes/AccountApiKeys.tsx` — list + create-with-reveal + revoke (with copy-to-clipboard, dismiss-acknowledgement, and a "this is the only time" warning)
+     - `webapp/frontend/src/routes/Feedback.tsx` — bug/feature/pricing/other form
+     - `App.tsx`: 3 new authed routes mounted
+     - `AccountMenu.tsx`: replaced "Shortcuts" + "Notifications" placeholders with real "API Keys" + "Send feedback" links
+     - `dashboard/CreateProjectModal.tsx`: error-hint copy `/account/billing` → `/account`
+   - Deleted: `webapp/routers/account.py` (entire file); `webapp/templates/account/{index,api_keys,billing}.html`; `webapp/templates/feedback.html`. `webapp/main.py` no longer imports `account_router`.
+   - Security tests migrated:
+     - `tests/unit/test_feedback_url_xss.py` ports the 9 hostile-URL parametrised cases (javascript:, data:, vbscript:, file:, ftp:, protocol-relative, JS-with-fake-netloc) to POST /api/v1/feedback. Status 200 → 201.
+     - `tests/unit/test_account_api_keys.py` rewritten for JSON endpoints; **added two new security tests**: (1) GET /account/api-keys list response never contains the full key (only the 8-char prefix), and (2) DELETE another user's key returns 404 (not 403), matching the user-scoped query in `api_v1.py` — 403 would leak existence.
+   - Lingering Jinja: only `annotate.html` + `base.html` (its host layout). Intentional per `webapp/routers/annotate.py:5` — "React SPA covers only customer-facing + super_admin surfaces; annotators get the legacy Jinja page". Confirmed kept by the user during the inventory pass.
+
+3. **EC2 deploy-path latent bug fixed** during the QA deploy: `/opt/qong/.git/config` had `origin = git@github.com:Qong-Systems/qong_product.git` (bare GitHub host), but the deploy key was registered against the `qong-product` SSH alias in `~ubuntu/.ssh/config`. `git pull` had been silently failing with "Permission denied (publickey)" — the prior FEATURES #17 / #18 deploys appear to have relied on host-side `npm run build` + bind-mount rather than a real git-pull. Fixed once with `git remote set-url origin git@qong-product:Qong-Systems/qong_product.git`. Future deploys via SSM RunCommand → `sudo -i -u ubuntu git pull` now work without intervention.
+
+**Result (if measurable):** Playwright-verified on `https://qa.qongsystems.com` end-to-end:
+- `GET /register` → SPA "404 - This page doesn't exist." (no Jinja form anywhere)
+- `GET /login` → 303 → `/signin` (SPA login renders)
+- `POST /login` with bad creds → `400 application/json` `{"detail":"Invalid username or password"}` parsed by SPA AuthContext
+- Login `tarun / CzlYN5pah7z5Dvbr` → 303 → `/dashboard`
+- `GET /logout` → 303 → `/signin`, cookie cleared, subsequent `/api/v1/account` → 401
+- `/account` SPA: shows profile + 1 txn row (`initial_admin_grant +10 → 20`) + 3 plans (Trial $0, Starter $19, Pro $149)
+- `/account/api-keys` SPA: created `playwright-qa-smoke` → revealed `qk_24a9e2515760a01684c07034fb5fff3c` (32 hex, correct shape) → Bearer-authed against `/api/v1/account` returning `{"username":"tarun","role":"super_admin"}` → revoked → cookie-isolated Bearer retry returned 401 (revocation effective at auth layer, not just UI)
+- `/feedback` SPA: submitted pricing-category form → 201 → "Thanks for your feedback!" banner. Hostile `page_url=javascript:alert(1)` curl-tested via SSM RunCommand on EC2 → DB row stored with `page_url=None` (security scrub holds across the port).
+- AccountMenu popover items: `["Account", "API Keys", "Send feedback", "Sign out"]` — no more Shortcuts/Notifications placeholders.
+
+**Notes:**
+- *base.html still in tree* — only referenced by `annotate.html`. Becomes orphan-deletable the day the annotator surface gets ported to SPA (no current plan; out of SPA scope by design).
+- *Pre-existing "20 credits on signup" bug surfaced* — the User model column default of 10 + `credits.grant(10, reason="signup_grant")` both fire at user creation, so the audit row's intent (just record the existing 10) ends up adding another 10. Not introduced by this work, just observed. Tracked as a follow-up; either drop the default-10 or stop double-granting.
+- *`wrv` compose warning still benign* — surfaced again during this deploy. The compose interpolation `${wrv}` is somewhere in the docker-compose chain; harmless empty-string default. Low-priority cleanup.
+- *RouterAuth tests not updated* — `webapp/frontend/src/auth/RequireAuth.test.tsx` already covered /signin redirection; no changes needed there. New SPA routes (Account, AccountApiKeys, Feedback) have NO unit tests yet — they rely on Playwright-on-QA verification documented above. Worth adding component tests if test parity with admin/*.test.tsx becomes a priority.
+- *Admin-side feedback UI not retested* — the new Playwright feedback row should now appear in `/admin/feedback`. Eyeball check skipped for time; defer to next admin-feedback session.
+- *AccountMenu no longer has Shortcuts / Notifications* — these were placeholders. If product wants them back, restore the buttons but route them somewhere real.
+
+---
+
 ## [2026-06-01] #18 — QA SPA bootstrap fixed (Playwright caught what curl missed); 4 root-causes addressed
 
 **Type:** bugfix
