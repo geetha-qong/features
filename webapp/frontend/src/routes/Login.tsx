@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowRight,
@@ -136,12 +136,14 @@ export default function Login() {
         <div>
           <strong>Invite-only access</strong>
           QONG Studio is in private beta. Need an account?{" "}
-          <Link
-            to="/"
+          <a
+            href="https://qongsystems.com"
+            target="_blank"
+            rel="noopener noreferrer"
             style={{ color: "var(--qong-magenta)", fontWeight: 600 }}
           >
             Request access
-          </Link>
+          </a>
           .
         </div>
       </div>

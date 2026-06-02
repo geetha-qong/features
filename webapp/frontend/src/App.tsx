@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "./theme/ThemeContext";
 import RequireAuth from "./auth/RequireAuth";
 import Layout from "./routes/Layout";
-import Home from "./routes/Home";
+import RootRedirect from "./routes/RootRedirect";
 import Login from "./routes/Login";
 import Dashboard from "./routes/Dashboard";
 import Projects from "./routes/Projects";
@@ -34,8 +34,10 @@ function AppRoutes() {
     <BrowserRouter>
       <Routes>
         <Route element={<Layout />}>
-          {/* Public surfaces */}
-          <Route index element={<Home />} />
+          {/* No public marketing on this instance — qongsystems.com is hosted
+              elsewhere. Root `/` redirects: active session → /dashboard,
+              anon → /signin. RootRedirect waits for AuthContext to settle. */}
+          <Route index element={<RootRedirect />} />
           {/* React sign-in screen lives at /signin so /login can be a
               pure backend proxy passthrough to FastAPI without a route
               conflict with this SPA. */}

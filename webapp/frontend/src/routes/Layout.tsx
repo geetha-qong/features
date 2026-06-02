@@ -4,7 +4,9 @@ import { useAuth } from "../auth/AuthContext";
 import AccountMenu from "../components/AccountMenu";
 import BrandRow from "../components/BrandRow";
 
-const FULL_BLEED_EXACT = new Set(["/", "/signin"]);
+// `/` no longer renders any UI (RootRedirect bounces to /dashboard or /signin).
+// /signin is full-bleed (no app header) since the user hasn't picked a workspace yet.
+const FULL_BLEED_EXACT = new Set(["/signin"]);
 const FULL_BLEED_PATTERNS = [/^\/jobs\/[^/]+(\/review)?\/?$/];
 
 function isFullBleed(pathname: string): boolean {

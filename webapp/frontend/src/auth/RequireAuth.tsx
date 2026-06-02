@@ -12,7 +12,8 @@ import { useAuth } from "./AuthContext";
  *   - !user    → <Navigate replace to="/signin?next=<current-path>">
  *   - user     → <Outlet> (renders the child route).
  *
- * Public surfaces (marketing `/`, `/signin`) sit outside this guard.
+ * Public surface (`/signin`) sits outside this guard. Root `/` redirects
+ * via RootRedirect to /dashboard or /signin based on session.
  */
 export default function RequireAuth() {
   const { user, loading } = useAuth();
