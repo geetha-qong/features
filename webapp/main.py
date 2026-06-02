@@ -118,56 +118,11 @@ async def healthz():
     return JSONResponse(status, status_code=200 if status["status"] == "ok" else 503)
 
 
-# CORS for the tile endpoint — Label Studio loads tiles cross-origin (LS lives
-# at ls-{env}.qongsystems.com, webapp at dev/qa.qongsystems.com) and uses
-# canvas for bounding-box drawing, which requires CORS-clean image sources.
-# Tile images are non-sensitive (PID drawings, no auth data leaks via headers),
-# so allow * for the GET. Other webapp endpoints stay same-origin only.
-_TILE_CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-    # Long max-age on the preflight cache so LS doesn't preflight every tile.
-    "Access-Control-Max-Age": "86400",
-}
-
-
-@app.options("/jobs/{job_id}/tiles/{filename}", include_in_schema=False)
-async def serve_tile_preflight(job_id: int, filename: str):  # noqa: ARG001
-    return JSONResponse({}, headers=_TILE_CORS_HEADERS)
-
-
-@app.get("/jobs/{job_id}/tiles/{filename}")
-async def serve_tile(job_id: int, filename: str):
-    """Serve tile PNG images — used by Label Studio to load task images.
-
-    Cross-origin from LS (ls-dev.qongsystems.com) so CORS headers are
-    required for the browser to allow LS's canvas-based annotation tools
-    to draw on these images. Tile content is non-sensitive (PID drawings),
-    no auth data is embedded in headers, so * is the right allow-origin.
-    """
-    from fastapi import HTTPException
-    from webapp import models
-    from webapp.database import SessionLocal
-    db = SessionLocal()
-    try:
-        job = db.query(models.Job).filter(models.Job.id == job_id).first()
-    finally:
-        db.close()
-    if not job:
-        raise HTTPException(status_code=404, detail="Tile not found")
-    tile_path = get_job_dir(job) / "tmp" / filename
-    if not tile_path.exists() or tile_path.suffix != ".png":
-        raise HTTPException(status_code=404, detail="Tile not found")
-    # Setting headers via FileResponse's `headers=` kwarg was silently dropping
-    # the CORS keys (Starlette 0.x quirk where FileResponse calls
-    # `set_stat_headers()` after init_headers and the path through `setdefault`
-    # doesn't seem to land them on the wire for image/* media types). Setting
-    # them post-construction via `.headers[k]=v` is the reliable form.
-    resp = FileResponse(str(tile_path), media_type="image/png")
-    for k, v in _TILE_CORS_HEADERS.items():
-        resp.headers[k] = v
-    resp.headers["X-Tile-Debug"] = "served-by-serve_tile-v3"
-    return resp
+# The `/jobs/{job_id}/tiles/{filename}` route is in webapp/routers/jobs.py
+# (registered via app.include_router(jobs.router) earlier in this file).
+# We do NOT redefine it here — that handler was previously shadowed because
+# router registrations come before app.get(...) calls. The CORS headers for
+# LS live in the jobs.py router definition.
 
 
 # ── SPA static mount + catch-all ──────────────────────────────────────────────

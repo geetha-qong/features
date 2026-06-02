@@ -249,13 +249,37 @@ async def download_annotated_pdf(
     )
 
 
+# CORS for the tile endpoint — Label Studio loads tiles cross-origin from
+# ls-{env}.qongsystems.com → dev/qa.qongsystems.com and draws on them via
+# canvas (bounding-box tools), which requires CORS-clean image sources.
+# Tile content is non-sensitive (PID drawings), no auth state in headers,
+# so `*` is the right allow-origin. NOTE: this router's tile endpoint is the
+# one that actually fires (webapp.main also has a `serve_tile` but it's
+# registered AFTER this router so it's shadowed — see FEATURES TBD).
+_TILE_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Access-Control-Max-Age": "86400",
+}
+
+
+@router.options("/jobs/{job_id}/tiles/{filename}", include_in_schema=False)
+async def serve_tile_preflight(job_id: int, filename: str):  # noqa: ARG001
+    from fastapi.responses import JSONResponse
+    return JSONResponse({}, headers=_TILE_CORS_HEADERS)
+
+
 @router.get("/jobs/{job_id}/tiles/{filename}")
 async def serve_tile(
     job_id: int,
     filename: str,
     db: Session = Depends(get_db),
 ):
-    """Serve tile PNGs for Label Studio annotation — no auth (LS accesses directly)."""
+    """Serve tile PNGs for Label Studio annotation — no auth (LS accesses directly).
+
+    Returns CORS headers so LS at ls-dev.qongsystems.com can use the image
+    in its canvas-based annotation tools (cross-origin, allow-origin *).
+    """
     if not filename.endswith(".png"):
         raise HTTPException(status_code=400, detail="Only PNG tiles served here")
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
@@ -264,7 +288,12 @@ async def serve_tile(
     tile_path = get_job_dir(job) / "tmp" / filename
     if not tile_path.exists():
         raise HTTPException(status_code=404, detail="Tile not found")
-    return FileResponse(str(tile_path), media_type="image/png")
+    # Set headers post-construction — FileResponse's `headers=` kwarg
+    # silently drops custom keys for image/* media types in our Starlette.
+    resp = FileResponse(str(tile_path), media_type="image/png")
+    for k, v in _TILE_CORS_HEADERS.items():
+        resp.headers[k] = v
+    return resp
 
 
 @router.get("/jobs/{job_id}/download-inst-datasheets")
