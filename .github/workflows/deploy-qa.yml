@@ -9,8 +9,13 @@ name: Deploy → qa.qongsystems.com
 # any branch/tag/SHA (e.g., to ship a hotfix from a feature branch directly to
 # QA without merging to dev first).
 #
-# Required GitHub Secrets (same as deploy-dev.yml):
-#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY — github-actions-deploy IAM user.
+# Required GitHub Secrets:
+#   QA_AWS_ACCESS_KEY_ID, QA_AWS_SECRET_ACCESS_KEY — env-scoped secrets for
+#   the github-actions-deploy IAM user. Same IAM user as dev today (single
+#   user has perms on both EC2s), so you can paste the SAME access key
+#   values you used for DEV_AWS_*. Splitting the env name now lets us rotate
+#   per-env later (or split to separate IAM users) without touching the
+#   workflows.
 
 on:
   workflow_dispatch:
@@ -34,8 +39,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.QA_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.QA_AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Validate ref input
