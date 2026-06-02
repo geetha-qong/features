@@ -12,6 +12,7 @@ from webapp.routers import annotate as annotate_router
 from webapp.routers import api_v1 as api_v1_router
 from webapp.routers import api_v1_admin as api_v1_admin_router
 from webapp.routers import exports as exports_router
+from webapp.routers import entities as entities_router
 import webapp.deliverables  # noqa: F401 — populates generator registry
 from webapp.config import JOB_OUTPUT_DIR, get_job_dir
 from webapp.watchdog import start_watchdog
@@ -101,6 +102,7 @@ app.include_router(annotate_router.router)
 app.include_router(api_v1_router.router)
 app.include_router(api_v1_admin_router.router)
 app.include_router(exports_router.router)
+app.include_router(entities_router.router)
 
 
 @app.get("/healthz")

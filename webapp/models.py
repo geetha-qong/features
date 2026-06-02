@@ -1,6 +1,6 @@
 """ORM models: User, Job, ValveRow, Feedback."""
 from datetime import datetime
-from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, Float, ForeignKey, JSON
+from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, Float, ForeignKey, JSON, UniqueConstraint
 from webapp.database import Base
 
 
@@ -137,6 +137,47 @@ class BillingPlan(Base):
     is_active = Column(Boolean, default=True)
     stripe_price_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class EntityOverride(Base):
+    """A user edit to a single field of a single entity within a job's canonical output.
+
+    The deliverables subsystem is filesystem-first (`canonical.json` is the
+    pipeline-produced source of truth). Overrides live in the DB so we get
+    audit columns (edited_by, edited_at, prior_value) and concurrent-write
+    safety without filesystem races. Generators merge overrides on top of
+    `canonical.json` before emitting bytes — see
+    `webapp/deliverables/job_loader.load_canonical_with_overrides()`.
+
+    `field_name` uses dot notation matching `CanonicalEntity`'s shape:
+      - "tag"                    → top-level scalar
+      - "sub_class"              → top-level scalar
+      - "fields.size"            → key inside the `fields` dict
+      - "vendor_match.vendor_name" → key inside the `vendor_match` sub-model
+
+    Read-only fields (entity_id, entity_class, pid_number, sheet_number,
+    bbox) are rejected by the PATCH endpoint, not at the DB layer — the DB
+    will accept anything, the API enforces the allowlist.
+
+    The UNIQUE constraint gives "current value only" semantics: re-editing
+    overwrites the row, capturing the latest prior_value. Full audit history
+    (every prior value, not just one) is a future migration if needed —
+    drop the UNIQUE and add a superseded_at column.
+    """
+    __tablename__ = "entity_overrides"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
+    entity_id = Column(String, nullable=False)     # UUID as string — SQLite has no native UUID
+    field_name = Column(String, nullable=False)
+    new_value = Column(JSON, nullable=False)
+    prior_value = Column(JSON, nullable=True)
+    edited_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    edited_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "entity_id", "field_name", name="uq_entity_overrides_jef"),
+    )
 
 
 class UserFeedback(Base):

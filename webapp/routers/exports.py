@@ -11,10 +11,8 @@ from sqlalchemy.orm import Session
 from webapp import models
 from webapp.auth import get_current_user
 from webapp.database import get_db
-from webapp.deliverables.job_loader import (
-    JobCanonicalNotFound,
-    load_canonical_for_job,
-)
+from webapp.deliverables.job_loader import JobCanonicalNotFound
+from webapp.deliverables.overrides import load_canonical_with_overrides
 from webapp.deliverables.registry import REGISTRY, UnknownGenerator
 from webapp.deliverables.storage import store_export
 from webapp.deliverables.template_loader import TemplateLoader
@@ -56,7 +54,11 @@ def export_deliverable(
         raise HTTPException(status_code=404, detail=f"job {job_id} not found")
 
     try:
-        canonical = load_canonical_for_job(job.output_csv_path)
+        # Merged view: exports include user edits saved via the
+        # /api/v1/jobs/{id}/entities PATCH endpoint. Pre-edit raw canonical
+        # is still available via webapp.deliverables.job_loader.load_canonical_for_job
+        # for tooling that intentionally wants the unedited pipeline output.
+        canonical = load_canonical_with_overrides(job.output_csv_path, job.id, db)
     except JobCanonicalNotFound:
         raise HTTPException(
             status_code=404,
