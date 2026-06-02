@@ -1,29 +1,29 @@
-name: Deploy → dev.qongsystems.com
+name: Deploy → qa.qongsystems.com
 
-# Fires automatically when commits land on `dev`. Also exposes a manual
-# `workflow_dispatch` button in the GitHub UI for re-running a deploy without
-# pushing a new commit (e.g., after rotating a secret or restarting a service).
+# QA deploys are MANUAL by design — push to dev auto-deploys dev, but QA only
+# moves when a human clicks the "Run workflow" button (or triggers via gh CLI).
+# This lets stakeholders preview a dev commit on QA without the dev branch
+# being a moving target underneath them.
 #
-# Mechanism: AWS SSM RunCommand against the dev EC2. No SSH keys, no bastion,
-# no inbound port 22 — IAM perms are the only authorization boundary.
+# Default: deploys the current tip of `dev`. Override `ref` input to deploy
+# any branch/tag/SHA (e.g., to ship a hotfix from a feature branch directly to
+# QA without merging to dev first).
 #
-# Required GitHub Secrets:
-#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY — for the github-actions-deploy
-#   IAM user, scoped to ssm:SendCommand + ssm:GetCommandInvocation on the dev
-#   EC2 only.
-#
-# Replaces the legacy GCP-SSH workflow (decommissioned 2026-06-02 alongside
-# the GCP→AWS dev migration — see FEATURES #21).
+# Required GitHub Secrets (same as deploy-dev.yml):
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY — github-actions-deploy IAM user.
 
 on:
-  push:
-    branches: [dev]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or SHA to deploy to QA'
+        required: false
+        default: 'dev'
 
 env:
   AWS_REGION: ap-south-1
-  EC2_INSTANCE_ID: i-0e7b89bd91b67a291
-  HEALTH_URL: https://dev.qongsystems.com/healthz
+  EC2_INSTANCE_ID: i-04be6af1fb7929a0c
+  HEALTH_URL: https://qa.qongsystems.com/healthz
 
 jobs:
   deploy:
@@ -38,26 +38,43 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Validate ref input
+        # workflow_dispatch input flows into a shell-quoted JSON payload that
+        # becomes commands on the EC2 — without validation a compromised
+        # writer account could inject arbitrary shell. Restrict to characters
+        # legal in git refs.
+        env:
+          DEPLOY_REF: ${{ github.event.inputs.ref }}
+        run: |
+          if [[ ! "$DEPLOY_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "Invalid ref: '$DEPLOY_REF' — must match [A-Za-z0-9._/-]+"
+            exit 1
+          fi
+          echo "Ref validated: $DEPLOY_REF"
+
       - name: Send deploy command via SSM
         id: send
+        env:
+          DEPLOY_REF: ${{ github.event.inputs.ref }}
         run: |
           CMD_ID=$(aws ssm send-command \
             --instance-ids "$EC2_INSTANCE_ID" \
             --document-name AWS-RunShellScript \
-            --comment "deploy-dev GH Actions ${GITHUB_SHA:0:7}" \
+            --comment "deploy-qa GH Actions ref=${DEPLOY_REF}" \
             --cloud-watch-output-config CloudWatchOutputEnabled=true \
-            --parameters '{"commands":[
-              "set -e",
-              "cd /opt/qong",
-              "sudo -u ubuntu git fetch origin dev",
-              "sudo -u ubuntu git reset --hard origin/dev",
-              "sudo docker compose -f docker-compose.yml -f docker-compose.override.dev.yml --env-file .env.dev -p qong build web cpu-worker",
-              "sudo docker compose -f docker-compose.yml -f docker-compose.override.dev.yml --env-file .env.dev -p qong up -d web cpu-worker",
-              "sudo -u ubuntu git log -1 --format=%H"
-            ]}' \
+            --parameters "{\"commands\":[
+              \"set -e\",
+              \"cd /opt/qong\",
+              \"sudo -u ubuntu git fetch origin\",
+              \"sudo -u ubuntu git checkout ${DEPLOY_REF} || sudo -u ubuntu git checkout -B ${DEPLOY_REF} origin/${DEPLOY_REF}\",
+              \"sudo -u ubuntu git reset --hard origin/${DEPLOY_REF}\",
+              \"sudo docker compose -f docker-compose.yml -f docker-compose.override.qa.yml --env-file .env.qa -p qong build web cpu-worker\",
+              \"sudo docker compose -f docker-compose.yml -f docker-compose.override.qa.yml --env-file .env.qa -p qong up -d web cpu-worker\",
+              \"sudo -u ubuntu git log -1 --format=%H\"
+            ]}" \
             --query 'Command.CommandId' --output text)
           echo "command_id=$CMD_ID" >> $GITHUB_OUTPUT
-          echo "Started SSM command: $CMD_ID"
+          echo "Started SSM command: $CMD_ID (ref=$DEPLOY_REF)"
 
       - name: Wait for SSM command to complete
         run: |
