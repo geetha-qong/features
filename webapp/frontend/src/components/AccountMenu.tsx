@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Bell,
   CheckCircle2,
   ChevronRight,
-  Keyboard,
+  Key,
   LogOut,
+  MessageSquare,
   Moon,
   Sun,
   User as UserIcon,
@@ -128,14 +128,14 @@ export default function AccountMenu() {
               <span>Account</span>
               <ChevronRight size={12} strokeWidth={1.6} />
             </button>
-            <button className="settings-item">
-              <Keyboard size={14} strokeWidth={1.6} />
-              <span>Shortcuts</span>
+            <button className="settings-item" onClick={() => { setOpen(false); navigate("/account/api-keys"); }}>
+              <Key size={14} strokeWidth={1.6} />
+              <span>API Keys</span>
               <ChevronRight size={12} strokeWidth={1.6} />
             </button>
-            <button className="settings-item">
-              <Bell size={14} strokeWidth={1.6} />
-              <span>Notifications</span>
+            <button className="settings-item" onClick={() => { setOpen(false); navigate("/feedback"); }}>
+              <MessageSquare size={14} strokeWidth={1.6} />
+              <span>Send feedback</span>
               <ChevronRight size={12} strokeWidth={1.6} />
             </button>
           </div>

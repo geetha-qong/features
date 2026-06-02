@@ -4,20 +4,24 @@ Auth: Bearer qk_... (API key) OR cookie JWT — both accepted on every endpoint.
 """
 import json
 import os
+import secrets as _secrets
 import shutil
 import uuid
 from datetime import datetime
+from typing import Optional
+from urllib.parse import urlparse
 
 _GPU_CALLBACK_SECRET = os.environ.get("GPU_CALLBACK_SECRET", "")
 
 import fitz  # PyMuPDF — page count for credit pre-flight
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from webapp import credits as credits_module
 from webapp import models
-from webapp.auth import get_user_from_api_key, get_current_user
+from webapp.auth import get_current_user, get_user_from_api_key, pwd_context
 from webapp.config import JOB_OUTPUT_DIR, get_job_dir, get_user_upload_dir
 from webapp.database import get_db
 from webapp.queue import get_cpu_queue
@@ -367,6 +371,223 @@ async def api_account(
         "credits_remaining": credits_module.get_balance(current_user),
         "tier": current_user.tier or "trial",
         "role": current_user.role or "user",
+    }
+
+
+# ── GET /api/v1/account/transactions ─────────────────────────────────────────
+
+@router.get("/account/transactions")
+async def api_account_transactions(
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+    limit: int = 20,
+):
+    """Return the current user's recent credit transactions (newest first)."""
+    rows = (
+        db.query(models.CreditTransaction)
+        .filter(models.CreditTransaction.user_id == current_user.id)
+        .order_by(models.CreditTransaction.created_at.desc())
+        .limit(min(max(limit, 1), 100))
+        .all()
+    )
+    return {
+        "transactions": [
+            {
+                "id": r.id,
+                "delta": r.delta,
+                "balance_after": r.balance_after,
+                "reason": r.reason,
+                "job_id": r.job_id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+# ── /api/v1/account/api-keys (list, create, revoke) ──────────────────────────
+
+@router.get("/account/api-keys")
+async def api_account_list_api_keys(
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+):
+    """List the current user's non-revoked API keys."""
+    keys = (
+        db.query(models.ApiKey)
+        .filter(
+            models.ApiKey.user_id == current_user.id,
+            models.ApiKey.revoked_at.is_(None),
+        )
+        .order_by(models.ApiKey.created_at.desc())
+        .all()
+    )
+    return {
+        "keys": [
+            {
+                "id": k.id,
+                "name": k.name,
+                "key_prefix": k.key_prefix,
+                "created_at": k.created_at.isoformat() if k.created_at else None,
+                "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+            }
+            for k in keys
+        ]
+    }
+
+
+class CreateApiKeyBody(BaseModel):
+    name: str = "Default"
+
+
+@router.post("/account/api-keys", status_code=201)
+async def api_account_create_api_key(
+    body: CreateApiKeyBody,
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+):
+    # SECURITY: the plaintext `key` is returned ONCE in this response body.
+    # DB stores only the bcrypt hash + the 8-char prefix. SPA must reveal-and-
+    # discard; do NOT log this value anywhere.
+    name = (body.name or "").strip() or "Default"
+    name = name[:64]
+
+    random_part = _secrets.token_hex(16)  # 32 hex chars
+    full_key = f"qk_{random_part}"
+    prefix = full_key[:8]
+    key_hash = pwd_context.hash(full_key)
+
+    api_key = models.ApiKey(
+        user_id=current_user.id,
+        name=name,
+        key_prefix=prefix,
+        key_hash=key_hash,
+    )
+    db.add(api_key)
+    db.commit()
+    db.refresh(api_key)
+    return {
+        "id": api_key.id,
+        "name": api_key.name,
+        "key_prefix": api_key.key_prefix,
+        "key": full_key,
+        "created_at": api_key.created_at.isoformat() if api_key.created_at else None,
+    }
+
+
+@router.delete("/account/api-keys/{key_id}", status_code=204)
+async def api_account_revoke_api_key(
+    key_id: int,
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+):
+    api_key = (
+        db.query(models.ApiKey)
+        .filter(
+            models.ApiKey.id == key_id,
+            models.ApiKey.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not api_key:
+        raise HTTPException(status_code=404, detail="Key not found")
+    api_key.revoked_at = datetime.utcnow()
+    db.commit()
+    return None
+
+
+# ── GET /api/v1/account/billing ──────────────────────────────────────────────
+
+@router.get("/account/billing")
+async def api_account_billing(
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+):
+    plans = (
+        db.query(models.BillingPlan)
+        .filter(models.BillingPlan.is_active == True)  # noqa: E712 — SQLAlchemy filter
+        .order_by(models.BillingPlan.price_usd_cents)
+        .all()
+    )
+    return {
+        "balance": credits_module.get_balance(current_user),
+        "tier": current_user.tier or "trial",
+        "plans": [
+            {
+                "id": p.id,
+                "name": p.name,
+                "credits": p.credits,
+                "price_usd_cents": p.price_usd_cents,
+                "stripe_price_id": p.stripe_price_id,
+            }
+            for p in plans
+        ],
+    }
+
+
+# ── POST /api/v1/feedback (anonymous allowed) ────────────────────────────────
+
+class FeedbackBody(BaseModel):
+    category: str
+    subject: str
+    message: str
+    page_url: Optional[str] = None
+
+
+@router.post("/feedback", status_code=201)
+async def api_feedback_submit(
+    body: FeedbackBody,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Submit user feedback. Anonymous submissions allowed (user_id NULL)."""
+    # Try cookie → API key → anonymous, in that order.
+    user_id: Optional[int] = None
+    user = await get_user_from_api_key(request, db)
+    if user is None:
+        try:
+            user = get_current_user(request, db)
+        except HTTPException:
+            user = None
+    if user is not None:
+        user_id = user.id
+
+    category = body.category if body.category in ("bug", "feature", "pricing", "other") else "other"
+    subject = (body.subject or "").strip()
+    message = (body.message or "").strip()
+    if not subject or not message:
+        raise HTTPException(status_code=400, detail="Subject and message are required")
+
+    # SECURITY: page_url is rendered as href in /admin/feedback. We allow-list
+    # http(s) URLs only — javascript:, data:, vbscript: are silently dropped so
+    # the rendered href can never execute in the admin's origin. Mirror the
+    # pre-existing Jinja /feedback POST sanitisation (was webapp/routers/account.py).
+    cleaned_url: Optional[str] = None
+    raw_url = (body.page_url or "").strip()[:500]
+    if raw_url:
+        try:
+            parsed = urlparse(raw_url)
+        except ValueError:
+            parsed = None
+        if parsed and parsed.scheme.lower() in ("http", "https") and parsed.netloc:
+            cleaned_url = raw_url
+
+    item = models.UserFeedback(
+        user_id=user_id,
+        category=category,
+        subject=subject[:255],
+        message=message,
+        page_url=cleaned_url,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    return {
+        "id": item.id,
+        "category": item.category,
+        "subject": item.subject,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
     }
 
 

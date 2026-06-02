@@ -84,7 +84,7 @@ export default function CreateProjectModal({ open, onClose, onCreated }: CreateP
         }
         if (res.status === 402) {
           throw new Error(
-            "Not enough credits to process this PDF. Visit /account/billing or contact admin.",
+            "Not enough credits to process this PDF. Visit /account or contact admin.",
           );
         }
         if (res.status === 422) {

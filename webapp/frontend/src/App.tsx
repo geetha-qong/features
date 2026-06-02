@@ -9,6 +9,9 @@ import Projects from "./routes/Projects";
 import ProjectDetail from "./routes/ProjectDetail";
 import JobDetail from "./routes/JobDetail";
 import ReviewCanvas from "./routes/ReviewCanvas";
+import Account from "./routes/Account";
+import AccountApiKeys from "./routes/AccountApiKeys";
+import Feedback from "./routes/Feedback";
 import NotFound from "./routes/NotFound";
 import AdminLayout from "./admin/AdminLayout";
 import AdminUsers from "./admin/AdminUsers";
@@ -46,6 +49,9 @@ function AppRoutes() {
             <Route path="projects/:projectId" element={<ProjectDetail />} />
             <Route path="jobs/:jobId" element={<JobDetail />} />
             <Route path="jobs/:jobId/review" element={<ReviewCanvas />} />
+            <Route path="account" element={<Account />} />
+            <Route path="account/api-keys" element={<AccountApiKeys />} />
+            <Route path="feedback" element={<Feedback />} />
             <Route path="admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
               <Route path="dashboard" element={<AdminDashboard />} />

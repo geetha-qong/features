@@ -9,7 +9,6 @@ from fastapi.staticfiles import StaticFiles
 from webapp.database import Base, engine, run_migrations, SessionLocal
 from webapp.routers import auth, jobs, feedback
 from webapp.routers import annotate as annotate_router
-from webapp.routers import account as account_router
 from webapp.routers import api_v1 as api_v1_router
 from webapp.routers import api_v1_admin as api_v1_admin_router
 from webapp.routers import exports as exports_router
@@ -99,7 +98,6 @@ app.include_router(auth.router)
 app.include_router(jobs.router)
 app.include_router(feedback.router)
 app.include_router(annotate_router.router)
-app.include_router(account_router.router)
 app.include_router(api_v1_router.router)
 app.include_router(api_v1_admin_router.router)
 app.include_router(exports_router.router)

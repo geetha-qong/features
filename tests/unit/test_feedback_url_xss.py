@@ -1,11 +1,14 @@
-"""Regression tests for the /feedback page_url XSS fix.
+"""Regression tests for the POST /api/v1/feedback page_url XSS fix.
 
 Locks in the security fix that scrubs non-http(s) URLs at submission time
-(and as defense-in-depth at render time in admin/feedback.html). Without
+(and as defense-in-depth at render time in the admin/feedback SPA). Without
 these, an unauthenticated attacker could submit `page_url=javascript:...`
 and execute JS in the admin origin when the admin clicks the link in the
 Feedback Inbox — escalating to super_admin via cookie-auth admin endpoints
 (no CSRF token exists on those POSTs).
+
+Migrated 2026-06-02 from the legacy Jinja /feedback form (deleted with the
+Jinja->SPA sweep, FEATURES #19). The endpoint is now JSON-only.
 """
 import os
 import sys
@@ -47,8 +50,8 @@ def client(db_session):
 
 def _submit(client, page_url):
     return client.post(
-        "/feedback",
-        data={
+        "/api/v1/feedback",
+        json={
             "category": "bug",
             "subject": "test",
             "message": "test",
@@ -72,7 +75,7 @@ def _submit(client, page_url):
 def test_hostile_page_url_is_dropped(client, db_session, hostile):
     """SECURITY: any non-http(s) scheme must NOT be persisted to the DB."""
     resp = _submit(client, hostile)
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     item = db_session.query(models.UserFeedback).one()
     assert item.page_url is None, (
         f"hostile URL {hostile!r} was stored as {item.page_url!r}; "
@@ -87,13 +90,13 @@ def test_hostile_page_url_is_dropped(client, db_session, hostile):
 ])
 def test_legitimate_page_url_is_kept(client, db_session, ok):
     resp = _submit(client, ok)
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     item = db_session.query(models.UserFeedback).one()
     assert item.page_url == ok
 
 
 def test_empty_page_url_is_none(client, db_session):
     resp = _submit(client, "")
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     item = db_session.query(models.UserFeedback).one()
     assert item.page_url is None
