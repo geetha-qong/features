@@ -157,10 +157,31 @@ app.mount(
 
 @app.get("/{full_path:path}", include_in_schema=False)
 async def spa_fallback(full_path: str):
-    """Serve dist/index.html for any unmatched GET so React Router can handle
-    SPA navigation (refresh on /admin/users, /jobs/123, etc.). API and explicit
-    routes registered above this point win because FastAPI matches in order.
+    """Serve real dist/ files (favicon.svg, robots.txt, etc.) directly, and
+    fall back to dist/index.html for any other GET so React Router can handle
+    SPA navigation (refresh on /admin/users, /jobs/123, etc.). API and
+    explicit routes registered above this point win because FastAPI matches
+    in order.
+
+    The `try_files`-style dist-root passthrough was added 2026-06-02 — the
+    favicon work surfaced that anything at dist root (not under /assets/) was
+    being served as index.html. With this passthrough, Vite's public/ files
+    get the right Content-Type automatically.
     """
+    if full_path:
+        # Path traversal guard: resolve the candidate and ensure it stays
+        # inside _SPA_DIST. Without this, e.g. `/../etc/passwd` would escape.
+        dist_root = _SPA_DIST.resolve()
+        try:
+            candidate = (_SPA_DIST / full_path).resolve()
+            candidate.relative_to(dist_root)
+        except (ValueError, OSError):
+            candidate = None
+        if candidate is not None and candidate.is_file():
+            # FileResponse auto-detects MIME type from the extension. .svg →
+            # image/svg+xml, .png → image/png, .txt → text/plain, etc.
+            return FileResponse(str(candidate))
+
     index = _SPA_DIST / "index.html"
     if index.exists():
         return FileResponse(str(index), media_type="text/html")
