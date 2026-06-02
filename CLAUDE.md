@@ -62,8 +62,25 @@ docker compose exec web python3 -m pytest tests/unit/ -v      # run unit tests
 ## VM access (production troubleshooting)
 
 - SSH via IAP (plain port 22 is firewalled): `gcloud compute ssh qong-dev-server --zone=asia-southeast1-c --tunnel-through-iap --command="..."` — works because gcloud is authed as `theqongglobal@gmail.com`. Same `--tunnel-through-iap` flag on `gcloud compute scp`.
+- **GCP VMs (dev/intake) stopped 2026-06-02** post-AWS-cutover (FEATURES #21). To restart for rollback: `gcloud compute instances start qong-dev-server --zone=asia-southeast1-c` (new ephemeral IP) + flip Cloudflare A-record. Disks + daily snapshots + GCS retained until Phase 4 (7-day soak).
+- **Don't use `gcloud compute scp --tunnel-through-iap` for files > ~50 MB** — IAP throttles to ~0.3 MB/s and stalls. Route via GCS instead (`gcloud storage cp` from VM hits ~128 MB/s), then pull GCS → local at ~16 MB/s.
+- **EC2 access is SSM Session Manager only** (no public 22, no key pair). `aws ssm start-session --target i-xxx --region ap-south-1 --profile tnbqong`, or `aws ssm send-command` for non-interactive scripts. Both EC2s share IAM `may26-ec2-ssm-role`.
+- **EC2 deploy-key remote URL must use the `qong-product` SSH alias**, not bare `git@github.com:`. If `git pull` fails silently with "Permission denied (publickey)" on a freshly-provisioned EC2: `git remote set-url origin git@qong-product:Qong-Systems/qong_product.git`. One-time fix per VM.
+- **SSM RunCommand runs as root** but `/opt/qong` is ubuntu-owned, so `git` aborts ("dubious ownership"). Fix once: `sudo git config --system --add safe.directory /opt/qong`.
+- **`aws ssm get-command-invocation` truncates stdout at ~24 KB.** For long bootstraps (docker build + restore + start), split into multiple commands, or run separate state-probe queries after the fact.
+- **EC2 can't reach its own public IP** (no hairpin NAT). Inside-VM smoke checks use 127.0.0.1 with `-H "Host: dev.qongsystems.com"`.
 - Query production DB from VM: `psql -U postgres` fails (role doesn't exist). Use the ORM via the web container: `sudo docker compose exec -T web python3 -c "from webapp.database import SessionLocal; from webapp.models import Job; s=SessionLocal(); print(s.get(Job, 41).output_csv_path)"`. Avoid f-strings inside `-c` (quoting hell — use `print(label, value)` with `,` separator).
 - Job artifact paths: jobs ≥ 40 use org-scoped `/app/job_outputs/{org_id}/{job_id}/`; jobs ≤ 39 use flat `/app/job_outputs/{job_id}/`. Always read the exact path from `Job.output_csv_path` / `output_annotated_pdf_path` in the DB rather than guessing.
+
+## AWS inventory (as of 2026-06-02 — see FEATURES #21)
+
+- **Account:** 449901518037 (`tnbqong` profile). All resources in `ap-south-1`.
+- **QA:** EC2 `i-04be6af1fb7929a0c` at `43.205.96.86`, data EBS `vol-06bdf1fab12bd2971`. URL https://qa.qongsystems.com.
+- **Dev:** EC2 `i-0e7b89bd91b67a291` at EIP `13.204.52.248`, data EBS `vol-00152abd9fa8f1bf8` at `/mnt/qong-data`. URL https://dev.qongsystems.com. EIP is free while attached.
+- **SSM secrets:** `/may26aws/qong-qa/*` (7 params), `/may26aws/qong-dev/*` (7 params), `/may26aws/hermes-agent/openrouter/key` (sibling workload). Always ap-south-1, never us-east-1.
+- **S3:** `qong-pid-archive-2026-06-02` (~1 GB, AES256, versioned) — pre-migration PID backup. Bucket policy grants read to `may26-ec2-ssm-role`.
+- **IAM role:** `may26-ec2-ssm-role` (shared by both EC2s). Has SSM + KMS; per-bucket S3 grants via bucket policy.
+- **nginx config on each host:** `/etc/nginx/sites-available/qong-{qa,dev}` + cert at `/etc/ssl/qong-{qa,dev}/origin.{crt,key}` + CF IP allowlist `/etc/nginx/cloudflare-ips.conf`. Default_server returns 301 to canonical hostname (not the prior 444 drop).
 
 ## CRITICAL: Two-Mode Architecture — Do NOT Mix
 
@@ -87,6 +104,13 @@ If someone changes this by mistake, revert it immediately. The offline detector 
 - OpenRouter API: `OPENROUTER_API_KEY` env var required (not Anthropic directly)
 - Default model: `google/gemini-2.0-flash-001` (fast); override via `OPENROUTER_MODEL`
 - Temp files → `tmp/` per job in `job_outputs/{org_id}/{job_id}/tmp/` (jobs ≥ 40) or `job_outputs/{job_id}/tmp/` (jobs ≤ 39); never commit. Also never commit `webapp.db`, `uploads/`, `job_outputs/`.
+- **Generated secrets must not contain `$`** (use `openssl rand -hex N` — alphanumeric only). Docker Compose treats `$wrv` inside a `.env` value as `${wrv}` and silently substitutes empty, truncating the secret. If a `$`-containing SSM value gets rendered into `.env.*`, escape `$ → $$` (Compose decodes `$$` as literal `$`). Real bug we hit on QA — FEATURES #19.
+- **Ubuntu 24.04 dropped `awscli` from apt.** Install via the AWS CLI v2 zip: `curl -sS https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/a.zip && unzip -q /tmp/a.zip -d /tmp/ && sudo /tmp/aws/install`.
+- **EBS `/dev/sdf` shows up as `/dev/nvme1n1` on Nitro instances.** Don't parse `lsblk` columns (empty MOUNTPOINT trips up awk); hardcode the device path and verify with `blockdev --getsize64`.
+- **AWS Security Group descriptions reject non-ASCII** (em-dash, smart quotes). ASCII only or the API returns `InvalidParameterValue`.
+- **`may26-ec2-ssm-role` has SSM + KMS perms but NOT S3 by default.** New buckets need a bucket policy granting `s3:GetObject` + `s3:ListBucket` to `arn:aws:iam::449901518037:role/may26-ec2-ssm-role`. Identity policy is shared with other workloads; prefer bucket policy.
+- **`pg_dumpall` includes `ALTER ROLE … WITH PASSWORD`** that overwrites the target's role password to the source value. After restoring into a fresh env with different SSM-generated creds, run `ALTER ROLE <user> WITH PASSWORD '<.env value>'` to re-sync, or webapp can't auth.
+- **`qongsystems.com` Cloudflare zone is "Full (Strict)" SSL mode.** Any new origin MUST present a valid TLS cert on 443 or CF returns 521. Copy the CF Origin Cert (`*.qongsystems.com` SAN) + key from QA via SSM; cert lives at `/etc/ssl/qong-{env}/origin.{crt,key}` on each host.
 
 ## Repo
 
