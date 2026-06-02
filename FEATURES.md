@@ -24,6 +24,62 @@
 
 ---
 
+## [2026-06-02] #21 — AWS migration Phases 1-3: dev moved from GCP to AWS; DNS cut over
+
+**Type:** infra
+**Stage:** infra
+**Status:** shipped
+
+**Why:** Continuation of FEATURES #20 (Phase 0 backup). User authorised "if we got the dev backup, go and finish all phases and validate on aws. give me new IP, i will change on cloudflare and we will mark this migration as complete". Since dev has no real customers and the QA pattern was already proven over the prior 2 days, this was an autonomous straight-line build + cutover.
+
+**What:** dev.qongsystems.com now runs on AWS, mirroring the QA pattern in ap-south-1.
+
+**Phase 1 — Provision AWS dev:**
+- Security Group `sg-0ad6bfa98b1e06969` (`qong-dev-web`): tcp/443 + tcp/80 from 0.0.0.0/0 (CF allowlist enforced at nginx, not SG).
+- Elastic IP `13.204.52.248` allocated + associated → stable IP for Cloudflare A-record across EC2 restarts. Free while attached.
+- EC2 `i-0e7b89bd91b67a291` (`qong-dev-server`): t3.medium, AMI `ami-0c54f8b78468b2ba2` (same as QA), `subnet-0eecf25001fad5cc9` in `ap-south-1a`, IAM `may26-ec2-ssm-role`, no key pair (SSM-only access), IMDSv2 required.
+- 30 GB encrypted gp3 root + 50 GB encrypted gp3 data EBS (`vol-00152abd9fa8f1bf8`) attached as `/dev/sdf`, formatted ext4, mounted at `/mnt/qong-data` via UUID-pinned fstab entry.
+- 7 SSM SecureString params under `/may26aws/qong-dev/`: `openrouter-api-key` (reuses the QA value), `secret-key`, `ls-api-key`, `postgres-password`, `redis-password`, `minio-root-user`, `minio-root-password`. All freshly generated with `openssl rand -hex` — guaranteed alphanumeric only, so no shell-special-char surprises like the `$wrv` SECRET_KEY corruption that FEATURES #19 documented for QA.
+
+**Phase 1B — VM bootstrap (via SSM RunCommand):**
+- apt installed docker.io, docker-compose-v2, git, jq, python3-boto3, unzip, curl
+- AWS CLI v2 installed via the official `awscli-exe-linux-x86_64.zip` (Ubuntu 24.04 dropped `awscli` from apt — fix added)
+- Reused QA's `qong-deploy` SSH key + ssh config via SSM-fetch from QA, base64-piped to dev. Both EC2s now share the same GitHub deploy key (acceptable for dev/QA scope; dev-only or QA-only rotation is a future option).
+- Repo cloned at `c7a8928` (`feature/digital-twin`) to `/opt/qong` (owned by ubuntu).
+- `git config --system --add safe.directory /opt/qong` so SSM RunCommand (running as root) can operate on the repo without "dubious ownership" errors.
+- `.env.dev` rendered from SSM via a Python script that fetches all 7 params with `boto3.client("ssm").get_parameters_by_path`, then escapes `$` → `$$` for Compose interpolation safety. The full file is written to `/opt/qong/.env.dev` with mode 600.
+- `docker-compose.override.dev.yml` written: web binds to `127.0.0.1:8000` (not host 80), data volumes point at `/mnt/qong-data/{uploads,job_outputs,postgres,minio}`, disables `nginx`/`label-studio-mcp`/`trainer` services with `profiles: [disabled]`.
+
+**Phase 2 — Storage cutover (GCS → S3, restore from archive):**
+- The dev EC2 role couldn't read the new archive bucket out of the box; added a bucket policy on `qong-pid-archive-2026-06-02` granting `s3:GetObject` + `s3:ListBucket` to `arn:aws:iam::449901518037:role/may26-ec2-ssm-role`. Identity-policy-on-shared-IAM-role left untouched.
+- Restore sequence on the new EC2:
+  1. `docker compose build web` with `BUILD_ID=$(git rev-parse --short HEAD)` baked into `__QONG_BUILD__` via the Vite define (FEATURES #19 queue-item B mechanism).
+  2. `up -d postgres redis`, wait for `pg_isready`.
+  3. `aws s3 cp s3://.../db-dumps/qong-dev-postgres-2026-06-02.sql` → `psql -U qong -d postgres -v ON_ERROR_STOP=0 < dump.sql`. Errors about pre-existing `qong` role and `qong` database are expected and ignored; data tables load into the qong DB. Verified: **8 users, 43 jobs, 706 valve_rows** — exact match with the GCP source.
+  4. `aws s3 cp s3://.../vm-tarballs/qong-vm-data-2026-06-02.tar.gz` → `tar xzf -C /mnt/qong-data`. Verified: **44 PDFs in /mnt/qong-data/uploads** (matches the freshest VM-disk count, +4 over GCS qong-backups).
+  5. `up -d --no-build web minio label-studio cpu-worker`.
+- **Bug surfaced + fixed:** After the pg_dumpall restore, the `qong` role's password was reset to the **GCP value** (from the dump's `ALTER ROLE ... WITH ENCRYPTED PASSWORD ...` line), which no longer matched the freshly-generated SSM password in `.env.dev`. Web crashed in a loop with `psycopg2.OperationalError: password authentication failed for user "qong"`. Fixed: `ALTER ROLE qong WITH PASSWORD '<ssm-value>'` from a `psql -U qong` connection. Web recovered immediately on restart. **Lesson: pg_dumpall's ALTER ROLE statements overwrite role passwords on the target — restore order matters when the new env has fresh credentials. Either restore *before* changing the password, or run an ALTER ROLE re-sync after.**
+
+**Phase 3 — TLS + DNS cutover:**
+- Host nginx 1.24 installed on dev EC2. Cloudflare Origin Certificate + private key + `cloudflare-ips.conf` copied verbatim from QA via SSM (cert covers `*.qongsystems.com` so it works for both subdomains). nginx site `qong-dev` configured identically to QA's `qong-qa` (TLS termination on 443, CF IP allowlist via `include` + `deny all`, `proxy_pass http://127.0.0.1:8000`, `client_max_body_size 100M`, websocket + long-poll headers, 600s read timeout for PDF endpoints).
+- docker `web` rebound from `0.0.0.0:80:8000` → `127.0.0.1:8000:8000` (host nginx now fronts it).
+- User updated the Cloudflare A-record for `dev.qongsystems.com` → `13.204.52.248`.
+- Validation: `curl https://dev.qongsystems.com/healthz` → **HTTP 200** through CF edge → CF Full (Strict) → origin TLS (CF Origin Cert) → nginx → docker web → FastAPI. Direct origin probe with non-CF IP returns 403 (nginx allowlist working).
+
+**Result:**
+- dev.qongsystems.com live on AWS with same security posture as QA (CF Full Strict, allowlist, AES256 SSM secrets, no SSH ingress).
+- GCP `qong-dev-server` still running but unused for traffic. 7-day soak begins; decommission tracked as Phase 4 (FEATURES TBD).
+- Cost: ~$36/mo running (t3.medium + 30 GB root + 50 GB data + EIP free while attached) + the ~$0.06/mo archive bucket from #20. QA continues at its own ~$36/mo. Total: ~$72/mo AWS + decaying GCP cost until #20 Phase 4.
+
+**Notes:**
+- *Many small footguns surfaced and were fixed in-line.* In rough order: SG description rejected unicode em-dash; bash `set -e` didn't trigger on a failed run-instances captured into `EC2=$(...)`; the wrong instance ID was looked up via a stray `Reservations[0]` query (turned out to be `may26-ollama`, harmlessly); `awscli` no longer in apt on 24.04; `lsblk` awk column counting was wrong for empty MOUNTPOINT; `git` refused root operations on ubuntu-owned `/opt/qong`; SSM RunCommand stdout truncates at ~24KB (lost the tail of the long bootstrap output); `may26-ec2-ssm-role` lacked S3 perms for the new archive bucket; pg_dumpall ALTER ROLE overwrote password; CF Full Strict needs origin TLS not HTTP. All resolved within this session.
+- *Repo deploy key shared with QA.* Both EC2s use the same `qong-deploy` private key for `git@qong-product:Qong-Systems/qong_product.git`. Acceptable for dev+QA scope. Rotation would require regenerating + adding both as separate GitHub deploy keys, or moving to a deploy token; deferred.
+- *cpu-worker reported "already exists" image conflict* during `up -d` but the container is running fine. Investigated only briefly — likely a docker buildx parallel-build noise that doesn't affect runtime. Tracked as a low-priority follow-up.
+- *Port 80 still open in the SG* — used during bootstrap before nginx took 443; should be closed before any real users. Tracked in queue items.
+- *GCP rollback path intact:* the original `qong-dev-server` VM is still running on GCP. To roll back: change Cloudflare A-record back to `34.126.93.103` (the GCP IP). The dump-restore on AWS doesn't mutate GCP at all. The 7-day soak window is conservative; could shorten if comfortable.
+
+---
+
 ## [2026-06-02] #20 — AWS migration Phase 0: full GCP PID-doc backup to S3 (3-way redundancy)
 
 **Type:** infra | decision
