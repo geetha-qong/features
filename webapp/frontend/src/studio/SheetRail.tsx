@@ -40,7 +40,11 @@ export default function SheetRail({
     <aside className="sheet-rail">
       <div className="rail-head">
         <span className="lbl">Sheets</span>
-        <span className="cnt">{sheets.length}</span>
+        {/* Show the count of what's actually rendered (real backend tiles
+            when available, otherwise the prototype `sheets`). Previously this
+            was hardcoded to sheets.length, which under-counted by the diff
+            when realSheets had more entries. */}
+        <span className="cnt">{renderSheets.length}</span>
       </div>
       <div className="rail-search">
         <Search size={13} strokeWidth={1.6} />

@@ -113,7 +113,24 @@ export default function Studio({ project, userName, onBack }: Props) {
     };
   }, []);
 
-  const current = sheets[activeSheet];
+  // When the backend returns more sheets than the prototype-builder produced
+  // (e.g. a job with 9 detected tiles vs `buildSheets` returning 8), clicking
+  // the extra tile would set activeSheet beyond `sheets.length`, leaving
+  // `sheets[activeSheet]` undefined — StudioTopBar then crashes on
+  // `currentSheet.name` and the whole tree unmounts (white page). Synthesise
+  // a Sheet from the real-sheet metadata as a fallback. Last-resort: first
+  // sheet so this can never be undefined.
+  const current =
+    sheets[activeSheet] ??
+    (realSheets && realSheets[activeSheet]
+      ? {
+          id: realSheets[activeSheet].id,
+          name: realSheets[activeSheet].label,
+          label: realSheets[activeSheet].label,
+          status: "ok" as const,
+          issues: 0,
+        }
+      : sheets[0]);
   const totalIssues = sheets.reduce((s, x) => s + (x.issues || 0), 0);
   const sel = DEMO_ELEMENT_DATA[selectedId] || DEMO_ELEMENT_DATA["PV-203"];
   const hasDatasheet = DATASHEET_TYPES.has(sel.type);
