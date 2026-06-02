@@ -166,6 +166,7 @@ async def serve_tile(job_id: int, filename: str):
     resp = FileResponse(str(tile_path), media_type="image/png")
     for k, v in _TILE_CORS_HEADERS.items():
         resp.headers[k] = v
+    resp.headers["X-Tile-Debug"] = "served-by-serve_tile-v3"
     return resp
 
 
