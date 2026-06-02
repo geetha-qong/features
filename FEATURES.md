@@ -24,6 +24,54 @@
 
 ---
 
+## [2026-06-02] #20 — AWS migration Phase 0: full GCP PID-doc backup to S3 (3-way redundancy)
+
+**Type:** infra | decision
+**Stage:** infra
+**Status:** shipped
+
+**Why:** User asked to move the `dev` environment from GCP to AWS (consolidating to the same `tnbqong` AWS account that already hosts QA), plus migrate GCP Cloud Storage to S3. Explicit prerequisite: "before that make sure, we have save all our PID docs. so we can begin with those PID on new AWS server." This entry covers Phase 0 only — the pre-migration safety backup. Phases 1-4 (provision AWS dev, migrate storage, cutover DNS, decommission GCP) are tracked in SESSION_STATE queue items and will get their own FEATURES entries when shipped.
+
+**What:** Inventoried the GCP env, then created a 3-way-redundant backup of every PID-related byte before touching anything on the source.
+
+GCP source state at backup time:
+- VM `qong-dev-server` (e2-standard-2 + 50 GB disk, asia-southeast1-c) serving https://dev.qongsystems.com — Postgres `qong` DB has **8 users, 43 jobs, 706 valve rows**.
+- VM `qong-intake-server` (e2-small + 20 GB) — separate intake service.
+- GCS `gs://qong-backups/` — 502 MB across `uploads/` (40 PDFs, 34 MB), `job_outputs/` (2,892 files, 423 MB), `models/` (45 MB), `postgres/` (59 KB legacy dump).
+- GCS `gs://qong-intake-data/` — 37 MB, 3 PDFs from the intake server.
+- AWS S3 in `449901518037` had **zero buckets** — clean slate.
+
+**Important finding during inventory:** the VM's `/app/qong_poc/uploads/` (44 PDFs, 39 MB) and `/app/qong_poc/job_outputs/` (3,089 files, 837 MB) **contain more data than the GCS qong-backups bucket** (+4 PDFs, +197 files, ~+414 MB). The GCS bucket is a partial historical archive, not a complete mirror. Without the VM tarball below, those newest files would only exist on the VM disk (and the daily disk snapshots).
+
+3-way redundancy achieved:
+
+1. **Fresh GCP disk snapshot** — `qong-dev-server-pre-aws-cutover-20260602-151219` (50 GB logical, 28.9 GB storage). Captures the entire `/app/qong_poc/` tree plus docker volumes (postgres, minio, label_studio) at the moment of the migration kickoff. Restore path: create a new disk from this snapshot, mount, extract whatever's needed.
+
+2. **GCS unchanged** — both buckets left intact for now; will be deleted in Phase 4 only after the AWS dev environment has been validated for 7+ days.
+
+3. **New S3 archive** — `s3://qong-pid-archive-2026-06-02` in `ap-south-1`, AES256 (SSE-S3), versioning enabled, public access blocked. Contents:
+   - `MANIFEST.json` — full inventory with SHA256s, sizes, restore instructions
+   - `db-dumps/qong-dev-postgres-2026-06-02.sql` — 10.5 MB `pg_dumpall` (databases: `qong`, `label_studio`, `postgres`; source user `qong`); SHA256 `6f3027b5b37b3519792a3807f0b6a7347a5d1ae3ee12fd7e52065daa521d28aa`
+   - `vm-tarballs/qong-vm-data-2026-06-02.tar.gz` — 531 MB gzipped tar of `uploads/` + `job_outputs/` (3,225 entries); SHA256 `f3e0bb39ccab17dcc8a063f0e3d2758e5ffa7119f7fbf7f35d5301a633cc9f30`
+   - `gcs-qong-backups/` — verbatim copy of `gs://qong-backups/` (2,935 objects, 502,091,044 bytes exact byte match)
+   - `gcs-qong-intake-data/` — verbatim copy of `gs://qong-intake-data/` (3 objects, 37,539,001 bytes exact byte match)
+   - **Total:** 2,941 objects, 1.08 GB
+
+**Result:**
+- Spot-check verification: 5 random PDFs from `gcs-qong-backups/uploads/` — MD5 from GCS source matches base64-decoded S3 ETag for all 5. **0 mismatches across 5 random samples**.
+- Cost: <$0.10 one-time egress, ~$0.06/mo recurring (S3 storage + snapshot incremental).
+- Time: ~25 min wall clock from `aws s3api create-bucket` to verified manifest, including the SCP-via-IAP false-start (see Notes).
+
+**Notes:**
+- **EC2 deploy-key gotcha is also live for the dev VM via a different mechanism**: the new dev VM (Phase 1) will need the same `qong-product` SSH alias setup that QA needed (FEATURES #19 Part 4). Document during Phase 1.
+- **Don't use `gcloud compute scp` for files > ~50 MB through IAP**. Threw the IAP tunnel at ~0.3 MB/s and stalled at 8% (42 MB of 531 MB). Killed it after ~2 minutes; rerouted via GCS: `gcloud storage cp` from VM to GCS ran at **128 MB/s** (literally 400× faster), then GCS → local at 16 MB/s, then local → S3 at ~30 MB/s. **Lesson: IAP tunnels are for `ssh` and small transfers; large transfers should go via GCS or direct EC2-side `aws s3 cp` when the VM has credentials.** Added to gotchas.
+- **The `qong-intake-server` VM was NOT backed up** beyond the GCS `qong-intake-data` bucket. If that server holds state beyond the 3 PDFs in the bucket, capture before Phase 4 decommission.
+- **Postgres dump captured `qong` + `label_studio` + globals** via `pg_dumpall`. Restore on the new AWS Postgres: `psql -U <new_user> < qong-dev-postgres-2026-06-02.sql`. The `\restrict` line at the top is a PostgreSQL 17 dump-format token; should restore cleanly on PG ≥ 16.
+- **Pre-existing daily disk snapshots** (5/20 onwards) remain in GCP and will be kept until Phase 4. They are NOT in the new S3 archive — they're disk-level, not file-level, so cost more to keep around. The new snapshot taken this session is the canonical "pre-cutover" rollback point.
+- The user picked the "Yes, execute Phase 0 as above" option from a 4-way menu (default plan; not the smaller "skip intake-data" variant). All scope kept.
+
+---
+
 ## [2026-06-02] #19 — Jinja → SPA consistency sweep; public signup removed; 4 surfaces ported
 
 **Type:** architecture | feature | bugfix
