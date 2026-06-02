@@ -6,6 +6,11 @@
 # the ./webapp bind-mount in docker-compose.override.qa.yml).
 FROM node:20-alpine AS frontend
 WORKDIR /frontend
+# BUILD_ID is read at build time by Vite (see webapp/frontend/vite.config.ts
+# `define` block) and baked into window.__QONG_BUILD__. CI passes the short
+# git SHA; defaults to "dev" if not set (local builds).
+ARG BUILD_ID=dev
+ENV BUILD_ID=$BUILD_ID
 # Cache deps independently of source so source edits don't bust the npm layer.
 COPY webapp/frontend/package.json webapp/frontend/package-lock.json ./
 RUN npm ci

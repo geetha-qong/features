@@ -60,6 +60,15 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
   },
+  // BUILD_ID is set by the CI / Dockerfile multi-stage frontend at build time
+  // (e.g. `BUILD_ID=$(git rev-parse --short HEAD) npm run build`). Falls back
+  // to "dev" for local Vite dev server. Used by main.tsx to set
+  // window.__QONG_BUILD__ for ops debugging + as a deterministic cache-bust
+  // key. Replaces the hand-bumped constant pattern (FEATURES #18 cache-poison
+  // workaround); now every CI deploy gets a fresh asset hash automatically.
+  define: {
+    __BUILD_ID__: JSON.stringify(process.env.BUILD_ID || "dev"),
+  },
   // Vitest config — see https://vitest.dev/config/
   test: {
     globals: true,
