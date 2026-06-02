@@ -81,6 +81,8 @@ docker compose exec web python3 -m pytest tests/unit/ -v      # run unit tests
 - **S3:** `qong-pid-archive-2026-06-02` (~1 GB, AES256, versioned) — pre-migration PID backup. Bucket policy grants read to `may26-ec2-ssm-role`.
 - **IAM role:** `may26-ec2-ssm-role` (shared by both EC2s). Has SSM + KMS; per-bucket S3 grants via bucket policy.
 - **nginx config on each host:** `/etc/nginx/sites-available/qong-{qa,dev}` + cert at `/etc/ssl/qong-{qa,dev}/origin.{crt,key}` + CF IP allowlist `/etc/nginx/cloudflare-ips.conf`. Default_server returns 301 to canonical hostname (not the prior 444 drop).
+- **Label Studio on dev** lives at https://ls-dev.qongsystems.com (subdomain hosting, FEATURES #23). Separate nginx vhost at `/etc/nginx/sites-available/qong-dev-ls` proxies to the LS container on `127.0.0.1:8080`. LS data (6 users, 28 projects, 819 tasks, 826 annotations) preserved via the postgres `label_studio` DB restored from GCP's pg_dumpall. Existing GCP LS users log in with their original passwords — no fresh admin account. **QA does NOT host LS publicly** by design.
+- **`LABEL_STUDIO_HOST` env var** must match the host LS is reached on, or LS generates redirects to wrong paths (e.g. `/ls/user/login` → 404). Override per env in `docker-compose.override.{env}.yml` `label-studio.environment.LABEL_STUDIO_HOST`. Base compose has the path-based local-dev value; AWS envs override to subdomain.
 
 ## CRITICAL: Two-Mode Architecture — Do NOT Mix
 

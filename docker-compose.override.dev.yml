@@ -1,0 +1,56 @@
+# dev override — applied on AWS EC2 i-0e7b89bd91b67a291 (qong-dev-server) alongside docker-compose.yml.
+#
+# Usage on the EC2:
+#   docker compose -f docker-compose.yml -f docker-compose.override.dev.yml \
+#                  --env-file .env.dev -p qong up -d
+#
+# What this override does (only dev-specific deltas — base compose is otherwise reused):
+#
+# 1. Bind /mnt/qong-data/{postgres,uploads,job_outputs,minio} to the EBS data
+#    volume so dev data survives EC2 replacement.
+# 2. Web container binds to 127.0.0.1:8000 (host nginx terminates TLS on 443).
+# 3. LABEL_STUDIO_HOST overridden so LS knows its public URL is the
+#    ls-dev.qongsystems.com subdomain (not the base compose default which
+#    points at /ls/ path-based hosting from local-dev).
+# 4. Disable services that conflict with EC2's host-level setup:
+#      - nginx (docker)  → host nginx already terminates TLS
+#      - label-studio-mcp → local-only Claude Code MCP server
+#      - trainer          → YOLO training (runs on GPU box only)
+
+services:
+  web:
+    ports:
+      - "127.0.0.1:8000:8000"   # host nginx proxies 443 → 8000
+    volumes:
+      - /mnt/qong-data/uploads:/app/uploads
+      - /mnt/qong-data/job_outputs:/app/job_outputs
+      - webapp_db:/app/data   # SQLite fallback dir, unused on Postgres but
+                              # leave declared so the named volume isn't orphaned.
+
+  cpu-worker:
+    volumes:
+      - /mnt/qong-data/uploads:/app/uploads
+      - /mnt/qong-data/job_outputs:/app/job_outputs
+      - webapp_db:/app/data
+
+  postgres:
+    volumes:
+      - /mnt/qong-data/postgres:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+
+  minio:
+    volumes:
+      - /mnt/qong-data/minio:/data
+
+  label-studio:
+    # The base compose has LABEL_STUDIO_HOST=https://dev.qongsystems.com/ls
+    # (path-based hosting, a relic of the local-dev docker-nginx pattern). On
+    # AWS dev we host LS at a dedicated subdomain (FEATURES #23), so override
+    # to the canonical subdomain hostname. Otherwise LS generates redirects to
+    # /ls/* which 404 on this nginx.
+    environment:
+      LABEL_STUDIO_HOST: https://ls-dev.qongsystems.com
+
+  nginx:            { profiles: [disabled] }
+  label-studio-mcp: { profiles: [disabled] }
+  trainer:          { profiles: [disabled] }

@@ -24,6 +24,40 @@
 
 ---
 
+## [2026-06-02] #23 — Label Studio exposed on ls-dev.qongsystems.com; all GCP LS data preserved
+
+**Type:** feature | infra
+**Stage:** infra | webapp
+**Status:** shipped
+
+**Why:** After the AWS cutover (FEATURES #21), Label Studio was running on dev (docker container `qong-label-studio-1` healthy, bound to `127.0.0.1:8080`) but not externally reachable — the dev nginx config copied from QA only proxies `/healthz` + `/` to the FastAPI webapp, with no `/ls/` location. User asked: "we should have label studio hosted on dev, is it removed?". Answer: no, just unrouted. This entry sets up a clean subdomain `ls-dev.qongsystems.com` rather than path-mounting at `/ls/` on the main hostname (which would conflict with FastAPI's own `/api/*` routes — the local-dev docker nginx config handles this with multiple proxy_pass blocks but it's brittle).
+
+**What:**
+
+1. **New nginx vhost `qong-dev-ls`** at `/etc/nginx/sites-available/qong-dev-ls` on EC2 `i-0e7b89bd91b67a291`. Mirrors the main `qong-dev` site's posture (CF Origin Cert + CF IP allowlist + 600s read timeout for long-running label-stream uploads) but proxies `/` to `http://127.0.0.1:8080` (the LS container). Symlink in `/etc/nginx/sites-enabled/`. `client_max_body_size 500M` for LS's image/video uploads.
+
+2. **Cloudflare DNS:** User added an `A` record `ls-dev.qongsystems.com → 13.204.52.248` (proxied / orange-cloud). CF Origin Cert (`*.qongsystems.com` SAN) covers the subdomain — no new cert work needed.
+
+3. **`docker-compose.override.dev.yml` now committed to the repo** (was previously only generated on the EC2 during bootstrap). Adds the `label-studio.environment.LABEL_STUDIO_HOST` override to `https://ls-dev.qongsystems.com`. The base compose ships `LABEL_STUDIO_HOST=https://dev.qongsystems.com/ls` (a path-based local-dev artifact); on AWS dev that value causes LS to generate `/ls/user/login` redirects that 404 because the dev nginx doesn't proxy `/ls/`.
+
+4. **Label Studio data fully preserved from GCP.** The PostgreSQL dump restored in Phase 2 (FEATURES #21) included the `label_studio` database — all 6 users (`tnb@qongsystems.com`, `admin@qong.com`, plus 4 team members), 28 projects, 819 tasks, 826 annotations were present on dev as soon as LS started. LS uses Django's PBKDF2-hashed passwords stored in `htx_user.password`; passwords carried over verbatim so the team logs in with their original GCP credentials.
+
+**Result (if measurable):**
+- `https://ls-dev.qongsystems.com/` returns `302 Location: /user/login/` then `200` on the login page (LS's normal anonymous flow). Playwright snapshot shows the LS branding, "Log in" form, and "Brought to you by Human Signal" footer. No 404, no path-prefix weirdness.
+- `https://ls-dev.qongsystems.com/health/` returns `200`.
+- `label_studio` DB row counts on dev: **6 users, 28 projects, 819 tasks, 826 annotations** — identical to the source GCP DB.
+- LS container env after the recreate: `LABEL_STUDIO_HOST=https://ls-dev.qongsystems.com` (no `/ls/`).
+- Both the main `dev.qongsystems.com` and the new `ls-dev.qongsystems.com` are CF-IP-allowlisted at nginx — direct IP access still gets 403, and bare-IP redirects (FEATURES #22) still apply.
+
+**Notes:**
+- *QA does NOT get this treatment.* User explicitly said "we dont this on QA. only for Dev instance." If QA needs LS exposed later, mirror this exact pattern with `ls-qa.qongsystems.com` (cert + nginx vhost + override.qa.yml env + CF DNS).
+- *LS expects to own its entire hostname.* No path rewrites needed because the subdomain owns the whole URL space. If anyone ever tries path-based hosting (`/ls/` on the main domain), expect to ALSO proxy `/api/`, `/static/`, `/websocket/`, `/react-app/` to LS — which collides with the FastAPI app's `/api/v1/*`. Avoid.
+- *No fresh admin account was created on dev's LS.* The existing GCP-era admin (`tnb@qongsystems.com` with `is_staff=true`, or `admin@qong.com` with `is_staff=true`) logs in normally. If the original LS password is forgotten, reset via Django shell in the container: `docker compose exec label-studio python3 -c "import django,os; os.environ.setdefault('DJANGO_SETTINGS_MODULE','core.settings.label_studio'); django.setup(); from users.models import User; u=User.objects.get(email='tnb@qongsystems.com'); u.set_password('newpass'); u.save()"`.
+- *Bootstrap script gap:* `docker-compose.override.dev.yml` is now in the repo, but `bootstrap_1.sh` (which the EC2 ran during provisioning) wrote the file inline via `tee` instead of `cp` from the repo. If we ever re-provision, prefer reading from the repo so the LS override and any future changes flow into the new EC2 automatically. Tracked as a follow-up improvement.
+- *LS's `LS_EXTERNAL_URL=https://ls-dev.qongsystems.com`* was also added to `.env.dev` for the webapp (the webapp uses this env var to build links to LS in the annotator UI). Different env var, different consumer than `LABEL_STUDIO_HOST`.
+
+---
+
 ## [2026-06-02] #22 — SPA marketing pages removed; IP-direct access redirects; GCP VMs stopped
 
 **Type:** feature | infra | decision
