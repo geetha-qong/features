@@ -137,7 +137,7 @@ export default function Login() {
           <strong>Invite-only access</strong>
           QONG Studio is in private beta. Need an account?{" "}
           <a
-            href="https://qongsystems.com"
+            href="https://qongsystems.com/contact"
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: "var(--qong-magenta)", fontWeight: 600 }}
