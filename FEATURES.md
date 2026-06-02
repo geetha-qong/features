@@ -24,6 +24,73 @@
 
 ---
 
+## [2026-06-02] #25 — CI/CD migrated to GitHub Actions + AWS SSM; branches synced (feature/digital-twin → dev → main)
+
+**Type:** infra | architecture
+**Stage:** ci-cd | deployment
+**Status:** shipped (pending: GH Secrets paste + first auto-deploy validation)
+
+### What changed
+
+Three coupled changes, shipped together:
+
+1. **CI/CD architecture pivoted from SSH-to-GCP to SSM-to-EC2.**
+   - `.github/workflows/deploy-dev.yml` rewritten. Old: `ssh maahedev@34.126.93.103 <<ENDSSH ... ENDSSH` (the GCP VM, stopped 2026-06-02 per #21 — meaning every dev push since cutover triggered a workflow that hung on SSH and silently failed). New: `aws-actions/configure-aws-credentials@v4` → `aws ssm send-command` → poll `get-command-invocation` → curl `/healthz`. Targets `i-0e7b89bd91b67a291`.
+   - `.github/workflows/deploy-qa.yml` created. **Manual** (`workflow_dispatch` only, no `push:` trigger) so QA stays stakeholder-paced. Accepts `ref` input (default `dev`) so hotfix branches can ship to QA without polluting `dev`. Ref is regex-validated `^[A-Za-z0-9._/-]+$` before flowing into the SSM JSON payload (defense-in-depth — `workflow_dispatch` already requires repo write, but a compromised account could otherwise shell-inject through the input).
+   - IAM user `github-actions-deploy` created with inline `DeployViaSSM` policy scoped to `ssm:SendCommand` on **exactly two** EC2 ARNs (dev + qa) + the `AWS-RunShellScript` document; `ssm:GetCommandInvocation` + `ssm:ListCommandInvocations` (read-only). Blast radius if leaked: shell on those 2 boxes only. No IAM, no other AWS services. Access keys generated; user pastes into GitHub repo Secrets.
+
+2. **`feature/digital-twin` → `dev` fast-forward merge.** 94 commits. `feature/digital-twin` had been the active dev branch since 2026-05-26 (#01) but never merged back; `dev` had drifted to "what's deployed to the dead GCP VM". FF-merge collapses the gap with no merge commit (dev was a strict ancestor). New `dev` tip: `028ee6a`.
+
+3. **`dev` → `main` fast-forward merge.** 100 commits. `main` was at `7f406db` from before the entire AWS migration, before the SaaS webapp, before the digital-twin work. Per CLAUDE.md `main` is reserved for future `app.qongsystems.com` prod — but the branch itself was so stale that prod cutover would have meant a 100-commit catch-up on top of infra work. FF'd to `028ee6a` (no deploy workflow on main — intentional, per CLAUDE.md "do not push until prod infra ready"). Now main is current; when prod is provisioned, cutover is one infra step, not infra + a giant catch-up merge.
+
+### Why this matters
+
+The dev deploy workflow had been **silently broken for 6 days** post-AWS-cutover. Every commit since 2026-05-27 was hand-deployed via SSM. The team had unknowingly traded "automated CI/CD" for "manual SSM commands hidden in conversation transcripts" — no audit trail in GitHub, no health check after deploy, no notifications on failure, easy to forget a step. This entry restores the CI/CD invariant: push to `dev` → deploy happens → health-checked → reported in GitHub.
+
+Also: the deploy workflow had been pointing at a dead host for 6 days and nobody noticed because no one looked at GitHub Actions during the AWS migration. The new workflows include a `/healthz` curl step that fails loudly if the deploy didn't actually take effect — so future "looks deployed but didn't" bugs surface immediately.
+
+### Why GH Actions + SSM over CodeDeploy / Jenkins / OIDC-on-day-one
+
+User explicitly evaluated:
+- **CodeDeploy + CodePipeline** — better fit at ≥3 envs or for blue/green, but ~3-4 hr setup (agent on each EC2, deployment groups, lifecycle hooks, S3 revision bucket). For 2 EC2s it's strictly more plumbing for marginal gain.
+- **Jenkins** — right at 20+ services across multiple teams; wrong at this scale. Would cost more in maintenance ops than the deploys save.
+- **ArgoCD/Flux** — only relevant if we move to EKS.
+- **GH Actions + OIDC from day one** — better security posture (no long-lived keys), but adds ~45 min to set up the GitHub OIDC provider in IAM + role trust policy. User picked "long-lived keys now, OIDC later" to ship faster. OIDC migration tracked as a follow-up.
+
+Rule of thumb encoded: **the right CI/CD tool scales with team size and deploy frequency, not project ambition.** Move to CodeDeploy when env count outgrows GH Actions; don't move to Jenkins ever (operational burden too high for our scale).
+
+### Files changed
+
+- `.github/workflows/deploy-dev.yml` (rewritten)
+- `.github/workflows/deploy-qa.yml` (new)
+- IAM resources (AWS, account `449901518037`):
+  - User `github-actions-deploy` (programmatic only, tagged `Purpose=ci-cd`)
+  - Inline policy `DeployViaSSM`
+  - Access key (surfaced to user once; he pastes into GH Secrets)
+
+### Commit
+
+- `028ee6a` ci(deploy): SSM-based deploy workflows for dev + qa
+
+### Branch state after this entry
+
+| Branch | Tip | Deployed to |
+|---|---|---|
+| `feature/digital-twin` | `0769c2d` (1 behind dev, no longer load-bearing) | nothing |
+| `dev` | `028ee6a` | dev.qongsystems.com (manual SSM this round; auto-deploy after secrets are pasted) |
+| `main` | `028ee6a` | nothing (no deploy wired — intentional) |
+
+QA EC2 (`i-04be6af1fb7929a0c`) switched from `feature/digital-twin` to tracking `dev`. Future QA deploys are manual via `workflow_dispatch` in the Actions UI.
+
+### Follow-ups
+
+1. **User**: paste `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` into Qong-Systems/qong_product → Settings → Secrets → Actions.
+2. **Verify**: re-run the deploy-dev workflow (workflow_dispatch) to confirm credentials work. The push of `028ee6a` will have already triggered the workflow once and failed (no secrets yet) — that red ✗ in Actions history is expected, ignore it.
+3. **Migrate to OIDC** (queued separately): replace long-lived access keys with GitHub OIDC trust → IAM role. ~1 hr.
+4. **deploy-prod.yml** when `app.qongsystems.com` infra is up — same SSM mechanism, gated by GitHub Environments with required-reviewer approval. Manual approval gate before any prod deploy fires.
+
+---
+
 ## [2026-06-02] #23 — Label Studio exposed on ls-dev.qongsystems.com; all GCP LS data preserved
 
 **Type:** feature | infra
