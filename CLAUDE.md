@@ -75,7 +75,7 @@ docker compose exec web python3 -m pytest tests/unit/ -v      # run unit tests
 ## AWS inventory (as of 2026-06-02 — see FEATURES #21)
 
 - **Account:** 449901518037 (`tnbqong` profile). All resources in `ap-south-1`.
-- **QA:** EC2 `i-04be6af1fb7929a0c` at `43.205.96.86`, data EBS `vol-06bdf1fab12bd2971`. URL https://qa.qongsystems.com.
+- **QA:** EC2 `i-04be6af1fb7929a0c`, data EBS `vol-06bdf1fab12bd2971`. URL https://qa.qongsystems.com. **STOPPED 2026-06-02** to save ~$30/mo. No EIP — restart auto-assigns a fresh public IP, so the CF A-record needs updating on restart (~5 min). Restart: `aws ec2 start-instances --instance-ids i-04be6af1fb7929a0c --region ap-south-1 --profile tnbqong`. If QA will cycle frequently, allocate an EIP first (~$3.65/mo idle, stable IP).
 - **Dev:** EC2 `i-0e7b89bd91b67a291` at EIP `13.204.52.248`, data EBS `vol-00152abd9fa8f1bf8` at `/mnt/qong-data`. URL https://dev.qongsystems.com. EIP is free while attached.
 - **SSM secrets:** `/may26aws/qong-qa/*` (7 params), `/may26aws/qong-dev/*` (7 params), `/may26aws/hermes-agent/openrouter/key` (sibling workload). Always ap-south-1, never us-east-1.
 - **S3:** `qong-pid-archive-2026-06-02` (~1 GB, AES256, versioned) — pre-migration PID backup. Bucket policy grants read to `may26-ec2-ssm-role`.

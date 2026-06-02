@@ -24,6 +24,110 @@
 
 ---
 
+## [2026-06-02] #26 — Editable deliverables: entity_overrides backend layer (Day 1 of Spec A)
+
+**Type:** feature | architecture
+**Stage:** webapp | deliverables | export
+**Status:** shipped (backend); frontend wiring in follow-ups
+
+### What changed
+
+The deliverables subsystem now supports **user edits** without disturbing the
+pipeline-produced `canonical.json`. Edits live in a new `entity_overrides` DB
+table; a thin merge layer applies them on top of canonical before any
+generator runs.
+
+New components:
+- **`models.EntityOverride`** — DB table `(job_id, entity_id, field_name,
+  new_value, prior_value, edited_by, edited_at)` with
+  `UNIQUE(job_id, entity_id, field_name)` for current-value semantics. Full
+  audit history is a future migration: drop UNIQUE, add `superseded_at`.
+- **`webapp/deliverables/overrides.py`** — `load_canonical_with_overrides()`
+  reads canonical.json, queries the override table, walks dot notation
+  (`tag`, `fields.size`, `vendor_match.vendor_name`) on each affected
+  entity, re-validates through `CanonicalEntity`. Read-only fields
+  (`entity_id`, `entity_class`, `pid_number`, `sheet_number`, `bbox`) are
+  silently skipped at this layer; API rejects them upstream.
+- **`webapp/routers/entities.py`**:
+    - `GET /api/v1/jobs/{job_id}/entities?deliverable_type={t}` — returns
+      schema (from customer template) + entities filtered by entity_class
+      (valve_list→valve, instrument_index/datasheet→instrument,
+      equipment_list→equipment), each with per-field `{value, source,
+      is_override}`. `source` distinguishes "pid" (canonical had a value)
+      from "manual" (user-supplied field). `is_override` true iff an
+      override row exists for that field path.
+    - `PATCH /api/v1/jobs/{job_id}/entities/{entity_id}` — `{fields:
+      {path: value}}`. Atomic: validates all paths editable before any
+      writes. Captures `prior_value` from on-disk canonical (not from a
+      prior override row) so audit always references pipeline output. Skips
+      writes when value unchanged.
+- **`webapp/routers/exports.py`** — swapped `load_canonical_for_job` →
+  `load_canonical_with_overrides` so generated CSV/XLSX include user edits.
+  Single change-point; generators themselves are unmodified.
+
+### Why this design
+
+The architecture already supported edits cleanly because of one prior choice:
+generators don't care where data comes from — they consume `JobCanonical`
+and emit bytes. So "make 4 deliverables editable" turned out to be one merge
+layer above generators + one router file, NOT a per-generator change. If the
+6 future generators (Control Narrative, C&E, I/O List, Line List, Loop
+Schedule, Tag Register) follow the same `Generator.generate(canonical,
+template)` contract, they get edit-ability for free.
+
+**Why DB, not filesystem.** User picked "DB table" over "canonical_overrides.json
+per job" because: audit columns come for free; concurrent edits on the same
+job are atomic without filesystem race; `canonical.json` stays the only
+file the pipeline writes.
+
+**Why `prior_value` snapshots from canonical, not from prior override.** Audit
+always references the pipeline's source-of-truth. If a user PATCHes X to A
+then B then C, the final audit row has `prior_value` from the original
+canonical, not from B. A reader sees "pipeline said X=Z; now X=C" — useful.
+
+### Smoke test (proven on job 41 / dev)
+
+| Test | Result |
+|---|---|
+| `GET /entities` returns schema + entities with per-field metadata | ✅ |
+| `PATCH` two fields → `applied=2` | ✅ |
+| `GET` again — `is_override:True` on edited fields | ✅ |
+| `POST /export/valve_list/csv` — CSV contains edited values | ✅ |
+| `PATCH bbox` (read-only) → 400 | ✅ |
+| `PATCH` unknown entity → 404 | ✅ |
+| DB row — `prior_value` captures pipeline value | ✅ |
+
+The override flowing into the exported CSV was the satisfying test — it
+validates the whole architectural premise (edit lives in DB, merged into
+canonical, flows through generator, lands in customer artifact) in one
+round-trip.
+
+### Out of scope (deferred)
+
+- **Canvas-click → entity_id linkage** (Spec A Day 1.5). GPU detections
+  don't carry `entity_id` today — they come from a separate code path than
+  canonical (Windows GPU worker → JSON detections vs. CSVs →
+  pipeline_emitter → canonical.json). User picked Option B: write a
+  `(page, bbox, tag) → entity_id` mapping during canonical emission and
+  surface it on the detections endpoint. ~half a day.
+- **DatasheetDrawer + BulkReviewScreen real-data wiring** — Days 2-4.
+  Blocked on D1.5.
+- **Admin custom-column-labels CRUD UI** — Day 5.
+
+### Files
+
+- `webapp/models.py` (+44 lines — EntityOverride)
+- `webapp/deliverables/overrides.py` (new, 160 lines)
+- `webapp/routers/entities.py` (new, 280 lines)
+- `webapp/routers/exports.py` (3 lines)
+- `webapp/main.py` (2 lines — router registration)
+
+### Commit
+
+- `54e0905` feat(deliverables): entity-override layer + editable-deliverables API (Day 1)
+
+---
+
 ## [2026-06-02] #25 — CI/CD migrated to GitHub Actions + AWS SSM; branches synced (feature/digital-twin → dev → main)
 
 **Type:** infra | architecture
