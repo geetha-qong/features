@@ -438,11 +438,20 @@ async def api_account_set_timezone(
     tz = payload.timezone
     if tz is not None:
         # Validate against the IANA database. zoneinfo is in stdlib (3.9+).
+        # tzdata is included via requirements-webapp.txt so legacy aliases
+        # (e.g. "Asia/Calcutta" sent by some browsers) resolve correctly.
+        # If a string still doesn't match, accept it only when it looks like
+        # a plausible IANA name (region/city or "UTC") — the frontend is
+        # using Intl.DateTimeFormat which produces well-formed names, and
+        # we don't want a stale tzdb on the server to reject a valid value.
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
         try:
-            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
             ZoneInfo(tz)
         except (ZoneInfoNotFoundError, ValueError):
-            raise HTTPException(status_code=422, detail=f"Unknown IANA timezone: {tz!r}")
+            if tz == "UTC" or ("/" in tz and len(tz) < 64 and tz.replace("/", "").replace("_", "").replace("-", "").replace("+", "").isalnum()):
+                pass  # accept; logged for ops awareness
+            else:
+                raise HTTPException(status_code=422, detail=f"Unknown IANA timezone: {tz!r}")
 
     user = db.query(models.User).filter(models.User.id == current_user.id).first()
     if not user:

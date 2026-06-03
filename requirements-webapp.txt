@@ -16,3 +16,6 @@ requests>=2.31.0
 psycopg2-binary>=2.9.9
 openpyxl>=3.1.0,<4.0.0
 pydantic>=2.7.0,<3.0.0
+tzdata>=2024.1  # Python zoneinfo on Linux/Alpine doesn't ship the full IANA database;
+                # tzdata provides the alias map so e.g. "Asia/Calcutta" (browser-emitted
+                # legacy alias) resolves to "Asia/Kolkata". Required for FEATURES #27.
