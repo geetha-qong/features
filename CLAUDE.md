@@ -38,10 +38,13 @@ Headline metric long-term: graph isomorphism (`networkx.is_isomorphic`) — meas
 
 ## Branches
 
-- `dev` — active development; auto-deploys to `dev.qongsystems.com` on every push via GitHub Actions. Existing valve-list product flows continue shipping here throughout the digital twin build-out.
-- `feature/digital-twin` — all digital twin MVP work (Sprints 1-5, ~8-10 weeks). Created in SCRUM-54. Merges back to `dev` at MVP cutover (Sprint 5).
-- `main` — reserved for future production at `app.qongsystems.com` (do not push until prod infra ready)
-- `feature/multi-cloud-saas` — superseded by `dev` (all phases A1-A3, B1-B5 merged in)
+**Current production-track layout (clean baseline established 2026-06-03 at `0f4f3c4`):**
+
+- `dev` — active development; auto-deploys to `dev.qongsystems.com` on every push via `.github/workflows/deploy-dev.yml`.
+- `qa` — QA release candidate; deploys to `qa.qongsystems.com` via **manual** `workflow_dispatch` on `.github/workflows/deploy-qa.yml`. **Workflow default ref is `dev`, not `qa`** — to deploy the `qa` branch, pass `ref: qa` on dispatch (or change `default: 'dev'` in the workflow file). Branched from `dev` 2026-06-03.
+- `main` — reserved for future production at `app.qongsystems.com`. No `deploy-main.yml` exists yet (task D in `SESSION_STATE.md`). Do not push until prod infra is provisioned.
+
+**Feature-branch policy:** branch off `dev`, merge back via PR. Stale branches `feature/digital-twin`, `feature/observability-job-runs`, `feature/instrument-index-improvements` were deleted locally on 2026-06-03; their `origin/*` refs are retained on GitHub for now but are reference-only — do **not** branch from them. `feature/multi-cloud-saas` was superseded by `dev` (all phases A1-A3, B1-B5 merged in).
 
 ## Docker-First Rule
 
@@ -108,6 +111,7 @@ If someone changes this by mistake, revert it immediately. The offline detector 
 - Default model: `google/gemini-2.0-flash-001` (fast); override via `OPENROUTER_MODEL`
 - Temp files → `tmp/` per job in `job_outputs/{org_id}/{job_id}/tmp/` (jobs ≥ 40) or `job_outputs/{job_id}/tmp/` (jobs ≤ 39); never commit. Also never commit `webapp.db`, `uploads/`, `job_outputs/`.
 - **Generated secrets must not contain `$`** (use `openssl rand -hex N` — alphanumeric only). Docker Compose treats `$wrv` inside a `.env` value as `${wrv}` and silently substitutes empty, truncating the secret. If a `$`-containing SSM value gets rendered into `.env.*`, escape `$ → $$` (Compose decodes `$$` as literal `$`). Real bug we hit on QA — FEATURES #19.
+- **Root-level `*.png` is gitignored** (`/*.png` line in `.gitignore`). Save Playwright / QA screenshots to `themes/screenshots/` (also gitignored), a job-output path, or `tmp/` — never the repo root. Nested PNGs under `design/`, `docs/`, `webapp/` track normally.
 - **Ubuntu 24.04 dropped `awscli` from apt.** Install via the AWS CLI v2 zip: `curl -sS https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/a.zip && unzip -q /tmp/a.zip -d /tmp/ && sudo /tmp/aws/install`.
 - **EBS `/dev/sdf` shows up as `/dev/nvme1n1` on Nitro instances.** Don't parse `lsblk` columns (empty MOUNTPOINT trips up awk); hardcode the device path and verify with `blockdev --getsize64`.
 - **AWS Security Group descriptions reject non-ASCII** (em-dash, smart quotes). ASCII only or the API returns `InvalidParameterValue`.
