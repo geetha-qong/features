@@ -72,6 +72,14 @@ export default function Studio({ project, userName, onBack }: Props) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [datasheetOpen, setDatasheetOpen] = useState(false);
   const [mode, setMode] = useState<"studio" | "bulk">("studio");
+  // The deliverable_type the workbench opens with. Today we default to
+  // "datasheet" — same as the DatasheetDrawer's initial DocType, so the two
+  // surfaces stay in sync when the user toggles between them. Lifting this
+  // to state (rather than a const) preserves the seam for D6+: a future
+  // sidebar tab in Studio that lets the user pick which deliverable to
+  // review would call a setter here. The workbench's own tab-switcher is
+  // local-state by design (tab changes shouldn't pollute Studio).
+  const [activeDeliverableType] = useState<string>("datasheet");
 
   // Real backend data — falls back to prototype when unavailable so the studio
   // never breaks on jobs without tiles/detections (e.g. seed data, brand-new
@@ -153,10 +161,15 @@ export default function Studio({ project, userName, onBack }: Props) {
   if (mode === "bulk") {
     return (
       <BulkReviewScreen
-        project={project}
+        jobId={project.id}
+        projectName={project.name}
+        initialDeliverableType={activeDeliverableType}
         onBack={() => setMode("studio")}
-        onOpenInStudio={(id) => {
-          setSelectedId(id);
+        onOpenEntity={(entityId) => {
+          // BulkReview row → Studio drawer. `entityId` is the canonical UUID
+          // (string). Studio's `selectedId` is happy to hold either a UUID
+          // (D1.5+ canvas selections) or a prototype tag, so this just works.
+          setSelectedId(entityId);
           setMode("studio");
           setDatasheetOpen(true);
         }}
