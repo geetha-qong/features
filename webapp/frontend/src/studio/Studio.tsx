@@ -242,9 +242,16 @@ export default function Studio({ project, userName, onBack }: Props) {
       <DatasheetDrawer
         open={datasheetOpen}
         onClose={() => setDatasheetOpen(false)}
-        element={sel}
+        jobId={project.id}
+        /* selectedId may be a prototype tag ("PV-203") OR a real UUID entity_id
+         * (post-D1.5, PidCanvas's DetectionOverlay fires onSelect(entity_id)).
+         * The drawer's GET will simply 404-equivalent ("not in canonical") on
+         * prototype IDs, and render the "Entity not found" panel — no crash. */
+        entityId={selectedId}
+        fallbackTag={sel.tag}
+        fallbackType={sel.type}
         onBulkReview={onBulkReview}
-        totalCount={68}
+        totalCount={detResp?.valves.length ?? 68}
       />
     </div>
   );

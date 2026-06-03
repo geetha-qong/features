@@ -73,6 +73,102 @@ async function call<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** Status-aware JSON fetcher for write-ish verbs. Returns the parsed body on
+ *  2xx; throws an `HttpError` carrying the status code on non-2xx so callers
+ *  can distinguish 404 (entity not in canonical) from 400 (read-only field)
+ *  from 401 (login expired). Mirrors the shape of `call<T>` so the same
+ *  cookie-credential rules apply. */
+export class HttpError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function callJson<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    credentials: "include",
+    redirect: "manual",
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 0 || res.type === "opaqueredirect") {
+    throw new HttpError("Not authenticated", 401);
+  }
+  if (!res.ok) {
+    throw new HttpError(`HTTP ${res.status}`, res.status);
+  }
+  return (await res.json()) as T;
+}
+
 export const getJobSheets = (jobId: number) => call<JobSheetsResp>(`/api/v1/jobs/${jobId}/sheets`);
 export const getJobDetections = (jobId: number) =>
   call<JobDetectionsResp>(`/api/v1/jobs/${jobId}/detections`);
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Editable deliverables (Spec A / FEATURES #26 — entity_overrides API)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** Column schema row from the customer template (one cell per row in the UI).
+ *  Mirrors `webapp/routers/entities.py:ColumnSchema`. */
+export interface EntityColumn {
+  field: string;        // dot-notation path: "tag", "fields.size", "vendor_match.vendor_name"
+  header: string;       // human-readable label, e.g. "Size"
+  order: number;
+  editable: boolean;    // false for read-only (entity_id, pid_number, sheet_number, bbox, entity_class)
+}
+
+/** One cell value from the GET response, post-override merge. */
+export interface EntityFieldValue {
+  value: unknown;       // typed loosely — canonical fields are str|number|null|nested object
+  source: "pid" | "manual";  // "pid" = pipeline-extracted, "manual" = user-supplied (null in canonical)
+  is_override: boolean; // true iff there's an entity_overrides row for this (entity, field)
+}
+
+export interface EntityRow {
+  entity_id: string;
+  entity_class: string;
+  sub_class: string;
+  tag: string | null;
+  pid_number: string;
+  sheet_number: number;
+  values: Record<string, EntityFieldValue>;  // keyed by EntityColumn.field
+}
+
+export interface EntitiesResponse {
+  deliverable_type: string;
+  customer_template_slug: string;
+  schema: EntityColumn[];
+  entities: EntityRow[];
+}
+
+export interface PatchEntityResponse {
+  entity_id: string;
+  applied: number;
+}
+
+/** Fetch every entity row + column schema for a given deliverable_type.
+ *  The single-entity drawer currently filters this response client-side
+ *  (no single-fetch endpoint exists yet — see follow-up note in D2 commit).
+ *  Cheap for typical job sizes (≤ a few hundred entities); revisit if we
+ *  hit jobs with thousands of valves where round-tripping all rows hurts. */
+export const getEntities = (jobId: number, deliverableType: string) =>
+  call<EntitiesResponse>(
+    `/api/v1/jobs/${jobId}/entities?deliverable_type=${encodeURIComponent(deliverableType)}`,
+  );
+
+/** PATCH a partial entity update. `fields` is a map of field-path → new value;
+ *  the backend captures `prior_value` from the on-disk canonical (audit trail).
+ *  Empty `fields` is a no-op (no-op returns 200 with applied=0). */
+export const patchEntity = (
+  jobId: number,
+  entityId: string,
+  fields: Record<string, unknown>,
+) =>
+  callJson<PatchEntityResponse>(
+    "PATCH",
+    `/api/v1/jobs/${jobId}/entities/${encodeURIComponent(entityId)}`,
+    { fields },
+  );
