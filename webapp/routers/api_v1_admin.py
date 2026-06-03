@@ -27,6 +27,11 @@ from webapp import models
 from webapp.auth import hash_password, require_super_admin
 from webapp.config import JOB_OUTPUT_DIR, MIN_PASSWORD_LENGTH, get_job_dir
 from webapp.database import get_db
+from webapp.deliverables.template_loader import (
+    TemplateLoader,
+    TemplateNotFound,
+    merged_template_dict,
+)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["api_v1_admin"])
 
@@ -463,6 +468,184 @@ def sync_label_configs(
         raise HTTPException(status_code=400, detail="LS_API_KEY not configured")
     result = ls.sync_all_label_configs(source_project_id=1)
     return {"updated": result.get("updated", []), "count": len(result.get("updated", []))}
+
+
+# ── Customer templates (D5: custom column labels) ─────────────────────────────
+
+
+_VALID_DELIVERABLE_TYPES = {"valve_list", "instrument_index", "datasheet", "equipment_list"}
+_template_loader = TemplateLoader()
+
+
+def _build_template_response(slug: str, db: Session) -> dict:
+    """Shared GET/PUT/DELETE serializer.
+
+    Returns the merged template for `slug` plus the list of available slugs
+    (filesystem-scan of `customer_templates/*.json`) so the UI can build its
+    picker without a second round-trip.
+    """
+    try:
+        merged = merged_template_dict(slug, db=db, loader=_template_loader, fallback=slug)
+    except TemplateNotFound:
+        raise HTTPException(status_code=404, detail=f"Customer template '{slug}' not found")
+
+    # Re-shape per-deliverable columns to the API contract documented in the
+    # spec: list of {key, label, hidden, order_in_template, is_overridden}.
+    deliverables_out: dict = {}
+    for d_type, d_cfg in (merged.get("deliverables") or {}).items():
+        rows = []
+        for col in d_cfg.get("columns", []):
+            rows.append({
+                "key": col.get("field"),
+                "label": col.get("header"),
+                "hidden": False,  # hidden cols were already dropped from the merge
+                "order_in_template": col.get("order"),
+                "is_overridden": bool(col.get("is_overridden", False)),
+            })
+        deliverables_out[d_type] = rows
+
+    # Surface hidden columns separately so the UI can show + un-hide them.
+    # We requery the override table for hidden rows since they're filtered
+    # out of the merged dict above.
+    hidden_by_dtype: dict = {}
+    overrides = (
+        db.query(models.CustomerTemplateOverride)
+        .filter(models.CustomerTemplateOverride.customer_template_slug == slug)
+        .filter(models.CustomerTemplateOverride.hidden == True)  # noqa: E712
+        .all()
+    )
+    if overrides:
+        # Need the original JSON to recover header/order for hidden columns.
+        try:
+            raw = _template_loader._load_raw(slug)
+        except TemplateNotFound:
+            raw = {}
+        for d_type, d_cfg in (raw.get("deliverables") or {}).items():
+            by_field = {c["field"]: c for c in d_cfg.get("columns", [])}
+            for o in overrides:
+                if o.deliverable_type != d_type:
+                    continue
+                col = by_field.get(o.column_key)
+                if not col:
+                    continue
+                hidden_by_dtype.setdefault(d_type, []).append({
+                    "key": col["field"],
+                    "label": o.label_override or col["header"],
+                    "hidden": True,
+                    "order_in_template": o.column_order if o.column_order is not None else col.get("order"),
+                    "is_overridden": True,
+                })
+    # Merge hidden cols back in at their stored position (sorted by order).
+    for d_type, hidden_cols in hidden_by_dtype.items():
+        merged_cols = deliverables_out.get(d_type, []) + hidden_cols
+        merged_cols.sort(key=lambda c: c.get("order_in_template") or 1_000_000)
+        deliverables_out[d_type] = merged_cols
+
+    last_updated = (
+        db.query(func.max(models.CustomerTemplateOverride.updated_at))
+        .filter(models.CustomerTemplateOverride.customer_template_slug == slug)
+        .scalar()
+    )
+
+    return {
+        "slug": slug,
+        "customer_name": merged.get("customer_name"),
+        "available_slugs": _template_loader.available_slugs(),
+        "deliverables": deliverables_out,
+        "last_updated_at": utc_iso(last_updated) if last_updated else None,
+    }
+
+
+@router.get("/customer-templates/{slug}")
+def get_customer_template(
+    slug: str,
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    return _build_template_response(slug, db)
+
+
+class OverrideItem(BaseModel):
+    deliverable_type: str
+    column_key: str
+    label_override: Optional[str] = None
+    column_order: Optional[int] = None
+    hidden: bool = False
+
+
+class PutOverridesBody(BaseModel):
+    overrides: list[OverrideItem]
+
+
+@router.put("/customer-templates/{slug}")
+def put_customer_template_overrides(
+    slug: str,
+    body: PutOverridesBody,
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    # Validate slug exists on disk before touching the DB.
+    try:
+        _template_loader._load_raw(slug)
+    except TemplateNotFound:
+        raise HTTPException(status_code=404, detail=f"Customer template '{slug}' not found")
+
+    for ov in body.overrides:
+        if ov.deliverable_type not in _VALID_DELIVERABLE_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid deliverable_type '{ov.deliverable_type}'",
+            )
+
+    # Delete-then-insert: simplest correct behavior across SQLite + Postgres
+    # (avoid dialect-specific UPSERT). Scoped to this slug so other slugs are
+    # untouched; per (deliverable_type, column_key) tuples in the payload.
+    payload_keys = {(ov.deliverable_type, ov.column_key) for ov in body.overrides}
+    if payload_keys:
+        existing = (
+            db.query(models.CustomerTemplateOverride)
+            .filter(models.CustomerTemplateOverride.customer_template_slug == slug)
+            .all()
+        )
+        for row in existing:
+            if (row.deliverable_type, row.column_key) in payload_keys:
+                db.delete(row)
+        db.flush()
+
+    for ov in body.overrides:
+        # Skip no-op rows (no override anywhere) — keeps the table tidy.
+        if ov.label_override is None and ov.column_order is None and not ov.hidden:
+            continue
+        db.add(models.CustomerTemplateOverride(
+            customer_template_slug=slug,
+            deliverable_type=ov.deliverable_type,
+            column_key=ov.column_key,
+            label_override=ov.label_override,
+            column_order=ov.column_order,
+            hidden=ov.hidden,
+            updated_by=current_user.id,
+        ))
+    db.commit()
+
+    return _build_template_response(slug, db)
+
+
+@router.delete("/customer-templates/{slug}/overrides")
+def reset_customer_template_overrides(
+    slug: str,
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    try:
+        _template_loader._load_raw(slug)
+    except TemplateNotFound:
+        raise HTTPException(status_code=404, detail=f"Customer template '{slug}' not found")
+
+    db.query(models.CustomerTemplateOverride).filter(
+        models.CustomerTemplateOverride.customer_template_slug == slug
+    ).delete()
+    db.commit()
+    return _build_template_response(slug, db)
 
 
 @router.post("/label-studio/sync/{job_id}")

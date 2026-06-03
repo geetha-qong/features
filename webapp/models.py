@@ -228,6 +228,43 @@ class ModelCorrection(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
+class CustomerTemplateOverride(Base):
+    """Per-customer-template column-label override (FEATURES #29).
+
+    The canonical templates live as JSON files on disk
+    (`webapp/deliverables/customer_templates/<slug>.json`) — they remain the
+    fallback. Admin edits (label rename / hide / reorder) live here and merge
+    on top of the JSON at load time via
+    `webapp.deliverables.template_loader.merged_template_dict()`.
+
+    `column_key` matches the `field` value in the JSON template (dot-notation
+    path, e.g. "fields.size", "tag", "vendor_match.vendor_name"). One row per
+    (slug, deliverable_type, column_key) — re-saving overwrites.
+
+    `label_override`, `column_order` are nullable so a row can hide a column
+    without forcing a new label/order; nulls fall back to the JSON's `header`
+    and `order`.
+    """
+    __tablename__ = "customer_templates_overrides"
+
+    id = Column(Integer, primary_key=True)
+    customer_template_slug = Column(String, nullable=False, index=True)   # "default" | "ronesans" | "muk" | ...
+    deliverable_type = Column(String, nullable=False)                     # "valve_list" | "instrument_index" | "datasheet" | "equipment_list"
+    column_key = Column(String, nullable=False)                           # matches `field` in the JSON template
+    label_override = Column(String, nullable=True)                        # null = use template default header
+    column_order = Column(Integer, nullable=True)                         # null = use template default order
+    hidden = Column(Boolean, default=False, nullable=False)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "customer_template_slug", "deliverable_type", "column_key",
+            name="uq_template_override_sdc",
+        ),
+    )
+
+
 class UserFeedback(Base):
     __tablename__ = "user_feedback"                      # distinct from "feedback" (job-level engineer notes)
 

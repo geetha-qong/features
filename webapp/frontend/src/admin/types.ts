@@ -77,3 +77,31 @@ export interface LabelStudioResponse {
   ls_url: string;
   ls_configured: boolean;
 }
+
+// Customer template overrides (D5 — admin-editable column labels)
+
+export type DeliverableType = "valve_list" | "instrument_index" | "datasheet" | "equipment_list";
+
+export interface CustomerTemplateColumn {
+  key: string;                  // the JSON template's `field` value, e.g. "fields.size"
+  label: string;                // current label (override if set, else JSON header)
+  hidden: boolean;
+  order_in_template: number | null;
+  is_overridden: boolean;
+}
+
+export interface CustomerTemplateResponse {
+  slug: string;
+  customer_name: string | null;
+  available_slugs: string[];
+  deliverables: Record<DeliverableType, CustomerTemplateColumn[]>;
+  last_updated_at: string | null;
+}
+
+export interface CustomerTemplateOverridePayload {
+  deliverable_type: DeliverableType;
+  column_key: string;
+  label_override: string | null;
+  column_order: number | null;
+  hidden: boolean;
+}

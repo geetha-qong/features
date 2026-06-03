@@ -8,6 +8,8 @@
 import type {
   AdminUser,
   BillingPlan,
+  CustomerTemplateOverridePayload,
+  CustomerTemplateResponse,
   DashboardKpis,
   FeedbackItem,
   FeedbackStatus,
@@ -123,6 +125,24 @@ export const syncJobToLs = (jobId: number) =>
   call<{ job_id: number; ls_project_id: number; tiles_pushed: number }>(
     "POST",
     `/api/v1/admin/label-studio/sync/${jobId}`,
+  );
+
+// Customer templates (D5)
+export const getCustomerTemplate = (slug: string) =>
+  call<CustomerTemplateResponse>("GET", `/api/v1/admin/customer-templates/${encodeURIComponent(slug)}`);
+export const putCustomerTemplate = (
+  slug: string,
+  overrides: CustomerTemplateOverridePayload[],
+) =>
+  call<CustomerTemplateResponse>(
+    "PUT",
+    `/api/v1/admin/customer-templates/${encodeURIComponent(slug)}`,
+    { overrides },
+  );
+export const resetCustomerTemplate = (slug: string) =>
+  call<CustomerTemplateResponse>(
+    "DELETE",
+    `/api/v1/admin/customer-templates/${encodeURIComponent(slug)}/overrides`,
   );
 
 export { HttpError };

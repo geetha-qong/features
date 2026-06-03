@@ -20,6 +20,7 @@ import AdminFeedback from "./admin/AdminFeedback";
 import AdminCredits from "./admin/AdminCredits";
 import AdminPlans from "./admin/AdminPlans";
 import AdminLabelStudio from "./admin/AdminLabelStudio";
+import AdminCustomColumns from "./admin/AdminCustomColumns";
 
 export default function App() {
   return (
@@ -62,6 +63,7 @@ function AppRoutes() {
               <Route path="credits" element={<AdminCredits />} />
               <Route path="plans" element={<AdminPlans />} />
               <Route path="label-studio" element={<AdminLabelStudio />} />
+              <Route path="custom-columns" element={<AdminCustomColumns />} />
             </Route>
           </Route>
 
