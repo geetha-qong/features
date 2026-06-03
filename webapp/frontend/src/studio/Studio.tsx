@@ -180,6 +180,7 @@ export default function Studio({ project, userName, onBack }: Props) {
   return (
     <div className="studio" data-screen-label="03 Project Studio">
       <StudioTopBar
+        jobId={project.id}
         projectName={project.name}
         currentSheet={current}
         sheetCount={sheets.length}
