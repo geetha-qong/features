@@ -8,7 +8,7 @@ import secrets as _secrets
 import shutil
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import urlparse
 
 from webapp.datetime_utils import utc_iso
@@ -667,6 +667,100 @@ async def api_feedback_submit(
         "subject": item.subject,
         "created_at": utc_iso(item.created_at),
     }
+
+
+# ── POST /api/v1/jobs/{id}/corrections ────────────────────────────────────────
+
+_ALLOWED_CORRECTION_ACTIONS = {"delete", "reclassify", "add"}
+
+
+class _CorrectionItem(BaseModel):
+    detection_index: int
+    action: str
+    new_label: Optional[str] = None
+    new_bbox: Optional[List[float]] = None    # [x1, y1, x2, y2]
+    note: Optional[str] = None
+
+
+class _CorrectionsPayload(BaseModel):
+    corrections: List[_CorrectionItem]
+
+
+@router.post("/jobs/{job_id}/corrections", status_code=201)
+async def api_job_corrections(
+    job_id: int,
+    payload: _CorrectionsPayload,
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+):
+    """Record user corrections against YOLO detections on a job.
+
+    FEATURES #28 — active-learning plumbing. Each correction in the body
+    becomes one row in ``model_corrections``. The bulk-insert is atomic
+    against the request: either all rows persist or none do (single commit).
+
+    Action contract::
+
+        delete       → false-positive at detection_index.
+        reclassify   → wrong class; new_label REQUIRED.
+        add          → false-negative; new_bbox REQUIRED (new_label optional).
+
+    The endpoint validates the action vocabulary and that the required
+    companion fields are present. It does NOT attempt to apply the
+    correction back into ``Job.gpu_detections`` — that's a UI concern; this
+    endpoint is a write-only audit log that the (future) export script
+    consumes to build training data.
+    """
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != current_user.id and current_user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not payload.corrections:
+        raise HTTPException(status_code=400, detail="corrections array is empty")
+
+    # Validate all entries before inserting any — fail fast and atomically.
+    for i, c in enumerate(payload.corrections):
+        if c.action not in _ALLOWED_CORRECTION_ACTIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"corrections[{i}].action must be one of "
+                       f"{sorted(_ALLOWED_CORRECTION_ACTIONS)}; got {c.action!r}",
+            )
+        if c.action == "reclassify" and not c.new_label:
+            raise HTTPException(
+                status_code=400,
+                detail=f"corrections[{i}]: reclassify requires new_label",
+            )
+        if c.action == "add" and not c.new_bbox:
+            raise HTTPException(
+                status_code=400,
+                detail=f"corrections[{i}]: add requires new_bbox",
+            )
+        if c.new_bbox is not None:
+            if not (isinstance(c.new_bbox, list) and len(c.new_bbox) == 4):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"corrections[{i}].new_bbox must be [x1, y1, x2, y2]",
+                )
+
+    rows = [
+        models.ModelCorrection(
+            job_id=job_id,
+            user_id=current_user.id,
+            detection_index=c.detection_index,
+            action=c.action,
+            new_label=c.new_label,
+            new_bbox=c.new_bbox,
+            note=c.note,
+        )
+        for c in payload.corrections
+    ]
+    db.add_all(rows)
+    db.commit()
+
+    return {"stored": len(rows), "job_id": job_id}
 
 
 # ── POST /api/v1/jobs/{id}/gpu-result ─────────────────────────────────────────

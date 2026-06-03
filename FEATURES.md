@@ -24,6 +24,47 @@
 
 ---
 
+## [2026-06-03] #28 — YOLO v1-9 ONNX in webapp for canvas bbox overlay + corrections-rollback API
+
+**Type:** feature | architecture
+**Stage:** webapp | infra | training
+**Status:** shipped (feature branch — pending merge to `dev`)
+
+**Why:** Three pressures converged:
+
+1. **Decouple from the Windows GPU worker.** Until now, the canvas overlay on the studio page only got bboxes when the Windows/CUDA worker (`worker.run_inference_job` over Tailscale-Redis) called back to `/api/v1/jobs/{id}/gpu-result`. That box is single-tenant, on a residential ISP, frequently powered down, and not part of the official AWS inventory. Customers visiting the studio on a fresh job often saw an empty canvas. Baking the model into the webapp image makes overlays the default.
+2. **Unblock on-prem deploys.** A handful of prospects want air-gapped installs ("our docs never leave our network"). With the model in the image, a single `docker compose up` reproduces the full UX — no Tailscale, no GPU box, no extra moving parts. CPU inference is slower (~1-2 s/tile on a t3.medium) but still well inside the perceived "instant" window for the on-load canvas paint.
+3. **Lay active-learning groundwork.** Spec C (corrections-driven retraining) needs a place to land "this bbox is wrong / this one is missing" events. Without a persistence layer, every studio session throws those signals away. The new `model_corrections` table is that drain — write-only audit log, indexed by `job_id`, ready for an export script to convert into YOLO `labels/*.txt` for the next training cycle. Competitor note: Model Broker / similar P&ID extractors require vector PDFs; we accept raster scans and can correct on them.
+
+The "Two-Mode Architecture — Do NOT Mix" rule in `CLAUDE.md` had to be amended: YOLO inside the webapp is now permitted, but **only** for bbox surfacing. The CSV / deliverable pipeline is still OpenRouter Vision API via `extractor.py` (93% recall, customer-facing quality bar). `pipeline.py` must not import `detector.py`.
+
+**What:**
+
+- **`Dockerfile`** — new RUN step downloads `v1-9.onnx` (43 MB) from the public GitHub release `model-v1-9`, verifies sha256 `11e29b47…f526178`, lands it at `/app/models/v1-9.onnx`. Tries an anonymous `curl -L` first (the release is public on prerelease); falls back to a `--mount=type=secret,id=github_pat` PAT path if the asset returns non-200. Both paths documented inline.
+- **`webapp/inference.py`** — new module exposing `run_yolo_inference(tile_paths) -> list[dict]`. Lazy-loads an `onnxruntime.InferenceSession` once at module scope behind a double-checked-locking pattern (`_session` + `threading.Lock`), CPU provider only. Output dict shape matches the existing GPU-worker callback (`bbox`, `label`, `confidence`, `tile_*`), so the `Job.gpu_detections` consumer in `routers/api_v1.py::api_job_detections` is unchanged. `label` is the raw YOLO class name (`valve_bf`, `inst_bubble`, …) — NOT the OCR'd tag. The entity_id-matching code in api_v1.py (added at `e9dbc1e`) returns `entity_id=null` for raw-class detections, which is the intended state for D1.5+.
+- **`webapp/pipeline_runner.py`** — new `_run_inplace_inference(job_id, job_dir)` runs after `write_canonical_for_job()`, JSON-dumps detections onto `Job.gpu_detections`. Wrapped in try/except (non-fatal), and skipped if the column already has a real (length > 0) list — the GPU worker callback wins if it raced. Logged via stderr; never crashes the job.
+- **`webapp/routers/api_v1.py::api_job_corrections`** — new `POST /api/v1/jobs/{id}/corrections`. Body `{ corrections: [{detection_index, action, new_label?, new_bbox?, note?}] }`. Atomic insert (single commit) into `model_corrections`. Validates action ∈ {delete, reclassify, add}, requires `new_label` on reclassify, `new_bbox` on add. Per-job auth: owner or super_admin.
+- **`webapp/models.ModelCorrection`** — id, job_id FK, user_id FK, detection_index int (-1 for "add"), action str, new_label nullable, new_bbox JSON nullable, note Text nullable, created_at `DateTime(timezone=True)` defaulting via `_utcnow`. Picked up by `Base.metadata.create_all()` in `run_migrations()` — no manual ALTER needed since the table is new.
+- **`requirements.txt`** — added `onnxruntime>=1.17.0`. Pillow was already a dep; numpy via pandas; nothing else new.
+- **`CLAUDE.md`** — amended the "CRITICAL: Two-Mode Architecture" section with the explicit exception clause pointing at `webapp/inference.py`.
+
+**Result (TBD — measure after deploy):**
+
+- v1-9 mAP50 = 0.404 on the diverse val split per the release notes — that's the upper bound for what the canvas will surface. Real-job recall typically tracks higher because the val split is intentionally hard.
+- Expected CPU inference cost: ~1-2 s/tile on a t3.medium (4-tile job ≈ 5 s overhead added to pipeline tail). Smoke-test on the dev EC2 after merge.
+- Numbers pending: recall on the standard MUK sample job after the dev image rebuilds.
+
+**Notes:**
+
+- The `_run_inplace_inference` step is **best-effort**. If the model file is missing (e.g. the Dockerfile download silently degraded), `InferenceError` is caught and the job still finishes "done" — canvas just stays empty, same as today's Windows-worker-unreachable state.
+- The PAT fallback in the Dockerfile is a no-op when no secret is mounted; both `docker build .` and `docker build --secret …` work.
+- Corrections-to-training-data export is **out of scope** here. Follow-up: `webapp/scripts/export_corrections_for_training.py` that reads `model_corrections`, joins on tile geometry, and writes YOLO `labels/*.txt` for the next training run.
+- Future v1-10 should be trainable from accumulated corrections once the export script lands. No timeline pinned — gates on first ~500 corrections accumulating, which at current job volume is ~6-8 weeks.
+- The detections endpoint's entity_id matching (matching `label` to canonical entity `tag`) returns null for raw-class labels like `"valve_bf"` because canonical tags look like `"01-BF-151031"`. That's expected for D1.5+; clicking on a raw-YOLO bbox shows the overlay but doesn't open a datasheet drawer. A "class+bbox → tag" reverse-lookup pass is its own ticket (needs a spatial index over canonical entities, doesn't exist yet).
+- `webapp/inference.py` gates the `import onnxruntime` behind a try/except ImportError so unit tests that don't exercise the inference path don't require the native library locally. Failures surface inside `_get_session()` instead, where they belong.
+
+---
+
 ## [2026-06-03] #27 — Timezone handling: UTC-on-the-wire + per-user display preference + frontend datetime util
 
 **Type:** feature | bugfix | architecture
