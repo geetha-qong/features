@@ -24,6 +24,7 @@ import CreateProjectModal from "../dashboard/CreateProjectModal";
 import ProjectCard from "../dashboard/ProjectCard";
 import ProjectRow from "../dashboard/ProjectRow";
 import { toProjectTile, type ApiJob, type ProjectStatus, type ProjectTile } from "../dashboard/types";
+import { useUserTimezone } from "../util/datetime";
 
 type Layout = "grid" | "list" | "sidebar";
 type Filter = "all" | "mine" | ProjectStatus;
@@ -38,6 +39,7 @@ function readLayout(): Layout {
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const tz = useUserTimezone();
   const navigate = useNavigate();
   const [projects, setProjects] = useState<ProjectTile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +61,7 @@ export default function Dashboard() {
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: { jobs: ApiJob[] }) => {
         if (cancelled) return;
-        setProjects(data.jobs.map(toProjectTile));
+        setProjects(data.jobs.map((j) => toProjectTile(j, tz)));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -73,7 +75,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, tz]);
 
   const counts = useMemo(
     () => ({

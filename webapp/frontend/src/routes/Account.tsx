@@ -13,6 +13,7 @@ import type {
   BillingResponse,
   Transaction,
 } from "../account/types";
+import { formatDateTime, useUserTimezone } from "../util/datetime";
 
 /** Curated short list — enough for ~95% of our user base. Users can also
  *  click "Use browser detection" to clear and fall back to Intl auto-detect. */
@@ -34,17 +35,9 @@ function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
 export default function Account() {
   const { user, refresh: refreshAuth } = useAuth();
+  const tz = useUserTimezone();
   const [info, setInfo] = useState<AccountInfo | null>(null);
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [billing, setBilling] = useState<BillingResponse | null>(null);
@@ -169,7 +162,7 @@ export default function Account() {
             <tbody>
               {txns.map((t) => (
                 <tr key={t.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                  <td style={{ padding: 8 }}>{formatDate(t.created_at)}</td>
+                  <td style={{ padding: 8 }}>{formatDateTime(t.created_at, tz)}</td>
                   <td style={{ padding: 8 }}>{t.reason}</td>
                   <td style={{ padding: 8, textAlign: "right", color: t.delta < 0 ? "crimson" : "green" }}>
                     {t.delta > 0 ? "+" : ""}{t.delta}

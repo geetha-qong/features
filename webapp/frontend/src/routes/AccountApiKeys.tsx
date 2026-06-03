@@ -3,17 +3,10 @@ import { Link } from "react-router-dom";
 import { Copy, Trash2, ArrowLeft } from "lucide-react";
 import { createApiKey, listApiKeys, revokeApiKey } from "../account/api";
 import type { ApiKey, CreatedApiKey } from "../account/types";
-
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
+import { formatDateTime, useUserTimezone } from "../util/datetime";
 
 export default function AccountApiKeys() {
+  const tz = useUserTimezone();
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -153,8 +146,8 @@ export default function AccountApiKeys() {
                 <tr key={k.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
                   <td style={{ padding: 8 }}>{k.name}</td>
                   <td style={{ padding: 8, fontFamily: "monospace" }}>{k.key_prefix}…</td>
-                  <td style={{ padding: 8 }}>{formatDate(k.created_at)}</td>
-                  <td style={{ padding: 8 }}>{formatDate(k.last_used_at)}</td>
+                  <td style={{ padding: 8 }}>{formatDateTime(k.created_at, tz)}</td>
+                  <td style={{ padding: 8 }}>{formatDateTime(k.last_used_at, tz)}</td>
                   <td style={{ padding: 8, textAlign: "right" }}>
                     <button
                       onClick={() => onRevoke(k.id)}

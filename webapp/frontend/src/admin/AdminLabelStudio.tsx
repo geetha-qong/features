@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { ExternalLink, GitBranch, RefreshCw } from "lucide-react";
 import * as api from "./api";
 import type { LabelStudioResponse } from "./types";
+import { formatDate, useUserTimezone } from "../util/datetime";
 
 export default function AdminLabelStudio() {
+  const tz = useUserTimezone();
   const [data, setData] = useState<LabelStudioResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -133,7 +135,7 @@ export default function AdminLabelStudio() {
               <div>
                 <div className="name">{j.original_filename}</div>
                 <div className="sub">
-                  {j.created_at ? new Date(j.created_at).toLocaleDateString() : ""}
+                  {j.created_at ? formatDate(j.created_at, tz) : ""}
                 </div>
               </div>
               <div className="mono">{j.pid_no}</div>

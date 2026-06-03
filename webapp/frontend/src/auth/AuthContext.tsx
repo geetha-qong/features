@@ -34,6 +34,15 @@ export function useAuth(): AuthState {
   return ctx;
 }
 
+/**
+ * Non-throwing variant — returns `null` when called outside <AuthProvider>.
+ * Use this in code that needs to gracefully degrade when no auth is mounted
+ * (e.g. utility hooks consumed by isolated component tests).
+ */
+export function useAuthOptional(): AuthState | null {
+  return useContext(AuthContext);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
