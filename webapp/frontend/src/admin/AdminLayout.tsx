@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import {
   Activity,
+  Columns3,
   CreditCard,
   GitBranch,
   Inbox,
@@ -16,6 +17,7 @@ const NAV: Array<{ to: string; label: string; icon: typeof Users }> = [
   { to: "/admin/feedback", label: "Feedback", icon: Inbox },
   { to: "/admin/credits", label: "Credits", icon: CreditCard },
   { to: "/admin/plans", label: "Plans", icon: Tags },
+  { to: "/admin/custom-columns", label: "Custom Columns", icon: Columns3 },
   { to: "/admin/label-studio", label: "Label Studio", icon: GitBranch },
 ];
 

@@ -24,6 +24,70 @@
 
 ---
 
+## [2026-06-03] #28 — D5: Custom-column-labels per customer template (admin UI)
+
+**Type:** feature
+**Stage:** webapp | webapp/frontend
+**Status:** shipped (Spec A · A.4, FEATURES #26 deliverables queue)
+
+**Why:** Customers want to rename / reorder / hide deliverable columns without us
+editing the canonical JSON templates. The JSON files stay version-controlled
+(canonical), and a thin DB-side override layer merges at template-load time —
+same pattern as `entity_overrides` for canonical entity data (FEATURES #26).
+
+**What:**
+- New ORM `CustomerTemplateOverride` (table `customer_templates_overrides`)
+  in `webapp/models.py`. UNIQUE on `(customer_template_slug, deliverable_type, column_key)`.
+  `column_key` = the JSON template's `field` value (e.g. `"fields.size"`), the
+  natural identity that survives label/order edits. Created automatically via
+  `Base.metadata.create_all()` in `run_migrations()` — no Alembic, no
+  `new_columns` entry needed.
+- `webapp/deliverables/template_loader.py` extended with `merged_template_dict(slug, db, …)`
+  + `TemplateLoader.load_merged(slug, db, …)`. Returns the JSON template with
+  label/order overrides applied and hidden columns dropped. Generators can opt
+  in by switching from `load_with_fallback` to `load_merged`; existing callers
+  (`exports.py`, `entities.py`) still use the JSON-only loader for now — D5
+  intentionally ships the data layer + UI; opting generators in is a follow-up.
+- Three admin endpoints in `routers/api_v1_admin.py`:
+  - `GET /api/v1/admin/customer-templates/{slug}` — merged template + `available_slugs`.
+  - `PUT /api/v1/admin/customer-templates/{slug}` — body `{overrides: [...]}`,
+    delete-then-insert per (deliverable_type, column_key) tuple. No-op rows
+    (no label change, no order change, not hidden) are skipped.
+  - `DELETE /api/v1/admin/customer-templates/{slug}/overrides` — clears all overrides for the slug.
+- New admin page `webapp/frontend/src/admin/AdminCustomColumns.tsx` at
+  `/admin/custom-columns`. Slug picker, four sections (valve_list,
+  instrument_index, equipment_list, datasheet), per-row up/down buttons +
+  editable label + visible checkbox + per-row Reset link. Top-right "Save" /
+  "Reset all" buttons. Uses `formatDateTime(last_updated_at, tz)` for the
+  audit display.
+- `admin/api.ts` + `admin/types.ts` extended with `getCustomerTemplate`,
+  `putCustomerTemplate`, `resetCustomerTemplate` + matching interfaces.
+- `App.tsx` route + `AdminLayout.tsx` nav entry (Columns3 lucide icon).
+
+**Result:**
+- `python3 -c 'import ast; ast.parse(...)' ` clean on backend files.
+- `pytest tests/unit/deliverables/` — 69/69 pass (no regressions, including
+  the 5 existing template-loader tests).
+- `npx tsc --noEmit` clean.
+- `npx vitest run` — 21/21 pre-existing tests pass.
+
+**Notes:**
+- `column_key` deliberately uses the JSON `field` value (dot-notation), not a
+  zero-based index. Reordering on disk later won't break overrides as long as
+  the `field` identity is stable. If a `field` is renamed in JSON, its
+  overrides become orphaned (silently ignored on merge) — acceptable for now;
+  if it becomes painful add a per-slug "orphaned overrides" report.
+- Generators still consume the JSON-only template. To opt one in: replace
+  `_loader.load_with_fallback(slug)` with `_loader.load_merged(slug, db)`.
+  Skipped in this commit to keep the blast radius tight; follow-up ticket once
+  the UI sees real use.
+- The `is_overridden` bookkeeping field added to merged column dicts is
+  silently dropped by `TemplateConfig.model_validate` (pydantic v2 default
+  `extra="ignore"`) so it only surfaces through the dict-based API path —
+  exactly what the UI needs, no generator surprise.
+
+---
+
 ## [2026-06-03] #27 — Timezone handling: UTC-on-the-wire + per-user display preference + frontend datetime util
 
 **Type:** feature | bugfix | architecture
