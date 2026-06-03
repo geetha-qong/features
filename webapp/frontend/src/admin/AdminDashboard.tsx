@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import * as api from "./api";
 import type { DashboardKpis } from "./types";
+import { formatDateTime, useUserTimezone } from "../util/datetime";
 
 export default function AdminDashboard() {
+  const tz = useUserTimezone();
   const [data, setData] = useState<DashboardKpis | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -110,7 +112,7 @@ export default function AdminDashboard() {
                 {t.delta}
               </div>
               <div className="mono">{t.balance_after}</div>
-              <div className="cell-date">{t.created_at ? new Date(t.created_at).toLocaleString() : ""}</div>
+              <div className="cell-date">{t.created_at ? formatDateTime(t.created_at, tz) : ""}</div>
             </div>
           ))}
         </div>

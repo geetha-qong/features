@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import * as api from "./api";
 import type { FeedbackItem, FeedbackStatus } from "./types";
+import { formatDateTime, useUserTimezone } from "../util/datetime";
 
 const STATUSES: Array<FeedbackStatus | "all"> = ["all", "new", "in_progress", "resolved", "wontfix"];
 
@@ -12,6 +13,7 @@ const STATUS_BADGE: Record<FeedbackStatus, string> = {
 };
 
 export default function AdminFeedback() {
+  const tz = useUserTimezone();
   const [filter, setFilter] = useState<FeedbackStatus | "all">("new");
   const [items, setItems] = useState<FeedbackItem[]>([]);
   const [openCount, setOpenCount] = useState(0);
@@ -115,7 +117,7 @@ export default function AdminFeedback() {
               </div>
               <h3 style={{ marginTop: 8 }}>{f.subject}</h3>
               <div className="caption" style={{ color: "var(--fg-3)" }}>
-                {f.username || "Anonymous"} · {f.created_at ? new Date(f.created_at).toLocaleString() : ""}
+                {f.username || "Anonymous"} · {f.created_at ? formatDateTime(f.created_at, tz) : ""}
                 {f.page_url &&
                   (f.page_url.startsWith("http://") || f.page_url.startsWith("https://")) && (
                     <>

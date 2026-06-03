@@ -1,7 +1,18 @@
-"""ORM models: User, Job, ValveRow, Feedback."""
-from datetime import datetime
+"""ORM models: User, Job, ValveRow, Feedback.
+
+All `DateTime` columns use `timezone=True` (Postgres `timestamptz`). Defaults
+use `datetime.now(timezone.utc)` so writes are timezone-aware UTC. SQLite
+silently ignores `timezone=True` (column behaves like TEXT) which is fine
+for local dev — only Postgres needs to enforce the TZ contract.
+"""
+from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, Float, ForeignKey, JSON, UniqueConstraint
 from webapp.database import Base
+
+
+def _utcnow():
+    """Aware UTC `now()` — used as `default=_utcnow` on DateTime columns."""
+    return datetime.now(timezone.utc)
 
 
 class User(Base):
@@ -13,10 +24,11 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     role = Column(String, default="user")       # "user" | "annotator" | "super_admin"
     is_active = Column(Boolean, default=True)   # super_admin can deactivate/approve users
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
     credits_remaining = Column(Integer, default=10)
     tier = Column(String, default="trial")               # 'trial'|'starter'|'pro'|'enterprise'
     organization = Column(String, nullable=True)
+    timezone = Column(String, nullable=True)             # IANA TZ name; NULL = use browser-detected (Intl.DateTimeFormat fallback)
 
 
 class Job(Base):
@@ -34,8 +46,8 @@ class Job(Base):
     include_control_valves = Column(Boolean, default=True)
     processing_time = Column(Float, nullable=True)   # seconds
     processing_log = Column(Text, nullable=True)     # captured stdout from pipeline
-    created_at = Column(DateTime, default=datetime.utcnow)
-    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     ls_project_id = Column(Integer, nullable=True)   # Label Studio project id
     ls_synced = Column(Boolean, default=False)        # True once tiles pushed to LS
     output_inst_index_path = Column(String, nullable=True)   # instrumentation_index.csv
@@ -57,11 +69,11 @@ class JobRun(Base):
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
     attempt_num = Column(Integer, nullable=False)
     rq_id = Column(String, nullable=True)
-    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    ended_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    ended_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String, default="running")        # running|done|failed|killed
     current_stage = Column(String, nullable=True)     # latest "Stage N: ..." line
-    last_heartbeat_at = Column(DateTime, nullable=True)
+    last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
     error_msg = Column(Text, nullable=True)
     error_traceback = Column(Text, nullable=True)
     stage_timings = Column(Text, nullable=True)       # JSON: [{stage, started_at, ended_at}]
@@ -98,7 +110,7 @@ class Feedback(Base):
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     notes = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 class ApiKey(Base):
@@ -109,9 +121,9 @@ class ApiKey(Base):
     name = Column(String, nullable=False)            # user-defined label e.g. "production"
     key_prefix = Column(String(8), nullable=False)   # first 8 chars for display
     key_hash = Column(String, nullable=False)         # pbkdf2_sha256 hash of full key
-    created_at = Column(DateTime, default=datetime.utcnow)
-    last_used_at = Column(DateTime, nullable=True)
-    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class CreditTransaction(Base):
@@ -124,7 +136,7 @@ class CreditTransaction(Base):
     reason = Column(String, nullable=False)              # 'signup_grant'|'admin_grant'|'job_consumed'|'purchase'|'refund'
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     meta = Column(Text, nullable=True)                   # JSON string for extra context
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 class BillingPlan(Base):
@@ -136,7 +148,7 @@ class BillingPlan(Base):
     price_usd_cents = Column(Integer, nullable=False)    # 0 for Trial
     is_active = Column(Boolean, default=True)
     stripe_price_id = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 class EntityOverride(Base):
@@ -173,7 +185,7 @@ class EntityOverride(Base):
     new_value = Column(JSON, nullable=False)
     prior_value = Column(JSON, nullable=True)
     edited_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    edited_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    edited_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("job_id", "entity_id", "field_name", name="uq_entity_overrides_jef"),
@@ -191,4 +203,4 @@ class UserFeedback(Base):
     page_url = Column(String, nullable=True)
     status = Column(String, default="new")               # 'new'|'in_progress'|'resolved'|'wontfix'
     admin_notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)

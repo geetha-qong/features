@@ -38,7 +38,9 @@ services:
       - GPU_CALLBACK_SECRET=${GPU_CALLBACK_SECRET}
       - WEBAPP_BASE_URL=${WEBAPP_BASE_URL:-https://dev.qongsystems.com}
       - GPU_INTERNAL_BASE_URL=${GPU_INTERNAL_BASE_URL:-http://100.127.190.88:8000}
-      - TZ=Asia/Kolkata
+      # No TZ env: containers run in UTC. All app writes use datetime.utcnow();
+      # API serializes with utc_iso() (Z-suffixed). Per-user display TZ comes
+      # from User.timezone or browser Intl.DateTimeFormat fallback (FEATURES #27).
     depends_on:
       postgres:
         condition: service_healthy
@@ -240,7 +242,7 @@ services:
       - WEBAPP_BASE_URL=${WEBAPP_BASE_URL:-https://dev.qongsystems.com}
       - GPU_CALLBACK_SECRET=${GPU_CALLBACK_SECRET}
       - GPU_INTERNAL_BASE_URL=${GPU_INTERNAL_BASE_URL:-http://100.127.190.88:8000}
-      - TZ=Asia/Kolkata
+      # No TZ env: containers run in UTC. See web service comment.
     depends_on:
       - redis
       - postgres

@@ -56,6 +56,13 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const getAccount = () => call<AccountInfo>("GET", "/api/v1/account");
 
+/**
+ * Set or clear the user's preferred display timezone.
+ * Pass `null` to clear (frontend then auto-detects via Intl.DateTimeFormat).
+ */
+export const setTimezone = (tz: string | null) =>
+  call<{ timezone: string | null }>("PATCH", "/api/v1/account/timezone", { timezone: tz });
+
 export const listTransactions = (limit = 20) =>
   call<{ transactions: Transaction[] }>("GET", `/api/v1/account/transactions?limit=${limit}`);
 

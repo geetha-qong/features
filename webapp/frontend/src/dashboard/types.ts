@@ -43,7 +43,9 @@ export function statusOf(s: ApiJobStatus): ProjectStatus {
   return "draft";
 }
 
-export function relativeTime(iso: string | null): string {
+import { formatDate } from "../util/datetime";
+
+export function relativeTime(iso: string | null, tz?: string): string {
   if (!iso) return "—";
   const then = new Date(iso).getTime();
   const diffSec = Math.max(0, (Date.now() - then) / 1000);
@@ -53,7 +55,7 @@ export function relativeTime(iso: string | null): string {
   if (diffSec < 86400 * 2) return "Yesterday";
   if (diffSec < 86400 * 7) return `${Math.round(diffSec / 86400)} days ago`;
   if (diffSec < 86400 * 30) return `${Math.round(diffSec / 86400 / 7)} weeks ago`;
-  return new Date(iso).toLocaleDateString();
+  return formatDate(iso, tz);
 }
 
 export function avatarFor(username: string | null): TeamMember {
@@ -65,12 +67,12 @@ export function avatarFor(username: string | null): TeamMember {
   return { name, initials, color };
 }
 
-export function toProjectTile(job: ApiJob): ProjectTile {
+export function toProjectTile(job: ApiJob, tz?: string): ProjectTile {
   return {
     id: job.id,
     name: job.name.replace(/\.pdf$/i, ""),
     client: job.owner_username || "Internal",
-    lastModified: relativeTime(job.created_at),
+    lastModified: relativeTime(job.created_at, tz),
     rev: "R1",
     pidCount: 1,
     status: statusOf(job.status),

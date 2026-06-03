@@ -1,38 +1,69 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Key, Receipt, CreditCard, ArrowRight } from "lucide-react";
-import { useAuth } from "../auth/AuthContext";
+import { detectBrowserTimezone, useAuth } from "../auth/AuthContext";
 import {
   getAccount,
   getBilling,
   listTransactions,
+  setTimezone,
 } from "../account/api";
 import type {
   AccountInfo,
   BillingResponse,
   Transaction,
 } from "../account/types";
+import { formatDateTime, useUserTimezone } from "../util/datetime";
+
+/** Curated short list — enough for ~95% of our user base. Users can also
+ *  click "Use browser detection" to clear and fall back to Intl auto-detect. */
+const TZ_OPTIONS: { value: string; label: string }[] = [
+  { value: "Asia/Kolkata", label: "India — IST (Asia/Kolkata)" },
+  { value: "Asia/Dubai", label: "Gulf — GST (Asia/Dubai)" },
+  { value: "Europe/Istanbul", label: "Türkiye — TRT (Europe/Istanbul)" },
+  { value: "Europe/London", label: "UK — GMT/BST (Europe/London)" },
+  { value: "Europe/Berlin", label: "Central Europe — CET/CEST (Europe/Berlin)" },
+  { value: "America/New_York", label: "US East — ET (America/New_York)" },
+  { value: "America/Los_Angeles", label: "US West — PT (America/Los_Angeles)" },
+  { value: "Asia/Singapore", label: "Singapore — SGT (Asia/Singapore)" },
+  { value: "Asia/Tokyo", label: "Japan — JST (Asia/Tokyo)" },
+  { value: "Australia/Sydney", label: "Sydney — AEST/AEDT (Australia/Sydney)" },
+  { value: "UTC", label: "UTC (no offset)" },
+];
 
 function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
 export default function Account() {
-  const { user } = useAuth();
+  const { user, refresh: refreshAuth } = useAuth();
+  const tz = useUserTimezone();
   const [info, setInfo] = useState<AccountInfo | null>(null);
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [billing, setBilling] = useState<BillingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tzSaving, setTzSaving] = useState(false);
+  const [tzError, setTzError] = useState<string | null>(null);
+  const browserTz = detectBrowserTimezone();
+
+  async function handleTimezoneChange(value: string) {
+    // "" sentinel = clear (revert to browser auto-detect)
+    const next = value === "" ? null : value;
+    setTzSaving(true);
+    setTzError(null);
+    try {
+      await setTimezone(next);
+      setInfo((cur) => (cur ? { ...cur, timezone: next } : cur));
+      // Push the new value into AuthContext so anywhere else in the SPA
+      // that reads user.timezone updates immediately.
+      void refreshAuth();
+    } catch (e) {
+      setTzError((e as Error).message);
+    } finally {
+      setTzSaving(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -68,13 +99,32 @@ export default function Account() {
 
       <section style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 18, marginBottom: 12 }}>Profile</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", rowGap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", rowGap: 8, alignItems: "center" }}>
           <div style={{ color: "#666" }}>Username</div><div>{info?.username ?? user?.username}</div>
           <div style={{ color: "#666" }}>Email</div><div>{info?.email ?? "—"}</div>
           <div style={{ color: "#666" }}>Role</div><div>{info?.role}</div>
           <div style={{ color: "#666" }}>Tier</div><div>{info?.tier}</div>
           <div style={{ color: "#666" }}>Credits remaining</div>
           <div style={{ fontWeight: 600 }}>{info?.credits_remaining ?? 0}</div>
+          <div style={{ color: "#666" }}>Time zone</div>
+          <div>
+            <select
+              value={info?.timezone ?? ""}
+              onChange={(e) => void handleTimezoneChange(e.target.value)}
+              disabled={tzSaving}
+              style={{ padding: "6px 10px", minWidth: 320 }}
+            >
+              <option value="">Auto-detect from browser ({browserTz})</option>
+              {TZ_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            {tzSaving && <span style={{ marginLeft: 12, color: "#666" }}>Saving…</span>}
+            {tzError && <span style={{ marginLeft: 12, color: "crimson" }}>{tzError}</span>}
+            <div style={{ color: "#888", fontSize: 12, marginTop: 4 }}>
+              All timestamps in Studio, Dashboard, and Admin display in this zone.
+            </div>
+          </div>
         </div>
       </section>
 
@@ -112,7 +162,7 @@ export default function Account() {
             <tbody>
               {txns.map((t) => (
                 <tr key={t.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                  <td style={{ padding: 8 }}>{formatDate(t.created_at)}</td>
+                  <td style={{ padding: 8 }}>{formatDateTime(t.created_at, tz)}</td>
                   <td style={{ padding: 8 }}>{t.reason}</td>
                   <td style={{ padding: 8, textAlign: "right", color: t.delta < 0 ? "crimson" : "green" }}>
                     {t.delta > 0 ? "+" : ""}{t.delta}

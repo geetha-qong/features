@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from webapp import models
 from webapp.config import JOB_OUTPUT_DIR, get_job_dir
+from webapp.datetime_utils import utc_iso
 from webapp.deliverables.pipeline_emitter import write_canonical_for_job
 
 _pipeline_lock = threading.Lock()
@@ -137,8 +138,8 @@ class _HeartbeatThread(threading.Thread):
             if self._current_stage:
                 self._stage_timings.append({
                     "stage": self._current_stage,
-                    "started_at": self._stage_started_at.isoformat(),
-                    "ended_at": now.isoformat(),
+                    "started_at": utc_iso(self._stage_started_at),
+                    "ended_at": utc_iso(now),
                 })
             self._current_stage = stage
             self._stage_started_at = now

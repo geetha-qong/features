@@ -24,6 +24,58 @@
 
 ---
 
+## [2026-06-03] #27 — Timezone handling: UTC-on-the-wire + per-user display preference + frontend datetime util
+
+**Type:** feature | bugfix | architecture
+**Stage:** webapp | webapp/frontend | infra
+**Status:** shipped (all three phases) — feature branch `feature/timezone-handling`, PR open against `dev`
+
+**Why:** A user-facing question ("what TZ are the servers running in, and can users pick their own?") surfaced a real latent bug stack:
+
+1. The `web` and `cpu-worker` containers had `TZ=Asia/Kolkata` in `docker-compose.yml`, which only changes `datetime.now()` / `time.localtime()` output, not `datetime.utcnow()`. Most code uses `utcnow()` (correct UTC writes), but the env was misleading and meant any future bare `datetime.now()` would silently emit IST into the same column as UTC values. Latent mixed-timezone data.
+2. The API serialized datetimes with `dt.isoformat() if dt else None`, producing strings without the `Z` suffix (e.g. `"2026-06-03T06:53:16"`). JavaScript's `new Date(iso)` parses those as **local clock**, not UTC, under-shifting every displayed timestamp by the browser's offset (5:30h on IST). This was wrong everywhere on dev.qongsystems.com.
+3. There was no `User.timezone` column or UI to let users pick a display TZ. Frontend defaulted to whatever `toLocaleString()` picked up from the browser, with no way to override.
+
+Without fixing all three, "show times in the user's TZ" wouldn't have done what users expect.
+
+**What:** Three phases, one commit per phase on `feature/timezone-handling`:
+
+- **Phase 1 — Backend correctness** (commit `29643a2`):
+  - Removed `TZ=Asia/Kolkata` from `web` + `cpu-worker` (containers now UTC, matching the EC2 host).
+  - New `webapp/datetime_utils.py` with `utc_iso(dt)` (Z-suffixed) and aware `utcnow()`. All 12 `dt.isoformat() if dt else None` callsites in `routers/api_v1.py` + `api_v1_admin.py` replaced. `pipeline_runner.py` stage timings switched too.
+  - `models.py`: every `DateTime` column → `DateTime(timezone=True)` (14 columns across 9 tables). Defaults switched to a module-level `_utcnow()` returning aware UTC.
+  - `database.py:run_migrations()` extended with a Postgres-only ALTER pass that converts each legacy `timestamp without time zone` column to `timestamptz USING (... AT TIME ZONE 'UTC')`. SQLite is a no-op. Failures are logged (not silently swallowed) so half-migrated state is visible.
+
+- **Phase 2 — User TZ preference** (commit `05b04e4`):
+  - `User.timezone = Column(String, nullable=True)` + a new entry in the `run_migrations` `new_columns` list.
+  - `GET /api/v1/account` now returns `timezone`. New `PATCH /api/v1/account/timezone` validates the IANA name via stdlib `zoneinfo.ZoneInfo` and returns 422 on unknown values.
+  - `AuthContext.tsx`: `CurrentUser.timezone`, new `detectBrowserTimezone()` utility wrapping `Intl.DateTimeFormat`. On `refresh()`, if the server returns null timezone, silently PATCH the browser-detected zone (best-effort; errors swallowed so login never breaks).
+  - `routes/Account.tsx`: TZ selector in Profile section with 11 curated IANA options and an "Auto-detect (browser: X)" sentinel that clears the field. Saves on change, refreshes AuthContext so the rest of the SPA picks up the change immediately.
+
+- **Phase 3 — Frontend rendering layer** (commit `b5e1fec`):
+  - `npm install date-fns@^4.4.0` (only `formatDistanceToNow` imported; ~6 KB gzipped).
+  - New `webapp/frontend/src/util/datetime.ts` exporting `useUserTimezone()`, `formatDateTime(iso, tz?)`, `formatDate(iso, tz?)`, `formatRelative(iso)`. Native `Intl.DateTimeFormat` for absolute formatting (no `date-fns-tz` needed); date-fns only for relative-distance strings.
+  - 9 callsites replaced: `routes/Account.tsx`, `routes/AccountApiKeys.tsx`, `routes/Dashboard.tsx`, `dashboard/types.ts`, `admin/AdminDashboard.tsx`, `admin/AdminCredits.tsx`, `admin/AdminFeedback.tsx`, `admin/AdminLabelStudio.tsx`, `admin/AdminUsers.tsx`. Each component now does `const tz = useUserTimezone()` once at top, passes through.
+  - Added `useAuthOptional()` (non-throwing variant) so `useUserTimezone()` is resilient to being called outside `<AuthProvider>` in isolated component tests. Saved wrapping every existing admin test in an AuthProvider.
+
+**Result (verified):**
+- `npx tsc --noEmit`: clean across the SPA.
+- `npx vitest run`: 21/21 tests pass (no test changes needed).
+- `webapp/datetime_utils.py` smoke test: naive UTC, aware UTC, aware IST, None — all serialize to expected Z-suffixed UTC string.
+- Bundle delta from date-fns: ~6 KB gzipped (tree-shaken to `formatDistanceToNow` only).
+
+**Notes:**
+- The timestamptz migration rewrites the column on disk. Safe at our current scale (jobs ~50 rows, users <20) but if any table hits 10M+ rows in the future, the same migration would need to be batched / use `pg_repack`. Not an issue today.
+- For users whose `User.timezone` is set but the IANA value later disappears from the system tzdb (e.g. obsolete zone removed), `Intl.DateTimeFormat` throws — we catch and fall back to `toLocaleString()`. Logged as a known soft-failure in `formatDateTime`.
+- Auto-detect on first login silently fires `PATCH /api/v1/account/timezone`. If you observe a `timezone` field appearing in DB writes for new users right after login, that's expected.
+- The dashboard's `relativeTime()` keeps its hand-rolled short strings ("3 hr ago", "Yesterday") for ≤30 days; only the >30-day "old date" fallback was migrated to the util. Replacing with `formatRelative()` everywhere would give consistent date-fns wording but would change tile copy ("about 3 hours ago" vs "3 hr ago"). Out of scope for this entry; reconsider when bulk-review screen renders timestamps.
+- Open follow-ups (not blocking):
+  1. Wire `entity_overrides.edited_at` display in DatasheetDrawer once Spec A D2 lands.
+  2. The QA-stopped EC2 will need the migration on next start (will run automatically on app startup via `run_migrations()`).
+  3. Consider exposing a richer TZ picker (full IANA list) once users complain about the 11-option curated list.
+
+---
+
 ## [2026-06-02] #26 — Editable deliverables: entity_overrides backend layer (Day 1 of Spec A)
 
 **Type:** feature | architecture

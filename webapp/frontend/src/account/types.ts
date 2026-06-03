@@ -5,6 +5,8 @@ export interface AccountInfo {
   credits_remaining: number;
   tier: string;
   role: string;
+  /** IANA name (e.g. "Asia/Kolkata"). Null → frontend uses Intl auto-detect. */
+  timezone: string | null;
 }
 
 export interface Transaction {

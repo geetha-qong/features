@@ -5,6 +5,7 @@ import * as api from "./api";
 import type { AdminUser, Role, Tier } from "./types";
 import CreateUserModal from "./CreateUserModal";
 import EditUserModal from "./EditUserModal";
+import { formatDate, useUserTimezone } from "../util/datetime";
 
 const ROLE_LABEL: Record<Role, string> = {
   user: "User",
@@ -21,6 +22,7 @@ const TIER_LABEL: Record<Tier, string> = {
 
 export default function AdminUsers() {
   const { user: me } = useAuth();
+  const tz = useUserTimezone();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -153,7 +155,7 @@ export default function AdminUsers() {
                     )}
                   </div>
                   <div className="sub">
-                    {u.created_at ? `Joined ${new Date(u.created_at).toLocaleDateString()}` : ""}
+                    {u.created_at ? `Joined ${formatDate(u.created_at, tz)}` : ""}
                   </div>
                 </div>
                 <div className="cell-client">{u.email || "—"}</div>

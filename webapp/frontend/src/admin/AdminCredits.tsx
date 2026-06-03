@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import * as api from "./api";
 import type { CreditTxn } from "./types";
+import { formatDateTime, useUserTimezone } from "../util/datetime";
 
 type SignFilter = "all" | "granted" | "consumed";
 
 export default function AdminCredits() {
+  const tz = useUserTimezone();
   const [txns, setTxns] = useState<CreditTxn[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,7 +127,7 @@ export default function AdminCredits() {
                 {t.delta}
               </div>
               <div className="mono">{t.balance_after}</div>
-              <div className="cell-date">{t.created_at ? new Date(t.created_at).toLocaleString() : ""}</div>
+              <div className="cell-date">{t.created_at ? formatDateTime(t.created_at, tz) : ""}</div>
               <div className="mono">{t.job_id ?? "—"}</div>
             </div>
           ))}
