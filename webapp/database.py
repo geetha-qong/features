@@ -67,6 +67,7 @@ def run_migrations():
         ("users", "credits_remaining", "INTEGER DEFAULT 10"),
         ("users", "tier", "TEXT DEFAULT 'trial'"),
         ("users", "organization", "TEXT"),
+        ("users", "timezone", "TEXT"),
         ("jobs", "original_filename", "TEXT"),
     ]
     for table, column, col_type in new_columns:

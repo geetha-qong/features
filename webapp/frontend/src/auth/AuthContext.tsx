@@ -5,6 +5,17 @@ export interface CurrentUser {
   username: string;
   email: string;
   role: string;
+  /** IANA name or null. Null → callers should fall back to browser-detected. */
+  timezone: string | null;
+}
+
+/** Browser-detected IANA timezone, with a safe fallback. */
+export function detectBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
 }
 
 interface AuthState {
@@ -44,7 +55,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // role MUST come from the server explicitly — never fall back to
           // data.tier (was a bug; would render super_admin as "trial").
           role: typeof data.role === "string" ? data.role : "user",
+          timezone: typeof data.timezone === "string" ? data.timezone : null,
         });
+        // Auto-set TZ on first login: if server has no preference yet,
+        // POST the browser-detected zone once silently. Subsequent logins
+        // see the persisted value and skip this. Failures are ignored —
+        // we don't want a TZ POST error to break login.
+        if (!data.timezone) {
+          const detected = detectBrowserTimezone();
+          if (detected) {
+            void fetch("/api/v1/account/timezone", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ timezone: detected }),
+              credentials: "include",
+            }).catch(() => { /* best-effort */ });
+          }
+        }
       } else {
         setUser(null);
       }

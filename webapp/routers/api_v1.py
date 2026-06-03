@@ -373,7 +373,43 @@ async def api_account(
         "credits_remaining": credits_module.get_balance(current_user),
         "tier": current_user.tier or "trial",
         "role": current_user.role or "user",
+        "timezone": current_user.timezone,  # IANA name or null → frontend uses Intl auto-detect
     }
+
+
+# ── PATCH /api/v1/account/timezone ────────────────────────────────────────────
+
+class TimezonePatch(BaseModel):
+    timezone: Optional[str] = None  # IANA name, or null to clear (back to auto-detect)
+
+
+@router.patch("/account/timezone")
+async def api_account_set_timezone(
+    payload: TimezonePatch,
+    current_user: models.User = Depends(_get_api_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear the user's preferred display timezone.
+
+    Body `{ "timezone": "Asia/Kolkata" }` to set, or `{ "timezone": null }` to
+    clear (frontend then falls back to Intl.DateTimeFormat browser detection).
+    IANA names only — validated via zoneinfo.ZoneInfo. Invalid → 422.
+    """
+    tz = payload.timezone
+    if tz is not None:
+        # Validate against the IANA database. zoneinfo is in stdlib (3.9+).
+        try:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            ZoneInfo(tz)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise HTTPException(status_code=422, detail=f"Unknown IANA timezone: {tz!r}")
+
+    user = db.query(models.User).filter(models.User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.timezone = tz
+    db.commit()
+    return {"timezone": user.timezone}
 
 
 # ── GET /api/v1/account/transactions ─────────────────────────────────────────

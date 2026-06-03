@@ -28,6 +28,7 @@ class User(Base):
     credits_remaining = Column(Integer, default=10)
     tier = Column(String, default="trial")               # 'trial'|'starter'|'pro'|'enterprise'
     organization = Column(String, nullable=True)
+    timezone = Column(String, nullable=True)             # IANA TZ name; NULL = use browser-detected (Intl.DateTimeFormat fallback)
 
 
 class Job(Base):
