@@ -20,6 +20,14 @@ export interface DetectionItem {
   label?: string;
   confidence?: number;
   category?: string;
+  /** Backend-attached canonical entity UUID (FEATURES #27 / D1.5). Null when
+   *  no canonical match (e.g. label is a symbol-class string, not a tag, or
+   *  canonical.json hasn't been written yet). The DatasheetDrawer keys edits
+   *  by this — detections with null `entity_id` are read-only. */
+  entity_id?: string | null;
+  /** Canonical entity_class ("valve" | "instrument" | …) — also from the
+   *  backend match. Used to choose which deliverable type to render. */
+  entity_class?: string;
   [k: string]: unknown;
 }
 

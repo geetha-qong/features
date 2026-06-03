@@ -259,6 +259,72 @@ def test_detections_survives_malformed_gpu_json(client, db_session, user, api_ke
     assert resp.json()["detections"] == []
 
 
+def test_detections_attach_entity_id_from_canonical(client, db_session, user, api_key_pair, tmp_path):
+    """D1.5: GET /detections matches detection.label → canonical.tag and attaches entity_id.
+
+    Detections whose label has no matching canonical entity get entity_id=None
+    (informational-only — not editable via the override API).
+    """
+    import json as _json
+    from webapp.deliverables.canonical import CanonicalEntity, JobCanonical
+    import uuid as _uuid
+
+    # Build a real canonical.json on disk alongside output_csv_path.
+    out_dir = tmp_path / "job_dir"
+    out_dir.mkdir()
+    csv_path = out_dir / "valve_list.csv"
+    csv_path.write_text("pid_no,category\nP-1,GLOBE\n")  # contents don't matter for this test
+    canonical_path = out_dir / "canonical.json"
+
+    entity1_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "pt-101")
+    entity2_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "ft-201")
+    canonical = JobCanonical(
+        job_id=9001,
+        canonical_schema_version="1.0.0",
+        customer_template_slug="default",
+        entities=[
+            CanonicalEntity(
+                entity_id=entity1_id, entity_class="instrument",
+                sub_class="PT", tag="PT-101",
+                pid_number="T-301", sheet_number=1,
+                bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
+            ),
+            CanonicalEntity(
+                entity_id=entity2_id, entity_class="instrument",
+                sub_class="FT", tag="FT-201",
+                pid_number="T-301", sheet_number=1,
+                bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
+            ),
+        ],
+    )
+    canonical_path.write_text(canonical.model_dump_json())
+
+    job = models.Job(
+        user_id=user.id, pid_no="T-301", status="done", valve_count=0,
+        original_filename="x.pdf", stored_filename="y.pdf",
+        output_csv_path=str(csv_path),
+        gpu_detections=_json.dumps([
+            {"bbox": [10, 20, 30, 40], "label": "PT-101"},   # matches entity1
+            {"bbox": [50, 60, 70, 80], "label": "FT-201"},   # matches entity2
+            {"bbox": [90, 100, 110, 120], "label": "valve_bf"},  # no canonical match
+        ]),
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    full_key, _ = api_key_pair
+    resp = client.get(
+        f"/api/v1/jobs/{job.id}/detections",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 200
+    dets = resp.json()["detections"]
+    assert dets[0]["entity_id"] == str(entity1_id)
+    assert dets[0]["entity_class"] == "instrument"
+    assert dets[1]["entity_id"] == str(entity2_id)
+    assert dets[2]["entity_id"] is None  # symbol-class label, no tag match
+
+
 def test_detections_includes_valve_rows(client, db_session, user, api_key_pair):
     job = models.Job(
         user_id=user.id, pid_no="T-203", status="done", valve_count=1,

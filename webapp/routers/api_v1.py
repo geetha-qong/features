@@ -270,10 +270,13 @@ async def api_job_detections(
 
     `detections` (may be null/empty if the GPU worker hasn't called back
     yet) contains the bounding-box positions to render on the PDF tile.
-    `valves` is the structured CSV the customer downloads (no coords).
+    Each detection is enriched with `entity_id` (UUID string) when its
+    `label` matches a canonical entity's `tag` — this is what makes the
+    canvas click-to-edit flow work (Spec A / FEATURES #26-27 / D1.5).
+    Detections that fail to match get `entity_id: null` and stay
+    informational-only (cannot be edited via the override API).
 
-    The SPA studio canvas uses `detections` to draw overlay rectangles when
-    available, and shows a fallback list from `valves` when not.
+    `valves` is the structured CSV the customer downloads (no coords).
     """
     import json as _json
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
@@ -290,6 +293,43 @@ async def api_job_detections(
                 detections = parsed
         except (ValueError, TypeError):
             detections = []
+
+    # ── Attach entity_id by matching detection.label → canonical_entity.tag.
+    # Multiple entities can share a tag in pathological cases (rare); we use a
+    # FIFO list-pop so each detection consumes one entity_id at most.
+    if detections and job.output_csv_path:
+        try:
+            from webapp.deliverables.job_loader import (
+                JobCanonicalNotFound,
+                load_canonical_for_job,
+            )
+            canonical = load_canonical_for_job(job.output_csv_path)
+            tag_to_ids: dict = {}
+            for e in canonical.entities:
+                if e.tag:
+                    tag_to_ids.setdefault(e.tag, []).append(
+                        (str(e.entity_id), e.entity_class)
+                    )
+            for det in detections:
+                label = det.get("label")
+                if not label:
+                    det["entity_id"] = None
+                    continue
+                bucket = tag_to_ids.get(label)
+                if bucket:
+                    entity_id, entity_class = bucket.pop(0)
+                    det["entity_id"] = entity_id
+                    det.setdefault("entity_class", entity_class)
+                else:
+                    det["entity_id"] = None
+        except JobCanonicalNotFound:
+            # canonical.json hasn't been emitted yet — leave detections as-is.
+            for det in detections:
+                det.setdefault("entity_id", None)
+        except Exception:
+            # Any parse/schema error: skip enrichment but don't break the canvas.
+            for det in detections:
+                det.setdefault("entity_id", None)
 
     valve_rows = db.query(models.ValveRow).filter(models.ValveRow.job_id == job_id).all()
     valves = [

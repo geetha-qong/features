@@ -158,7 +158,7 @@ export default function PidCanvas({
           />
         )}
         {useReal && detections && detections.length > 0 && (
-          <DetectionOverlay detections={detections} />
+          <DetectionOverlay detections={detections} onSelect={onSelect} selectedId={selectedId} />
         )}
         {!useReal && (
           <svg viewBox="0 0 700 360" className="pid-svg">
@@ -419,7 +419,15 @@ export default function PidCanvas({
  * If the detection shapes are absent or unrecognizable, we silently render
  * nothing — never crash the canvas because the GPU worker hasn't called back.
  */
-function DetectionOverlay({ detections }: { detections: DetectionItem[] }) {
+function DetectionOverlay({
+  detections,
+  onSelect,
+  selectedId,
+}: {
+  detections: DetectionItem[];
+  onSelect: (id: string) => void;
+  selectedId: string;
+}) {
   const valid = detections.filter((d) => Array.isArray(d.bbox) && d.bbox.length === 4);
   if (valid.length === 0) return null;
 
@@ -444,12 +452,14 @@ function DetectionOverlay({ detections }: { detections: DetectionItem[] }) {
         margin: "auto",
         maxWidth: "min(100%, 1200px)",
         maxHeight: "70vh",
-        pointerEvents: "none",
+        // pointerEvents handled per-rect — only entity-linked detections capture clicks
       }}
       preserveAspectRatio="xMidYMid meet"
     >
       {valid.map((d, i) => {
         const [x1, y1, x2, y2] = d.bbox!;
+        const clickable = typeof d.entity_id === "string" && d.entity_id.length > 0;
+        const isSelected = clickable && d.entity_id === selectedId;
         return (
           <g key={i}>
             <rect
@@ -457,11 +467,18 @@ function DetectionOverlay({ detections }: { detections: DetectionItem[] }) {
               y={y1}
               width={x2 - x1}
               height={y2 - y1}
-              fill="none"
-              stroke="#FF4DA8"
-              strokeWidth={Math.max(1, w / 400)}
-              strokeDasharray={Math.max(2, w / 200) + " " + Math.max(2, w / 200)}
-            />
+              fill={isSelected ? "rgba(255,77,168,0.15)" : "none"}
+              stroke={isSelected ? "#FF4DA8" : "#FF4DA8"}
+              strokeWidth={isSelected ? Math.max(2, w / 250) : Math.max(1, w / 400)}
+              strokeDasharray={isSelected ? undefined : Math.max(2, w / 200) + " " + Math.max(2, w / 200)}
+              style={{
+                pointerEvents: clickable ? "auto" : "none",
+                cursor: clickable ? "pointer" : "default",
+              }}
+              onClick={clickable ? () => onSelect(d.entity_id as string) : undefined}
+            >
+              {clickable && <title>{d.label} — click to edit</title>}
+            </rect>
             {d.label && (
               <text
                 x={x1}
@@ -470,6 +487,7 @@ function DetectionOverlay({ detections }: { detections: DetectionItem[] }) {
                 fontFamily="JetBrains Mono, monospace"
                 fontWeight="700"
                 fill="#FF4DA8"
+                style={{ pointerEvents: "none" }}
               >
                 {d.label}
               </text>
