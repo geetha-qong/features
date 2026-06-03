@@ -192,6 +192,42 @@ class EntityOverride(Base):
     )
 
 
+class ModelCorrection(Base):
+    """A user correction to a single YOLO detection on a job's canvas.
+
+    FEATURES #28 — active-learning plumbing. Each row captures one editorial
+    action on the bbox overlay (``Job.gpu_detections`` JSON list):
+
+      - ``action="delete"``      → false-positive: this bbox should not exist.
+      - ``action="reclassify"``  → wrong class: ``new_label`` is the correct one.
+      - ``action="add"``         → false-negative: ``new_bbox`` (and usually
+        ``new_label``) describe a symbol the model missed.
+
+    ``detection_index`` refers to the index in the JSON list at edit time
+    (``-1`` is the convention for new "add" rows that don't correspond to an
+    existing detection). The bbox + class snapshot lives in the JSON column
+    so we keep enough context to rebuild YOLO label files later — see the
+    forthcoming ``webapp/scripts/export_corrections_for_training.py``.
+
+    Audit columns deliberately mirror :class:`EntityOverride` (user + time).
+    There is no UNIQUE constraint here: the same detection may be corrected
+    multiple times (e.g. classified twice while the user is iterating), and
+    each correction is a row. The export script picks the most recent per
+    ``(job_id, detection_index)``.
+    """
+    __tablename__ = "model_corrections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    detection_index = Column(Integer, nullable=False)         # -1 for "add" rows
+    action = Column(String, nullable=False)                   # "delete"|"reclassify"|"add"
+    new_label = Column(String, nullable=True)
+    new_bbox = Column(JSON, nullable=True)                    # [x1, y1, x2, y2]
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
 class UserFeedback(Base):
     __tablename__ = "user_feedback"                      # distinct from "feedback" (job-level engineer notes)
 

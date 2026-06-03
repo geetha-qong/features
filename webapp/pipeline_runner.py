@@ -302,6 +302,15 @@ def run_pipeline_for_job_rq(
         except Exception as _emit_err:
             print(f"[canonical-emit] job {job_id}: {_emit_err}", file=sys.stderr)
 
+        # In-process YOLO inference for canvas bbox surfacing (FEATURES #28).
+        # Populates Job.gpu_detections so the SPA studio canvas gets overlays
+        # without depending on the Windows GPU worker callback. Non-fatal —
+        # CSV/deliverables are the headline product; bbox overlays are gravy.
+        try:
+            _run_inplace_inference(job_id, job_dir)
+        except Exception as _yolo_err:
+            print(f"[inplace-yolo] job {job_id}: {_yolo_err}", file=sys.stderr)
+
         _finalize_job_run(run_id, "done")
 
         # Side effects (LS sync, GPU dispatch) use the same session
@@ -385,6 +394,53 @@ def _dispatch_gpu_job(job, job_dir: Path) -> None:
         print(f"[gpu] Dispatched job {job.id} ({len(tile_infos)} tiles)")
     except Exception as e:
         print(f"[gpu] Dispatch error for job {job.id}: {e}")
+
+
+def _run_inplace_inference(job_id: int, job_dir: Path) -> None:
+    """Run YOLO ONNX inference on all tiles and write to Job.gpu_detections.
+
+    FEATURES #28. This is the in-process counterpart to
+    :func:`_dispatch_gpu_job` — both write the same shape into the same DB
+    column. The GPU worker is faster on its CUDA box; this CPU path is the
+    default everywhere else (on-prem deploys, CI, local dev).
+
+    Skipped automatically when ``gpu_detections`` already has content — the
+    GPU worker callback wins if it raced ahead.
+    """
+    from webapp.inference import run_yolo_inference, InferenceError
+
+    tile_files = sorted((job_dir / "tmp").glob("tile_p*_r*_c*.png"))
+    if not tile_files:
+        return
+
+    db = _short_session()
+    try:
+        job = db.query(models.Job).filter(models.Job.id == job_id).first()
+        if not job:
+            return
+        # Don't clobber a real GPU-worker result that already landed.
+        if job.gpu_detections:
+            try:
+                existing = json.loads(job.gpu_detections)
+                if isinstance(existing, list) and len(existing) > 0:
+                    print(f"[inplace-yolo] job {job_id}: gpu_detections already populated ({len(existing)}); skipping")
+                    return
+            except (ValueError, TypeError):
+                pass  # fall through and overwrite garbage
+
+        try:
+            detections = run_yolo_inference(tile_files)
+        except InferenceError as exc:
+            # Expected mode: model missing on dev machines without the
+            # baked image. Log and exit cleanly.
+            print(f"[inplace-yolo] job {job_id}: {exc}")
+            return
+
+        job.gpu_detections = json.dumps(detections)
+        db.commit()
+        print(f"[inplace-yolo] job {job_id}: stored {len(detections)} detections")
+    finally:
+        db.close()
 
 
 def _ingest_csv(job_id: int, csv_path: str, pid_no_override: str, db: Session, include_control_valves: bool = True) -> None:

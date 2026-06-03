@@ -3,4 +3,5 @@ pymupdf
 pillow
 pandas
 rapidocr-onnxruntime
+onnxruntime>=1.17.0
 rapidfuzz

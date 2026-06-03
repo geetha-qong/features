@@ -103,6 +103,8 @@ docker compose exec web python3 -m pytest tests/unit/ -v      # run unit tests
 **Rule**: `pipeline.py` line 15 must always read `from extractor import ...` — never `from detector import ...`
 If someone changes this by mistake, revert it immediately. The offline detector is NOT production-ready yet (73% recall vs 93% API).
 
+**Exception:** YOLO inference is permitted in the webapp for bbox-surfacing only (canvas overlay via `Job.gpu_detections`). The CSV/deliverable pipeline still uses `extractor.py` (OpenRouter API). Do not import `detector.py` into `pipeline.py`. The new `webapp/inference.py` is the supported path for in-process inference (FEATURES #28).
+
 ## Environment
 
 - Python 3.12 server (Ubuntu 24.04), Python 3.9 local dev
