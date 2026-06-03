@@ -14,6 +14,8 @@ import re
 from datetime import datetime
 from typing import Optional
 
+from webapp.datetime_utils import utc_iso
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -47,7 +49,7 @@ def _serialize_user(u: models.User) -> dict:
         "credits_remaining": u.credits_remaining or 0,
         "tier": u.tier or "trial",
         "organization": u.organization,
-        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "created_at": utc_iso(u.created_at),
     }
 
 
@@ -60,7 +62,7 @@ def _serialize_txn(t: models.CreditTransaction, username: Optional[str]) -> dict
         "balance_after": t.balance_after,
         "reason": t.reason,
         "job_id": t.job_id,
-        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "created_at": utc_iso(t.created_at),
     }
 
 
@@ -75,7 +77,7 @@ def _serialize_feedback(f: models.UserFeedback, username: Optional[str]) -> dict
         "page_url": f.page_url,
         "status": f.status,
         "admin_notes": f.admin_notes,
-        "created_at": f.created_at.isoformat() if f.created_at else None,
+        "created_at": utc_iso(f.created_at),
     }
 
 
@@ -87,7 +89,7 @@ def _serialize_plan(p: models.BillingPlan) -> dict:
         "price_usd_cents": p.price_usd_cents,
         "is_active": bool(p.is_active),
         "stripe_price_id": p.stripe_price_id,
-        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "created_at": utc_iso(p.created_at),
     }
 
 
@@ -100,7 +102,7 @@ def _serialize_job_with_ls(job: models.Job, stats: dict) -> dict:
         "ls_project_id": job.ls_project_id,
         "ls_synced": bool(job.ls_synced),
         "valve_count": job.valve_count or 0,
-        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "created_at": utc_iso(job.created_at),
         "ls_stats": stats or {},
     }
 

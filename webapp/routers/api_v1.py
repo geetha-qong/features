@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 
+from webapp.datetime_utils import utc_iso
+
 _GPU_CALLBACK_SECRET = os.environ.get("GPU_CALLBACK_SECRET", "")
 
 import fitz  # PyMuPDF — page count for credit pre-flight
@@ -204,7 +206,7 @@ async def api_list_jobs(
                 "pid_no": j.pid_no or "UNKNOWN",
                 "status": j.status,
                 "valve_count": j.valve_count or 0,
-                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "created_at": utc_iso(j.created_at),
                 "owner_username": owner_username,
             }
             for j, owner_username in rows
@@ -348,7 +350,7 @@ async def api_job_status(
         "error_msg": job.error_msg,
         "csv_url": csv_url,
         "inst_index_url": inst_url,
-        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "created_at": utc_iso(job.created_at),
     }
 
 
@@ -398,7 +400,7 @@ async def api_account_transactions(
                 "balance_after": r.balance_after,
                 "reason": r.reason,
                 "job_id": r.job_id,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "created_at": utc_iso(r.created_at),
             }
             for r in rows
         ]
@@ -428,8 +430,8 @@ async def api_account_list_api_keys(
                 "id": k.id,
                 "name": k.name,
                 "key_prefix": k.key_prefix,
-                "created_at": k.created_at.isoformat() if k.created_at else None,
-                "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
+                "created_at": utc_iso(k.created_at),
+                "last_used_at": utc_iso(k.last_used_at),
             }
             for k in keys
         ]
@@ -471,7 +473,7 @@ async def api_account_create_api_key(
         "name": api_key.name,
         "key_prefix": api_key.key_prefix,
         "key": full_key,
-        "created_at": api_key.created_at.isoformat() if api_key.created_at else None,
+        "created_at": utc_iso(api_key.created_at),
     }
 
 
@@ -587,7 +589,7 @@ async def api_feedback_submit(
         "id": item.id,
         "category": item.category,
         "subject": item.subject,
-        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "created_at": utc_iso(item.created_at),
     }
 
 
