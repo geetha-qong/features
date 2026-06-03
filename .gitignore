@@ -47,6 +47,10 @@ annotate/tiles/
 # Stray PyTorch weights at repo root (e.g. yolov8s.pt base weights)
 /*.pt
 
+# Stray screenshots at repo root (Playwright / QA artifacts).
+# Nested PNGs under design/, docs/, webapp/ etc. are tracked normally.
+/*.png
+
 # YOLO dataset images and label caches (regenerated from job_outputs)
 datasets/pid_valves/images/
 datasets/**/*.cache
