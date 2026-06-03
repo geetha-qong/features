@@ -24,6 +24,7 @@ services:
       # base would shadow the baked-in SPA dist on QA. See FEATURES #18.
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.5-flash}
       - SECRET_KEY=${SECRET_KEY}
       - LS_API_KEY=${LS_API_KEY}
       - LS_URL=http://label-studio:8080
@@ -228,6 +229,7 @@ services:
       - webapp_db:/app/data
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.5-flash}
       - SECRET_KEY=${SECRET_KEY}
       - DATABASE_URL=${DATABASE_URL:-sqlite:///data/webapp.db}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}

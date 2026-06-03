@@ -29,10 +29,12 @@ load_dotenv(Path(__file__).parent / ".env")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # Best vision models on OpenRouter for technical P&ID drawings:
-#   google/gemini-2.0-flash-001     — fastest, excellent dense-text vision
-#   anthropic/claude-sonnet-4-6 — best reasoning
+#   google/gemini-2.5-flash         — fastest, excellent dense-text vision (current default)
+#   anthropic/claude-sonnet-4-6     — best reasoning
 #   openai/gpt-4o                   — strong alternative
-DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
+# Note: gemini-2.0-flash-001 was retired by OpenRouter mid-2026 — selecting it
+# now returns "No endpoints found" 404. Override via OPENROUTER_MODEL env var.
+DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemini-2.5-flash")
 
 DRAWING_DESCRIPTION = "FW Transfer Pump (62-P-151005), Occidental Mukhaizna LLC, drawing MUK-62-1-15-1004-001"
 # ──────────────────────────────────────────────────────────────────────────────
