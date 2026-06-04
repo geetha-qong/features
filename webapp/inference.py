@@ -54,21 +54,31 @@ IOU_THRESH = 0.45
 # 13-class label set per README.md "Annotation labels (13 classes)".
 # Order = class index (i.e. argmax over the output's class-score channels).
 # This MUST match the order the model was trained against. v1-9 was exported
-# with this label order — do not reorder without re-exporting.
+# with this 20-class label order (see `detector.py:CLASS_NAMES` — the
+# canonical source). The README's 13-label annotation guide is for human
+# annotators in Label Studio; the trained model has been through several
+# refinement rounds and uses this 20-class head.
 CLASS_NAMES: List[str] = [
-    "valve_bf",
-    "valve_bv",
-    "valve_ck",
-    "valve_gl",
-    "valve_db",
-    "valve_cv",
-    "valve_gen",
-    "actuator_motor",
-    "actuator_pneu",
-    "actuator_sol",
-    "inst_bubble",
-    "inst_cv",
-    "inst_solenoid",
+    "valve_bf",            # 0
+    "valve_bv",            # 1
+    "valve_ck",            # 2
+    "valve_cv",            # 3
+    "valve_db",            # 4
+    "valve_gen",           # 5
+    "valve_gl",            # 6
+    "valve_gt",            # 7  (gate valve — new in v1-9)
+    "inst_field",          # 8
+    "DCS",                 # 9
+    "PLC",                 # 10
+    "interlock",           # 11
+    "interlock-R",         # 12
+    "inst_field-R",        # 13
+    "Pump_Dwg_Pump",       # 14
+    "Motor",               # 15
+    "valve_3way_relief",   # 16
+    "valve_ncbv",          # 17
+    "valve_relief_safety", # 18
+    "valve_pnuectrl",      # 19
 ]
 
 
