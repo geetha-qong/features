@@ -79,7 +79,11 @@ export default function Studio({ project, userName, onBack }: Props) {
   // sidebar tab in Studio that lets the user pick which deliverable to
   // review would call a setter here. The workbench's own tab-switcher is
   // local-state by design (tab changes shouldn't pollute Studio).
-  const [activeDeliverableType] = useState<string>("datasheet");
+  // Default to Valve List in Bulk Review — most jobs have valves first, and
+  // it's the deliverable customers always see (Instrument Index only populates
+  // when the instrumentation pass detects instruments, which on some P&IDs is
+  // 0). Was "datasheet" — too narrow as a starting point.
+  const [activeDeliverableType] = useState<string>("valve_list");
 
   // Real backend data — falls back to prototype when unavailable so the studio
   // never breaks on jobs without tiles/detections (e.g. seed data, brand-new
@@ -111,6 +115,10 @@ export default function Studio({ project, userName, onBack }: Props) {
   const realSheets = sheetsResp?.sheets;
   const activeTileUrl =
     realSheets && realSheets[activeSheet]?.url ? realSheets[activeSheet].url : null;
+  // Tile filename (e.g. "tile_p0_r1_c2.png") — DetectionOverlay uses this to
+  // filter `detections` down to the bboxes that actually belong to this tile.
+  const activeTileFilename =
+    realSheets && realSheets[activeSheet]?.filename ? realSheets[activeSheet].filename : null;
 
   // Lock body scroll while studio is mounted (full-bleed surface)
   useEffect(() => {
@@ -211,6 +219,7 @@ export default function Studio({ project, userName, onBack }: Props) {
             setPan={setPan}
             dark={dark}
             tileImageUrl={activeTileUrl}
+            tileFilename={activeTileFilename}
             detections={detResp?.detections}
             valveCount={detResp?.valves.length ?? 0}
             valveCountTotal={detResp?.valve_count ?? 0}

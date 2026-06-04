@@ -48,7 +48,11 @@ except ImportError:  # pragma: no cover
 
 MODEL_PATH = "/app/models/v1-9.onnx"
 IMGSZ = 1280
-CONF_THRESH = 0.25
+CONF_THRESH = 0.50  # raised from 0.25 to suppress the noise band the v1-9
+                    # model produces in the 0.25–0.45 range on raster P&IDs.
+                    # Calibrated against the MUK-62 test deck where 0.50 cuts
+                    # ~70% of clearly-wrong detections while keeping the
+                    # high-confidence valve_bf / valve_db / valve_gen hits.
 IOU_THRESH = 0.45
 
 # 13-class label set per README.md "Annotation labels (13 classes)".

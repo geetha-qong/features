@@ -50,6 +50,11 @@ interface Props {
    * any) are overlaid as rectangles in the same coordinate space.
    */
   tileImageUrl?: string | null;
+  /** Filename of the active tile (e.g. "tile_p0_r0_c1.png"). Used to filter
+   *  `detections` to only the bboxes that belong to the visible tile — without
+   *  this filter, detections from other tiles get drawn on whichever tile is
+   *  showing, producing the "random markings" bug. */
+  tileFilename?: string | null;
   /** Backend-supplied valve / instrument detections to overlay on the tile. */
   detections?: DetectionItem[];
   /** Number of structured valve rows in the DB — shown in the canvas footer. */
@@ -67,6 +72,7 @@ export default function PidCanvas({
   setPan,
   dark,
   tileImageUrl,
+  tileFilename,
   detections,
   valveCount,
   valveCountTotal,
@@ -140,25 +146,13 @@ export default function PidCanvas({
         style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
       >
         {useReal && (
-          <img
-            src={tileImageUrl!}
-            alt="P&ID tile"
-            style={{
-              maxWidth: "min(100%, 1200px)",
-              maxHeight: "70vh",
-              objectFit: "contain",
-              display: "block",
-              margin: "0 auto",
-              borderRadius: 4,
-              boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
-              userSelect: "none",
-              pointerEvents: "none",
-            }}
-            draggable={false}
+          <TileWithOverlay
+            tileImageUrl={tileImageUrl!}
+            tileFilename={tileFilename ?? null}
+            detections={detections ?? []}
+            onSelect={onSelect}
+            selectedId={selectedId}
           />
-        )}
-        {useReal && detections && detections.length > 0 && (
-          <DetectionOverlay detections={detections} onSelect={onSelect} selectedId={selectedId} />
         )}
         {!useReal && (
           <svg viewBox="0 0 700 360" className="pid-svg">
@@ -411,91 +405,136 @@ export default function PidCanvas({
 }
 
 /**
- * Renders detection rectangles on top of the tile image. Coords are expected
- * to be in the tile's pixel space (the same image used as the canvas
- * background), so we render the SVG with `viewBox` set to the bbox extent of
- * the detections and absolutely position it over the image.
+ * Renders the active tile image with detection rectangles overlaid in the
+ * tile's own pixel coordinate system.
  *
- * If the detection shapes are absent or unrecognizable, we silently render
- * nothing — never crash the canvas because the GPU worker hasn't called back.
+ * Previously this was two separate components — the SVG and the <img> had no
+ * shared coordinate frame, and the SVG's `viewBox` was the bbox extent of
+ * detections rather than the tile's full pixel space. That made bboxes from
+ * other tiles land on whichever tile was showing ("random markings").
+ *
+ * Fix:
+ *  1. Filter `detections` to only the rows whose `tile` filename matches the
+ *     active tile — bboxes from other tiles never reach this overlay.
+ *  2. Capture the image's `naturalWidth`/`naturalHeight` via onLoad.
+ *  3. Position the SVG absolutely over the <img>, identical bounds, with
+ *     `viewBox="0 0 naturalWidth naturalHeight"`. Bbox pixel coords then map
+ *     exactly to image pixels.
  */
-function DetectionOverlay({
+function TileWithOverlay({
+  tileImageUrl,
+  tileFilename,
   detections,
   onSelect,
   selectedId,
 }: {
+  tileImageUrl: string;
+  tileFilename: string | null;
   detections: DetectionItem[];
   onSelect: (id: string) => void;
   selectedId: string;
 }) {
-  const valid = detections.filter((d) => Array.isArray(d.bbox) && d.bbox.length === 4);
-  if (valid.length === 0) return null;
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
 
-  const xs = valid.flatMap((d) => [d.bbox![0], d.bbox![2]]);
-  const ys = valid.flatMap((d) => [d.bbox![1], d.bbox![3]]);
-  const minX = Math.min(...xs);
-  const minY = Math.min(...ys);
-  const maxX = Math.max(...xs);
-  const maxY = Math.max(...ys);
-  const w = Math.max(1, maxX - minX);
-  const h = Math.max(1, maxY - minY);
+  // Only show bboxes whose `tile` field matches the visible tile filename.
+  // Without the filename we can't filter safely → render no overlays rather
+  // than misplaced ones.
+  const tileDets = tileFilename
+    ? detections.filter(
+        (d) => Array.isArray(d.bbox) && d.bbox.length === 4 && d.tile === tileFilename,
+      )
+    : [];
 
   return (
-    <svg
-      viewBox={`${minX} ${minY} ${w} ${h}`}
+    <div
       style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        margin: "auto",
+        position: "relative",
+        display: "inline-block",
         maxWidth: "min(100%, 1200px)",
         maxHeight: "70vh",
-        // pointerEvents handled per-rect — only entity-linked detections capture clicks
+        margin: "0 auto",
       }}
-      preserveAspectRatio="xMidYMid meet"
     >
-      {valid.map((d, i) => {
-        const [x1, y1, x2, y2] = d.bbox!;
-        const clickable = typeof d.entity_id === "string" && d.entity_id.length > 0;
-        const isSelected = clickable && d.entity_id === selectedId;
-        return (
-          <g key={i}>
-            <rect
-              x={x1}
-              y={y1}
-              width={x2 - x1}
-              height={y2 - y1}
-              fill={isSelected ? "rgba(255,77,168,0.15)" : "none"}
-              stroke={isSelected ? "#FF4DA8" : "#FF4DA8"}
-              strokeWidth={isSelected ? Math.max(2, w / 250) : Math.max(1, w / 400)}
-              strokeDasharray={isSelected ? undefined : Math.max(2, w / 200) + " " + Math.max(2, w / 200)}
-              style={{
-                pointerEvents: clickable ? "auto" : "none",
-                cursor: clickable ? "pointer" : "default",
-              }}
-              onClick={clickable ? () => onSelect(d.entity_id as string) : undefined}
-            >
-              {clickable && <title>{d.label} — click to edit</title>}
-            </rect>
-            {d.label && (
-              <text
-                x={x1}
-                y={y1 - Math.max(2, h / 100)}
-                fontSize={Math.max(8, w / 100)}
-                fontFamily="JetBrains Mono, monospace"
-                fontWeight="700"
-                fill="#FF4DA8"
-                style={{ pointerEvents: "none" }}
-              >
-                {d.label}
-              </text>
-            )}
-          </g>
-        );
-      })}
-    </svg>
+      <img
+        src={tileImageUrl}
+        alt="P&ID tile"
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          setNatural({ w: img.naturalWidth, h: img.naturalHeight });
+        }}
+        style={{
+          display: "block",
+          maxWidth: "min(100%, 1200px)",
+          maxHeight: "70vh",
+          objectFit: "contain",
+          borderRadius: 4,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+          userSelect: "none",
+          pointerEvents: "none",
+          // Sharper line work when CSS-zoomed past 1x. Default interpolation
+          // blurs thin engineering linework on raster tiles.
+          imageRendering: "pixelated",
+        }}
+        draggable={false}
+      />
+      {natural && tileDets.length > 0 && (
+        <svg
+          viewBox={`0 0 ${natural.w} ${natural.h}`}
+          preserveAspectRatio="none"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            // pointerEvents handled per-rect — only entity-linked detections capture clicks
+          }}
+        >
+          {tileDets.map((d, i) => {
+            const [x1, y1, x2, y2] = d.bbox!;
+            const clickable = typeof d.entity_id === "string" && d.entity_id.length > 0;
+            const isSelected = clickable && d.entity_id === selectedId;
+            // Stroke widths in *image* pixels — the SVG viewBox is the image's
+            // natural size, so dividing by 400 gives a stroke that scales with
+            // image size (constant pixel weight on screen across zooms).
+            const sw = Math.max(1, natural.w / 400);
+            return (
+              <g key={i}>
+                <rect
+                  x={x1}
+                  y={y1}
+                  width={x2 - x1}
+                  height={y2 - y1}
+                  fill={isSelected ? "rgba(255,77,168,0.15)" : "none"}
+                  stroke="#FF4DA8"
+                  strokeWidth={isSelected ? sw * 2 : sw}
+                  strokeDasharray={isSelected ? undefined : `${sw * 2} ${sw * 2}`}
+                  style={{
+                    pointerEvents: clickable ? "auto" : "none",
+                    cursor: clickable ? "pointer" : "default",
+                  }}
+                  onClick={clickable ? () => onSelect(d.entity_id as string) : undefined}
+                >
+                  {clickable && <title>{d.label} — click to edit</title>}
+                </rect>
+                {d.label && (
+                  <text
+                    x={x1}
+                    y={y1 - sw * 2}
+                    fontSize={Math.max(8, natural.w / 100)}
+                    fontFamily="JetBrains Mono, monospace"
+                    fontWeight="700"
+                    fill="#FF4DA8"
+                    style={{ pointerEvents: "none" }}
+                  >
+                    {d.label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      )}
+    </div>
   );
 }
 
