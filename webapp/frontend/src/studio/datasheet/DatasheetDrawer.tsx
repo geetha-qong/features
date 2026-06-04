@@ -97,7 +97,7 @@ export default function DatasheetDrawer({
   onBulkReview,
   totalCount = 0,
 }: Props) {
-  const [docType, setDocType] = useState<DocTypeKey>("datasheet");
+  const [docType, setDocType] = useState<DocTypeKey>("index");
   const [showDocPicker, setShowDocPicker] = useState(false);
 
   // Backend response + drift between original (pre-edit snapshot) and the
