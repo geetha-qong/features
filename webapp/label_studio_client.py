@@ -1,6 +1,10 @@
 """Label Studio API client — push P&ID tiles as annotation tasks."""
+import base64
+import json
 import os
 import re
+import time
+import threading
 from collections import defaultdict
 from pathlib import Path
 from typing import List, Optional
@@ -36,7 +40,65 @@ LABEL_CONFIG = """<View>
 </View>"""
 
 
+def _looks_like_jwt(s: str) -> bool:
+    return s.startswith("eyJ") and s.count(".") == 2
+
+
+# LS 1.23+ replaced the legacy "Token <key>" auth with JWT. The Personal Access
+# Token shown in the LS UI is a *refresh* token — you have to POST it to
+# /api/token/refresh/ to get a short-lived (~5 min) access token, then send
+# THAT as `Bearer …` to the real API. We cache the access token until ~60s
+# before its iat-derived expiry to avoid a round-trip on every call.
+#
+# If LS_API_KEY is a non-JWT string (legacy LS deployments < 1.23), we send it
+# as `Token <key>` directly — no exchange.
+_access_token: Optional[str] = None
+_access_token_exp: float = 0.0
+_access_lock = threading.Lock()
+
+
+def _refresh_access_token() -> Optional[str]:
+    """Exchange the refresh-JWT in LS_API_KEY for a short-lived access JWT.
+    Caches the result in module globals; subsequent calls inside the validity
+    window are O(1). Returns None on any failure (caller falls back to no-op)."""
+    global _access_token, _access_token_exp
+    try:
+        resp = requests.post(
+            f"{LS_URL}/api/token/refresh/",
+            json={"refresh": LS_API_KEY},
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            print(f"[label_studio] token-refresh failed {resp.status_code}: {resp.text[:200]}")
+            return None
+        access = resp.json().get("access")
+        if not access:
+            return None
+        # Decode the access JWT's payload for `exp`; tolerate missing exp.
+        try:
+            payload_b64 = access.split(".")[1] + "==="  # pad for safety
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+            exp = float(payload.get("exp", time.time() + 240))
+        except Exception:
+            exp = time.time() + 240  # 4-min default if decode fails
+        _access_token = access
+        _access_token_exp = exp - 60  # refresh 60s before real expiry
+        return access
+    except Exception as e:
+        print(f"[label_studio] token-refresh error: {e!r}")
+        return None
+
+
 def _headers() -> dict:
+    if _looks_like_jwt(LS_API_KEY):
+        with _access_lock:
+            now = time.time()
+            tok = _access_token if _access_token and now < _access_token_exp else _refresh_access_token()
+        if not tok:
+            # Send the refresh as Bearer anyway — some LS endpoints accept it.
+            tok = LS_API_KEY
+        return {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+    # Legacy LS or non-JWT API key — send as Token header.
     return {"Authorization": f"Token {LS_API_KEY}", "Content-Type": "application/json"}
 
 

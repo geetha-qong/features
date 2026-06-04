@@ -20,3 +20,16 @@ services:
   cpu-worker:
     volumes:
       - ./webapp:/app/webapp
+
+  # Local-only LS overrides. Base docker-compose.yml ships the dev-prod
+  # values (LABEL_STUDIO_HOST=https://dev.qongsystems.com/ls) which make Django
+  # redirect to /ls/* paths that 404 on http://localhost:8080. CSRF list also
+  # needs the local origins or POSTs from any vite/web tab return 403.
+  label-studio:
+    environment:
+      - LABEL_STUDIO_HOST=http://localhost:8080
+      - LABEL_STUDIO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://localhost:5173,http://localhost:8000
+      # LS 1.23 dropped the legacy "Token <key>" auth header by default; our
+      # webapp/label_studio_client.py still sends that format (FEATURES #23).
+      # Until we migrate the client to Bearer-JWT, re-enable the legacy path:
+      - LABEL_STUDIO_LEGACY_API_TOKEN_ENABLED=true
