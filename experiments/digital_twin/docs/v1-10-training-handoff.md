@@ -1,8 +1,9 @@
 # v1-10 YOLO Training — Autonomous Run Handoff
 
-**Started:** 2026-06-05 ~22:15 IST (16:45 UTC)
-**Expected finish:** ~01:15-02:30 IST (a 100-epoch yolov8s on g5.2xlarge usually clocks ~2-3h, plus ~10 min setup + ~5 min ONNX export + ~5 min upload + auto-terminate).
-**Instance:** `i-0ec47e4aaa9ad364b` (g5.2xlarge, on-demand, ap-south-1b, public IP 3.110.151.91)
+**Started:** 2026-06-05 ~22:28 IST (16:58 UTC) — second attempt; first attempt failed on smoke test due to two script bugs now fixed in commit `89be82c`.
+**Expected finish:** ~01:30-02:45 IST (a 100-epoch yolov8s on g5.2xlarge usually clocks ~2-3h, plus ~10 min setup + ~5 min ONNX export + ~5 min upload + auto-terminate).
+**Instance:** `i-0f1ab2fd0a46c4d60` (g5.2xlarge, on-demand, ap-south-1b)
+**Prior failed instance:** `i-0ec47e4aaa9ad364b` (terminated). Ran ~45 min, cost ~$0.90 — counted toward total budget. Lessons logged in FEATURES #30 and commit `89be82c`.
 **Cost:** ~$1.21/hr × ~3 hours ≈ **$3.50–4.50 total**
 **Auto-terminate:** YES — instance shuts down + terminates via `--instance-initiated-shutdown-behavior=terminate` after script ends. Verify in console next morning.
 
@@ -118,7 +119,7 @@ Most common failure modes:
 ## If you need to kill the instance manually
 
 ```bash
-aws ec2 terminate-instances --instance-ids i-0ec47e4aaa9ad364b \
+aws ec2 terminate-instances --instance-ids i-0f1ab2fd0a46c4d60 \
   --region ap-south-1 --profile tnbqong
 ```
 
