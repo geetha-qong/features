@@ -1,0 +1,39 @@
+[project]
+name = "qong-digital-twin"
+version = "0.0.1"
+description = "Experimental graph-extraction track for Qong digital-twin platform"
+requires-python = ">=3.11"
+dependencies = [
+    # Core CV / geometry
+    "opencv-python>=4.10",
+    "scikit-image>=0.24",        # skeleton/thinning, region props
+    "numpy>=1.26",
+    "shapely>=2.0",              # geometry ops for bbox/line proximity tests
+    "networkx>=3.3",             # the graph itself, plus isomorphism eval
+
+    # OCR on YOLO bbox crops (tag-extraction step)
+    "easyocr>=1.7",              # works on Apple silicon; switch to paddleocr on GPU later
+
+    # YOLO inference (matches parent repo's webapp/inference.py)
+    "onnxruntime>=1.18",
+
+    # Notebook / exploration
+    "jupyterlab>=4.2",
+    "matplotlib>=3.9",
+    "pandas>=2.2",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8.0",
+    "nbstripout>=0.7",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

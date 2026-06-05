@@ -46,6 +46,17 @@ Headline metric long-term: graph isomorphism (`networkx.is_isomorphic`) — meas
 
 **Feature-branch policy:** branch off `dev`, merge back via PR. Stale branches `feature/digital-twin`, `feature/observability-job-runs`, `feature/instrument-index-improvements` were deleted locally on 2026-06-03; their `origin/*` refs are retained on GitHub for now but are reference-only — do **not** branch from them. `feature/multi-cloud-saas` was superseded by `dev` (all phases A1-A3, B1-B5 merged in).
 
+## Experimental track (`dt/*` branches, `experiments/digital_twin/`)
+
+A parallel long-running track for fast-iteration R&D — currently graph-extraction v0 (FEATURES TBD, design doc at `docs/superpowers/specs/2026-06-05-graph-extraction-design.md`). Created 2026-06-05.
+
+- **Why it exists:** team interns ramp up on `dev` at their own pace; lead works with Claude Code on `dt/*` to ship the next-gen tool faster, then merges back for handover once the team's basics are solid.
+- **Location:** `experiments/digital_twin/` — own `pyproject.toml`, own notebooks, own backend (planned). Reads parent repo data via `../../job_outputs/`, `../../models/`. **Never writes back** into team artefacts; if shared code needs to change, that change lands on `dev` with its own FEATURES.md entry.
+- **Branch policy:** `dt/main` is the long-running base off `dev`; `dt/<topic>` for short-lived feature work. Don't merge into `dev` until handoff is intended — one PR at the end, not a stream of partial merges.
+- **Deploys:** silent. `deploy-dev.yml` only fires on `branches: [dev]`; `dt/*` pushes never touch dev.qongsystems.com.
+- **Memory stays unified:** `CLAUDE.md` (this file), `FEATURES.md`, and `SESSION_STATE.md` all remain at repo root. FEATURES.md entries originating from this track use a `[DT]` prefix in the title for filtering. SESSION_STATE.md should always note which track ("team / experimental") the previous session was on.
+- **Stack freedom:** the experimental track can pick its own stack (Jupyter-first, OpenCV → CV-CUDA later, NetworkX, etc.) without aligning to the parent repo's FastAPI+React shape. When code is ready to merge, it gets re-aligned during the handover PR.
+
 ## Docker-First Rule
 
 **NEVER install any service or tool directly on the local Mac.** All services (nginx, databases, annotation tools, etc.) must be added as Docker containers in `docker-compose.yml`. This ensures the compose file can be pushed to production as-is.
