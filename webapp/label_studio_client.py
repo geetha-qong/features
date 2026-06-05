@@ -170,18 +170,29 @@ def push_tiles(project_id: int, tile_urls: list) -> int:
 def download_task_image(image_path: str) -> Optional[bytes]:
     """Download a task's image file (e.g. /data/upload/<pid>/<uuid>.<ext>) from LS.
 
-    `image_path` is the value of `task.data.image` — a path relative to LS_URL.
-    Used by the auto-tile webhook to pull a PDF upload before tiling it.
+    `image_path` is the value of `task.data.image` — a webhook-controlled
+    string. SSRF-hardened:
+      * Only accept paths under `/data/upload/` — that's where LS stores
+        Import-UI uploads. Anything else (absolute URLs, ``//attacker.com``,
+        ``../etc/passwd``, ``/api/...``) is rejected before any network call.
+      * Always prepend `LS_URL`. The LS host is never overridable from the
+        webhook payload, so an attacker can't redirect this request at
+        ``169.254.169.254`` (AWS instance metadata) to exfiltrate the
+        LS Bearer token from the Authorization header.
+      * Disable redirects so a 302 from LS can't dodge the host check.
     """
     if not is_configured() or not image_path:
         return None
+    # SSRF guard — narrow allowlist matching what LS UI uploads actually look like.
+    if not image_path.startswith("/data/upload/") or ".." in image_path:
+        print(f"[label_studio] download_task_image refused unsafe path: {image_path!r}")
+        return None
+    url = f"{LS_URL}{image_path}"
     try:
-        # image_path may be absolute (https://…) or path-only (/data/upload/…)
-        url = image_path if image_path.startswith(("http://", "https://")) else f"{LS_URL}{image_path}"
         # Only auth header — no Content-Type for a binary GET.
         h = _headers()
         h.pop("Content-Type", None)
-        resp = requests.get(url, headers=h, timeout=30)
+        resp = requests.get(url, headers=h, timeout=30, allow_redirects=False)
         if resp.status_code == 200:
             return resp.content
         print(f"[label_studio] download_task_image {url} returned {resp.status_code}")

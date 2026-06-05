@@ -9,6 +9,7 @@ See FEATURES #30 for the auto-tile motivation.
 """
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Any, Dict, List, Optional
 
@@ -36,9 +37,12 @@ def _verify_secret(authorization: Optional[str], x_ls_webhook_secret: Optional[s
     if not _LS_WEBHOOK_SECRET:
         raise HTTPException(status_code=503, detail="webhook secret not configured server-side")
     expected = _LS_WEBHOOK_SECRET
-    if x_ls_webhook_secret and x_ls_webhook_secret == expected:
+    # hmac.compare_digest avoids byte-by-byte timing leaks. Both candidate
+    # branches use compare_digest so a slow-equal compare can't be used to
+    # probe one branch via the other.
+    if x_ls_webhook_secret and hmac.compare_digest(x_ls_webhook_secret, expected):
         return
-    if authorization and authorization == f"Bearer {expected}":
+    if authorization and hmac.compare_digest(authorization, f"Bearer {expected}"):
         return
     raise HTTPException(status_code=401, detail="invalid webhook secret")
 
