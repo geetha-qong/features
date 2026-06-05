@@ -167,6 +167,78 @@ def push_tiles(project_id: int, tile_urls: list) -> int:
     return 0
 
 
+def download_task_image(image_path: str) -> Optional[bytes]:
+    """Download a task's image file (e.g. /data/upload/<pid>/<uuid>.<ext>) from LS.
+
+    `image_path` is the value of `task.data.image` — a path relative to LS_URL.
+    Used by the auto-tile webhook to pull a PDF upload before tiling it.
+    """
+    if not is_configured() or not image_path:
+        return None
+    try:
+        # image_path may be absolute (https://…) or path-only (/data/upload/…)
+        url = image_path if image_path.startswith(("http://", "https://")) else f"{LS_URL}{image_path}"
+        # Only auth header — no Content-Type for a binary GET.
+        h = _headers()
+        h.pop("Content-Type", None)
+        resp = requests.get(url, headers=h, timeout=30)
+        if resp.status_code == 200:
+            return resp.content
+        print(f"[label_studio] download_task_image {url} returned {resp.status_code}")
+    except Exception as e:
+        print(f"[label_studio] download_task_image error: {e}")
+    return None
+
+
+def upload_tile_files(project_id: int, tile_paths: List[Path]) -> int:
+    """Upload PNG files via multipart POST /api/projects/{id}/import.
+
+    Each file becomes one task with `data.image` set by LS to the new
+    `/data/upload/<project_id>/<uuid>.<filename>` path. Returns count of
+    tasks successfully created. Files are uploaded one-at-a-time to keep
+    error reporting per-file (LS treats a multi-file batch as atomic on
+    failure, which makes it harder to recover from a single bad tile).
+    """
+    if not is_configured() or not tile_paths:
+        return 0
+    headers = _headers()
+    headers.pop("Content-Type", None)  # multipart sets its own
+    created = 0
+    for path in tile_paths:
+        try:
+            with open(path, "rb") as fh:
+                resp = requests.post(
+                    f"{LS_URL}/api/projects/{project_id}/import",
+                    headers=headers,
+                    files={"FILES": (path.name, fh, "image/png")},
+                    timeout=30,
+                )
+            if resp.status_code in (200, 201):
+                created += 1
+            else:
+                print(f"[label_studio] upload_tile_files {path.name} → {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            print(f"[label_studio] upload_tile_files {path.name} error: {e}")
+    return created
+
+
+def delete_task(task_id: int) -> bool:
+    """Delete a single task by id. Used by auto-tile to remove the original
+    PDF task after replacement tile tasks are uploaded."""
+    if not is_configured():
+        return False
+    try:
+        resp = requests.delete(
+            f"{LS_URL}/api/tasks/{task_id}",
+            headers=_headers(),
+            timeout=10,
+        )
+        return resp.status_code == 204
+    except Exception as e:
+        print(f"[label_studio] delete_task error: {e}")
+        return False
+
+
 def sync_all_label_configs(source_project_id: int = 1) -> dict:
     """Copy the label config from source_project_id to every other project.
 

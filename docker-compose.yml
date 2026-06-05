@@ -29,6 +29,7 @@ services:
       - LS_API_KEY=${LS_API_KEY}
       - LS_URL=http://label-studio:8080
       - LS_EXTERNAL_URL=${LS_EXTERNAL_URL:-http://localhost:9001}
+      - LS_WEBHOOK_SECRET=${LS_WEBHOOK_SECRET}
       - DATABASE_URL=${DATABASE_URL:-sqlite:///data/webapp.db}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - STORAGE_ENDPOINT_URL=${STORAGE_ENDPOINT_URL:-http://minio:9000}
@@ -241,6 +242,7 @@ services:
       - LS_API_KEY=${LS_API_KEY}
       - LS_URL=http://label-studio:8080
       - LS_EXTERNAL_URL=${LS_EXTERNAL_URL:-http://localhost:9001}
+      - LS_WEBHOOK_SECRET=${LS_WEBHOOK_SECRET}
       - WEBAPP_BASE_URL=${WEBAPP_BASE_URL:-https://dev.qongsystems.com}
       - GPU_CALLBACK_SECRET=${GPU_CALLBACK_SECRET}
       - GPU_INTERNAL_BASE_URL=${GPU_INTERNAL_BASE_URL:-http://100.127.190.88:8000}
