@@ -33,7 +33,7 @@ COPY . .
 COPY --from=frontend /frontend/dist /app/webapp/frontend/dist
 RUN mkdir -p uploads job_outputs
 
-# ─── YOLO v1-9 ONNX model (FEATURES #28) ──────────────────────────────────────
+# ─── YOLO v1-10 ONNX model (FEATURES #30, supersedes v1-9 from FEATURES #28) ─
 # Bakes the production object-detection weights into the image so the webapp
 # can run in-process inference for canvas bbox surfacing (Job.gpu_detections)
 # without depending on the Windows GPU worker callback.
@@ -43,8 +43,15 @@ RUN mkdir -p uploads job_outputs
 # webapp/inference.py and the "CRITICAL: Two-Mode Architecture" section of
 # CLAUDE.md.
 #
-# Asset: v1-9.onnx, 43 MB, sha256:
-#   11e29b47dea7a36b5609f315a7f589c53f0d0f8e24f0b95e74ecb9447f526178
+# v1-10 vs v1-9:
+#   - 23 classes (v1-9 had 20) — adds 6 direction labels (arrow_*, connector_*)
+#     and inst_bpcs/inst_sis/SIS-R/inst_local_panel; drops valve_cv, valve_gen,
+#     DCS, PLC, *-R variants, and valve_pnuectrl typo (all had <100 LS instances)
+#   - mAP50 = 0.834 (v1-9 was 0.404) — 2× improvement on the unified test set
+#   - Trained from yolov8s on 24,428 LS-sourced annotations (605 train + 62 val)
+#
+# Asset: v1-10.onnx, 42.6 MB, sha256:
+#   896e42561fddd8014fd6021176ce903a5bb0afeffa3717b436e32a56c19e3142
 #
 # Path 1 (preferred — no secret) — Release asset is public:
 #   docker build .
@@ -57,10 +64,10 @@ RUN mkdir -p uploads job_outputs
 RUN --mount=type=secret,id=github_pat,required=false \
     mkdir -p /app/models && \
     REPO="Qong-Systems/qong_product" && \
-    TAG="model-v1-9" && \
-    ASSET_NAME="v1-9.onnx" && \
-    MODEL_SHA="11e29b47dea7a36b5609f315a7f589c53f0d0f8e24f0b95e74ecb9447f526178" && \
-    DEST=/app/models/v1-9.onnx && \
+    TAG="model-v1-10" && \
+    ASSET_NAME="v1-10.onnx" && \
+    MODEL_SHA="896e42561fddd8014fd6021176ce903a5bb0afeffa3717b436e32a56c19e3142" && \
+    DEST=/app/models/v1-10.onnx && \
     AUTH_HEADER="" && \
     if [ -s /run/secrets/github_pat ]; then \
         TOKEN=$(cat /run/secrets/github_pat) && \

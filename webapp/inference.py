@@ -46,43 +46,54 @@ except ImportError:  # pragma: no cover
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-MODEL_PATH = "/app/models/v1-9.onnx"
-IMGSZ = 1280
-CONF_THRESH = 0.50  # raised from 0.25 to suppress the noise band the v1-9
-                    # model produces in the 0.25–0.45 range on raster P&IDs.
-                    # Calibrated against the MUK-62 test deck where 0.50 cuts
-                    # ~70% of clearly-wrong detections while keeping the
-                    # high-confidence valve_bf / valve_db / valve_gen hits.
+MODEL_PATH = "/app/models/v1-10.onnx"
+IMGSZ = 640  # v1-10 was trained + ONNX-exported at 640; using a different
+             # IMGSZ here against a fixed-axes ONNX would fail with a shape
+             # mismatch. v1-9 used 1280 — don't blindly copy that value.
+CONF_THRESH = 0.50  # carried over from v1-9. v1-10's training mAP is much
+                    # higher (0.834 vs 0.404), so 0.50 should still be a
+                    # reasonable noise-floor; revisit after dev smoke-test
+                    # if the canvas overlay becomes either too sparse or
+                    # too cluttered.
 IOU_THRESH = 0.45
 
-# 13-class label set per README.md "Annotation labels (13 classes)".
-# Order = class index (i.e. argmax over the output's class-score channels).
-# This MUST match the order the model was trained against. v1-9 was exported
-# with this 20-class label order (see `detector.py:CLASS_NAMES` — the
-# canonical source). The README's 13-label annotation guide is for human
-# annotators in Label Studio; the trained model has been through several
-# refinement rounds and uses this 20-class head.
+# Class IDs in v1-10 — order = class index (argmax over the output's class-
+# score channels). MUST match the training-time `data.yaml` (see
+# experiments/digital_twin/data/dataset_v1-10/data.yaml or the CLASSES
+# constant in experiments/digital_twin/scripts/export_ls_dataset.py).
+#
+# v1-10 changes from v1-9 (FEATURES #30):
+#   added:   inst_bpcs, inst_sis, SIS-R, inst_local_panel + 6 direction
+#            labels (arrow_*, connector_in/out)
+#   dropped: valve_cv, valve_gen, DCS, PLC, interlock-R, inst_field-R,
+#            valve_pnuectrl typo (all had <100 LS annotations — too thin)
 CLASS_NAMES: List[str] = [
-    "valve_bf",            # 0
-    "valve_bv",            # 1
-    "valve_ck",            # 2
-    "valve_cv",            # 3
-    "valve_db",            # 4
-    "valve_gen",           # 5
-    "valve_gl",            # 6
-    "valve_gt",            # 7  (gate valve — new in v1-9)
-    "inst_field",          # 8
-    "DCS",                 # 9
-    "PLC",                 # 10
-    "interlock",           # 11
-    "interlock-R",         # 12
-    "inst_field-R",        # 13
-    "Pump_Dwg_Pump",       # 14
-    "Motor",               # 15
-    "valve_3way_relief",   # 16
-    "valve_ncbv",          # 17
-    "valve_relief_safety", # 18
-    "valve_pnuectrl",      # 19
+    # Valves (9)
+    "valve_bv",            # 0
+    "valve_ncbv",          # 1
+    "valve_gt",            # 2
+    "valve_bf",            # 3
+    "valve_ck",            # 4
+    "valve_db",            # 5
+    "valve_relief_safety", # 6
+    "valve_gl",            # 7
+    "valve_3way_relief",   # 8
+    # Instruments / signals (8)
+    "inst_field",          # 9
+    "inst_bpcs",           # 10
+    "Motor",               # 11
+    "Pump/Dwg Pump",       # 12  (note: contains slash + space — was Pump_Dwg_Pump in v1-9)
+    "inst_sis",            # 13
+    "SIS-R",               # 14
+    "interlock",           # 15
+    "inst_local_panel",    # 16
+    # Direction (6 — new in v1-10)
+    "arrow_up",            # 17
+    "arrow_left",          # 18
+    "arrow_right",         # 19
+    "arrow_down",          # 20
+    "connector_out",       # 21
+    "connector_in",        # 22
 ]
 
 
@@ -120,7 +131,7 @@ def _get_session() -> Any:
         if not model_path.exists():
             raise InferenceError(
                 f"YOLO model file missing at {MODEL_PATH}. "
-                "The Docker image build is expected to download v1-9.onnx "
+                "The Docker image build is expected to download v1-10.onnx "
                 "into /app/models/. Verify the Dockerfile build step succeeded."
             )
         try:
