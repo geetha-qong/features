@@ -68,3 +68,4 @@ themes/screenshots/
 #  bind-mounts. Per-developer customization should go in
 #  docker-compose.local.yml which IS gitignored:)
 docker-compose.local.yml
+.github_pat

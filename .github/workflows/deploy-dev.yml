@@ -43,6 +43,12 @@ jobs:
       - name: Send deploy command via SSM
         id: send
         run: |
+          # Build secret: docker compose build needs a github_pat file path
+          # at $GITHUB_PAT_FILE (referenced from the top-level `secrets:` block
+          # in docker-compose.yml). The PAT is pulled from SSM at deploy time,
+          # written to /tmp/qong-github-pat.<cmd-id>, used for the build, then
+          # deleted. Buildkit reads the file at build start and forgets it —
+          # the PAT never lands in an image layer.
           CMD_ID=$(aws ssm send-command \
             --instance-ids "$EC2_INSTANCE_ID" \
             --document-name AWS-RunShellScript \
@@ -53,7 +59,11 @@ jobs:
               "cd /opt/qong",
               "sudo -u ubuntu git fetch origin dev",
               "sudo -u ubuntu git reset --hard origin/dev",
-              "sudo docker compose -f docker-compose.yml -f docker-compose.override.dev.yml --env-file .env.dev -p qong build web cpu-worker",
+              "PAT_FILE=/tmp/qong-github-pat.$$",
+              "aws ssm get-parameter --name /may26aws/qong-shared/github-pat-model-release --with-decryption --region ap-south-1 --query Parameter.Value --output text > $PAT_FILE",
+              "chmod 600 $PAT_FILE",
+              "trap \"rm -f $PAT_FILE\" EXIT",
+              "GITHUB_PAT_FILE=$PAT_FILE DOCKER_BUILDKIT=1 sudo -E docker compose -f docker-compose.yml -f docker-compose.override.dev.yml --env-file .env.dev -p qong build web cpu-worker",
               "sudo docker compose -f docker-compose.yml -f docker-compose.override.dev.yml --env-file .env.dev -p qong up -d web cpu-worker",
               "sudo -u ubuntu git log -1 --format=%H"
             ]}' \

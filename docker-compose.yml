@@ -10,6 +10,14 @@ services:
         # the short git SHA via `BUILD_ID=$(git rev-parse --short HEAD)
         # docker compose build`. Falls back to "dev" for local builds.
         BUILD_ID: ${BUILD_ID:-dev}
+      # The Dockerfile's v1-9 model-download step (FEATURES #28) needs a GH PAT
+      # to fetch the private release asset. Compose mounts the file referenced
+      # by the top-level `secrets:` block at /run/secrets/github_pat during build.
+      # Dockerfile uses `--mount=type=secret,id=github_pat,required=false` so the
+      # build still succeeds locally when no PAT file is present (model bake
+      # will fail and the container will load YOLO at runtime instead).
+      secrets:
+        - github_pat
     ports:
       - "127.0.0.1:8000:8000"
       # - "100.127.190.88:8000:8000"   # Tailscale — disabled locally (Tailscale not up); GPU worker on Windows reads tiles + callback via this when enabled
@@ -222,7 +230,10 @@ services:
 
   # ── CPU RQ worker (runs pipeline.py jobs from the 'cpu' queue) ───────────────────
   cpu-worker:
-    build: .
+    build:
+      context: .
+      secrets:
+        - github_pat
     command: python3 workers/cpu_worker.py
     volumes:
       - ./uploads:/app/uploads
@@ -257,3 +268,18 @@ volumes:
   minio_data:
   postgres_data:
   ls_data:
+
+# Top-level secrets block — referenced by web/cpu-worker build sections so
+# the GH PAT for fetching v1-9.onnx (FEATURES #28) is available as a
+# Buildkit secret at /run/secrets/github_pat during image build. The PAT
+# is NOT baked into the image layer.
+#
+# Env var `GITHUB_PAT_FILE` lets each environment point at its own file:
+#   - CI (deploy-dev.yml): writes PAT from SSM to /tmp/qong-github-pat, exports
+#     GITHUB_PAT_FILE=/tmp/qong-github-pat, runs build, deletes the file.
+#   - Local dev: leave unset → defaults to ./.github_pat. If that file
+#     doesn't exist, compose-build will still succeed (Dockerfile's
+#     `required=false` mount makes the model-download step a no-op).
+secrets:
+  github_pat:
+    file: ${GITHUB_PAT_FILE:-./.github_pat}
