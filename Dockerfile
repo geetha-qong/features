@@ -56,24 +56,35 @@ RUN mkdir -p uploads job_outputs
 # Authorization header read from the secret file (no-op if not mounted).
 RUN --mount=type=secret,id=github_pat,required=false \
     mkdir -p /app/models && \
-    MODEL_URL="https://github.com/Qong-Systems/qong_product/releases/download/model-v1-9/v1-9.onnx" && \
+    REPO="Qong-Systems/qong_product" && \
+    TAG="model-v1-9" && \
+    ASSET_NAME="v1-9.onnx" && \
     MODEL_SHA="11e29b47dea7a36b5609f315a7f589c53f0d0f8e24f0b95e74ecb9447f526178" && \
     DEST=/app/models/v1-9.onnx && \
-    echo "[model] Attempting public download..." && \
-    HTTP=$(curl -sL -w "%{http_code}" -o "$DEST" "$MODEL_URL") && \
-    if [ "$HTTP" != "200" ]; then \
-        echo "[model] Public download returned HTTP $HTTP — retrying with PAT" && \
-        if [ ! -s /run/secrets/github_pat ]; then \
-            echo "[model] No github_pat secret mounted; cannot retry. Pass --secret id=github_pat,src=<file>." && exit 1; \
-        fi && \
+    AUTH_HEADER="" && \
+    if [ -s /run/secrets/github_pat ]; then \
         TOKEN=$(cat /run/secrets/github_pat) && \
-        curl -sL -H "Authorization: token $TOKEN" \
-            -H "Accept: application/octet-stream" \
-            -o "$DEST" "$MODEL_URL" || exit 1; \
+        AUTH_HEADER="Authorization: Bearer $TOKEN"; \
+    fi && \
+    echo "[model] Looking up asset id via GitHub API..." && \
+    ASSET_JSON=$(curl -sL -H "Accept: application/vnd.github+json" \
+        -H "$AUTH_HEADER" \
+        "https://api.github.com/repos/$REPO/releases/tags/$TAG") && \
+    ASSET_ID=$(echo "$ASSET_JSON" | python3 -c "import json,sys; d=json.loads(sys.stdin.read(), strict=False); a=[x for x in d.get('assets',[]) if x['name']=='$ASSET_NAME']; print(a[0]['id']) if a else sys.exit('no asset (API said: '+str(d.get('message','?'))+')')") && \
+    echo "[model] asset_id=$ASSET_ID — downloading via API endpoint..." && \
+    HTTP=$(curl -sL -w "%{http_code}" \
+        -H "Accept: application/octet-stream" \
+        -H "$AUTH_HEADER" \
+        -o "$DEST" \
+        "https://api.github.com/repos/$REPO/releases/assets/$ASSET_ID") && \
+    if [ "$HTTP" != "200" ]; then \
+        echo "[model] Download failed with HTTP $HTTP. If the release is private, mount a Buildkit secret: DOCKER_BUILDKIT=1 docker build --secret id=github_pat,src=<file> ..." && \
+        rm -f "$DEST" && exit 1; \
     fi && \
     ACTUAL_SHA=$(sha256sum "$DEST" | awk '{print $1}') && \
     if [ "$ACTUAL_SHA" != "$MODEL_SHA" ]; then \
         echo "[model] sha256 mismatch: expected $MODEL_SHA got $ACTUAL_SHA" && \
+        head -c 500 "$DEST" && \
         rm -f "$DEST" && exit 1; \
     fi && \
     echo "[model] $DEST verified ($(stat -c%s "$DEST") bytes)"
