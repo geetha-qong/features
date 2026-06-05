@@ -24,6 +24,51 @@
 
 ---
 
+## [2026-06-05] #30 — v1-10 YOLO ONNX deployed (23 classes incl. flow direction, 2× mAP50 over v1-9)
+
+**Type:** model-swap
+**Stage:** training | infra | webapp
+**Status:** shipped (deployed to dev.qongsystems.com 2026-06-05 17:28 UTC)
+
+**Why:** v1-9 didn't detect the 6 direction labels the team added in LS over the past week (arrow_up/down/left/right + connector_in/out), blocking the flow-direction step of graph-extraction v0 (digital twin sub-project G). Rather than ship a separate direction-detector running alongside v1-9 (two-pass inference, two ONNX files), the call was to retrain a single unified model with all 23 classes from LS — both gains (direction) and the existing valve/instrument vocabulary in one pass.
+
+**What:**
+
+1. **Single 23-class model** trained from `yolov8s.pt` on 24,428 annotations exported from all 33 dev-LS projects:
+   - 9 valves: `valve_bv`, `valve_ncbv`, `valve_gt`, `valve_bf`, `valve_ck`, `valve_db`, `valve_relief_safety`, `valve_gl`, `valve_3way_relief`
+   - 8 instruments / signals: `inst_field`, `inst_bpcs`, `Motor`, `Pump/Dwg Pump`, `inst_sis`, `SIS-R`, `interlock`, `inst_local_panel`
+   - 6 direction (NEW): `arrow_up`, `arrow_left`, `arrow_right`, `arrow_down`, `connector_out`, `connector_in`
+2. **LS schema hygiene:** before training, two LS label typos consolidated — `valve_3way_releif` → `valve_3way_relief` (3 results) and `valve_pnuectrl` → `valve_pneuctrl` (16 results, 28 project configs). Idempotent fixer at `experiments/digital_twin/scripts/fix_ls_typos.py`.
+3. **Dataset pipeline:** new exporter `experiments/digital_twin/scripts/export_ls_dataset.py` walks all LS projects, applies a global 23-class ID map, emits a standard YOLO dataset (605 train + 62 val, 90/10 split). Handles both `/data/upload/` LS storage and webapp tile-route URLs. Output staged to `s3://qong-pid-archive-2026-06-02/training/v1-10/dataset_v1-10.tar` (258 MB).
+4. **Training:** g5.2xlarge on-demand in ap-south-1b (GPU spot quota = 0 in account; on-demand cost ~$1.21/hr × ~12 min training + setup = ~$3.50 total including a failed first run). Autonomous script: dataset pull → smoke (yolov8n, 1ep) → full train (yolov8s, 100ep, imgsz=640, batch=32, patience=20) → ONNX export → S3 upload → self-terminate. Script at `experiments/digital_twin/scripts/ec2_train_v1-10.sh`.
+5. **Production wiring:**
+   - GitHub release `model-v1-10` on `Qong-Systems/qong_product` (https://github.com/Qong-Systems/qong_product/releases/tag/model-v1-10), asset `v1-10.onnx` (42.6 MB, sha256 `896e42561fddd8014fd6021176ce903a5bb0afeffa3717b436e32a56c19e3142`)
+   - `Dockerfile`: TAG/ASSET_NAME/MODEL_SHA/DEST bumped to v1-10
+   - `webapp/inference.py`: MODEL_PATH → `/app/models/v1-10.onnx`, IMGSZ 1280 → 640 (v1-10 exported at 640), CLASS_NAMES rewritten to 23-class order
+   - Auto-deployed on push to `dev` via existing `deploy-dev.yml` (build → SSM RunCommand → docker compose restart → healthz)
+6. **Live smoke test on dev:** healthz 200, container has `/app/models/v1-10.onnx` (43 MB), `len(CLASS_NAMES)==23`, real inference on 9 job-9 tiles returned 138 detections including both old (`valve_db`, `inst_field`) and new (`inst_bpcs`, `inst_sis`) classes.
+
+**Result:**
+
+| Metric | v1-9 | v1-10 |
+|---|---|---|
+| mAP50 | 0.404 | **0.834** |
+| mAP50-95 | (unknown) | 0.502 |
+| Precision | (unknown) | 0.826 |
+| Recall | (unknown) | 0.755 |
+| Classes | 20 | 23 (7 dropped, 10 added) |
+| ONNX size | 43 MB | 42.6 MB |
+
+**Notes:**
+
+- **BREAKING:** dropped 7 v1-9 classes that lacked ≥100 LS annotations: `valve_cv`, `valve_gen`, `DCS`, `PLC`, `interlock-R`, `inst_field-R`, `valve_pnuectrl` (typo). Anything that currently relies on those class names or IDs will silently stop firing. Class IDs are completely reordered — only safe to map by name. The 20-class → 23-class transition is decoded by name via `CLASS_NAMES[d["_class_id"]]` in `inference.py`, so callers that read the string `label` field are fine.
+- **`Pump_Dwg_Pump` (v1-9) → `Pump/Dwg Pump` (v1-10)** — label now has slash + space, mirroring LS exactly. YOLO tolerates it; if it ever flows through filesystem paths we'd need to normalise.
+- **Under-represented classes** (`connector_in` 55 instances, `connector_out` 73, `valve_3way_relief` 114, `inst_local_panel` 113) — per-class mAP likely weaker; surface in eval and either annotate more in LS or use class weights on next retrain.
+- **GPU spot quota = 0** in account 449901518037 for "All G and VT Spot Instance Requests". Worth filing a quota increase ahead of v1-11 to halve retrain cost (~$0.49/hr spot vs $1.21/hr on-demand). 24-48h approval.
+- **Training script lessons logged** (commit `89be82c` on `dt/main`): (1) Ultralytics resolves `path:` in data.yaml against its own settings dir not the yaml file location — always use absolute paths; (2) `cmd 2>&1 | tail -N` masks `cmd`'s non-zero exit without `set -o pipefail`; (3) `torch.onnx.export` needs `onnxscript` (not just `onnx`) on PyTorch 2.7+ — add to bootstrap pip install.
+
+---
+
 ## [2026-06-03] #29 — D5: Custom-column-labels per customer template (admin UI)
 
 **Type:** feature
