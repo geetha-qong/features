@@ -32,6 +32,11 @@ for i in $(seq 1 60); do
   sleep 10
 done
 which yolo || pip install ultralytics==8.3.40 onnx==1.16.2 onnxruntime
+# onnxscript is required by torch.onnx.export on PyTorch 2.7+ (not pulled in
+# transitively by `onnx` or `ultralytics`). Bake it here so the ONNX export
+# at the end of training doesn't ImportError — bug we hit on the first
+# v1-10 run, recovered manually but baking the fix avoids the same retry.
+pip install --quiet onnxscript
 which yolo
 
 # Background log uploader — pushes log + results.csv to S3 every 5 min so user
