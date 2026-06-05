@@ -11,7 +11,7 @@
 # g5.2xlarge on-demand pricing). shutdown -h now at the end relies on
 # --instance-initiated-shutdown-behavior=terminate set at launch time, so the
 # EC2 dies (not just stops).
-set -e
+set -eo pipefail
 LOG=/var/log/qong-train.log
 exec > "$LOG" 2>&1
 echo "[train] === Started at $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
@@ -58,7 +58,45 @@ aws s3 cp "$S3_BASE/dataset_v1-10.tar" dataset.tar --region ap-south-1
 ls -lh dataset.tar
 tar -xf dataset.tar
 ls dataset_v1-10/
-echo "[train] Dataset extracted."
+
+# Overwrite data.yaml with an ABSOLUTE-path version. Ultralytics resolves
+# relative `path:` against ~/.config/Ultralytics/settings.json datasets_dir
+# (default /opt/qong/training/datasets/), NOT relative to the yaml file —
+# which makes `path: .` silently route to the wrong directory and fail with
+# "missing path .../images/val". Bug we hit on the first run.
+cat > dataset_v1-10/data.yaml <<YAML
+path: $WORK/dataset_v1-10
+train: images/train
+val: images/val
+
+nc: 23
+names:
+  0: valve_bv
+  1: valve_ncbv
+  2: valve_gt
+  3: valve_bf
+  4: valve_ck
+  5: valve_db
+  6: valve_relief_safety
+  7: valve_gl
+  8: valve_3way_relief
+  9: inst_field
+  10: inst_bpcs
+  11: Motor
+  12: Pump/Dwg Pump
+  13: inst_sis
+  14: SIS-R
+  15: interlock
+  16: inst_local_panel
+  17: arrow_up
+  18: arrow_left
+  19: arrow_right
+  20: arrow_down
+  21: connector_out
+  22: connector_in
+YAML
+echo "[train] Dataset extracted; data.yaml rewritten with absolute path."
+cat dataset_v1-10/data.yaml | head -4
 
 # GPU sanity check
 echo "[train] === GPU check ==="
