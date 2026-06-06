@@ -260,6 +260,100 @@ async def api_job_sheets(
 
 # ── GET /api/v1/jobs/{id}/detections ───────────────────────────────────────────
 
+
+def _yolo_class_to_canonical(label: Optional[str]) -> tuple:
+    """Map a YOLO class string to ``(entity_class, sub_class_or_None)``.
+
+    Returns ``(None, None)`` for labels that don't correspond to a canonical
+    entity (direction arrows, unknown classes). Detection of those labels
+    will not be paired with any entity.
+    """
+    if not label:
+        return None, None
+    if label.startswith("valve_"):
+        return "valve", label[len("valve_"):].upper()
+    if label.startswith("inst_") or label in {"interlock", "SIS-R"}:
+        return "instrument", None
+    # v1-9 used "Pump_Dwg_Pump" (underscore); v1-10 uses "Pump/Dwg Pump" — handle both
+    if label in {"Motor", "Pump/Dwg Pump", "Pump_Dwg_Pump"}:
+        return "equipment", None
+    if label.startswith("arrow_") or label.startswith("connector_"):
+        return None, None  # direction labels are not editable entities
+    return None, None
+
+
+def _attach_entity_ids(detections: list, entities: list) -> None:
+    """Mutate each detection dict in-place, adding ``entity_id`` and
+    ``entity_class``. See the docstring on ``api_job_detections`` for the
+    three-step matching strategy.
+
+    Each canonical entity is consumed at most once across the whole
+    detection list (FIFO over the detection iteration order), so two
+    detections of class ``valve_BV`` will resolve to two distinct entities
+    of that class.
+    """
+    tag_to_ids: dict = {}
+    for e in entities:
+        if e.tag:
+            tag_to_ids.setdefault(e.tag, []).append(
+                (str(e.entity_id), e.entity_class)
+            )
+    consumed: set = set()
+
+    def _pop_from_bucket(bucket: list) -> tuple:
+        while bucket:
+            eid, ecls = bucket.pop(0)
+            if eid not in consumed:
+                consumed.add(eid)
+                return eid, ecls
+        return None, None
+
+    for det in detections:
+        entity_id = None
+        entity_class = None
+
+        # Step 1+2: tag-equality matches. Two possible carriers of a tag on
+        # the detection — `valve_tag` (legacy GPU worker output) or `label`
+        # (when the label string happens to be tag-shaped, e.g. fixtures).
+        for candidate_tag in (det.get("valve_tag"), det.get("tag"), det.get("label")):
+            if candidate_tag and candidate_tag in tag_to_ids:
+                entity_id, entity_class = _pop_from_bucket(tag_to_ids[candidate_tag])
+                if entity_id:
+                    break
+
+        # Step 3: class compatibility — read the YOLO class from either
+        # shape (new in-process inference: `label`; legacy worker: `yolo_class`).
+        if entity_id is None:
+            yolo_label = det.get("label") or det.get("yolo_class")
+            cls, sub = _yolo_class_to_canonical(yolo_label)
+            if cls:
+                # Prefer sub_class-exact match; fall back to class-only.
+                for e in entities:
+                    eid = str(e.entity_id)
+                    if eid in consumed or e.entity_class != cls:
+                        continue
+                    if sub and (e.sub_class or "").upper() != sub:
+                        continue
+                    entity_id = eid
+                    entity_class = e.entity_class
+                    consumed.add(eid)
+                    break
+                if entity_id is None and sub:
+                    # Sub_class didn't match anything; try class-only.
+                    for e in entities:
+                        eid = str(e.entity_id)
+                        if eid in consumed or e.entity_class != cls:
+                            continue
+                        entity_id = eid
+                        entity_class = e.entity_class
+                        consumed.add(eid)
+                        break
+
+        det["entity_id"] = entity_id
+        if entity_class:
+            det.setdefault("entity_class", entity_class)
+
+
 @router.get("/jobs/{job_id}/detections")
 async def api_job_detections(
     job_id: int,
@@ -270,10 +364,31 @@ async def api_job_detections(
 
     `detections` (may be null/empty if the GPU worker hasn't called back
     yet) contains the bounding-box positions to render on the PDF tile.
-    Each detection is enriched with `entity_id` (UUID string) when its
-    `label` matches a canonical entity's `tag` — this is what makes the
-    canvas click-to-edit flow work (Spec A / FEATURES #26-27 / D1.5).
-    Detections that fail to match get `entity_id: null` and stay
+    Each detection is enriched with `entity_id` (UUID string) when it can
+    be paired with a canonical entity — this makes the canvas click-to-edit
+    flow work (Spec A / FEATURES #26-27 / D1.5).
+
+    Matching strategy, tried in order until one succeeds (FEATURES #31):
+
+      1. **Tag-equality.** If the detection carries an OCR'd tag string
+         (`valve_tag` or `tag` field — populated by the legacy Windows GPU
+         worker), match exactly against `canonical_entity.tag`.
+      2. **Label-as-tag.** If the detection's `label` happens to be a
+         tag-shaped string (legacy / unit-test fixtures), match against
+         `tag` as well.
+      3. **Class compatibility (FIFO).** Map the YOLO class string
+         (`label` from `webapp.inference` *or* `yolo_class` from the
+         legacy worker) → `(entity_class, sub_class)`, then assign the
+         first un-consumed canonical entity of that class. This is the
+         dominant path now that the in-process YOLO inference module
+         (FEATURES #28, model v1-10 FEATURES #30) emits class names not
+         tags. Without spatial info on canonical entities (their bboxes
+         are placeholder zeros today) the pairing is order-based, not
+         spatially correct — but it unblocks DatasheetDrawer editing for
+         the matched class. Spatial IoU matching is the v2 of D1.5,
+         deferred until `pipeline_emitter` populates real bboxes.
+
+    Detections that fail all three steps get `entity_id: null` and stay
     informational-only (cannot be edited via the override API).
 
     `valves` is the structured CSV the customer downloads (no coords).
@@ -294,9 +409,6 @@ async def api_job_detections(
         except (ValueError, TypeError):
             detections = []
 
-    # ── Attach entity_id by matching detection.label → canonical_entity.tag.
-    # Multiple entities can share a tag in pathological cases (rare); we use a
-    # FIFO list-pop so each detection consumes one entity_id at most.
     if detections and job.output_csv_path:
         try:
             from webapp.deliverables.job_loader import (
@@ -304,24 +416,7 @@ async def api_job_detections(
                 load_canonical_for_job,
             )
             canonical = load_canonical_for_job(job.output_csv_path)
-            tag_to_ids: dict = {}
-            for e in canonical.entities:
-                if e.tag:
-                    tag_to_ids.setdefault(e.tag, []).append(
-                        (str(e.entity_id), e.entity_class)
-                    )
-            for det in detections:
-                label = det.get("label")
-                if not label:
-                    det["entity_id"] = None
-                    continue
-                bucket = tag_to_ids.get(label)
-                if bucket:
-                    entity_id, entity_class = bucket.pop(0)
-                    det["entity_id"] = entity_id
-                    det.setdefault("entity_class", entity_class)
-                else:
-                    det["entity_id"] = None
+            _attach_entity_ids(detections, canonical.entities)
         except JobCanonicalNotFound:
             # canonical.json hasn't been emitted yet — leave detections as-is.
             for det in detections:

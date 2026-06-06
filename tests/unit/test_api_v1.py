@@ -259,54 +259,58 @@ def test_detections_survives_malformed_gpu_json(client, db_session, user, api_ke
     assert resp.json()["detections"] == []
 
 
-def test_detections_attach_entity_id_from_canonical(client, db_session, user, api_key_pair, tmp_path):
-    """D1.5: GET /detections matches detection.label → canonical.tag and attaches entity_id.
-
-    Detections whose label has no matching canonical entity get entity_id=None
-    (informational-only — not editable via the override API).
-    """
-    import json as _json
-    from webapp.deliverables.canonical import CanonicalEntity, JobCanonical
-    import uuid as _uuid
-
-    # Build a real canonical.json on disk alongside output_csv_path.
+def _build_canonical_fixture(tmp_path, entities):
+    """Helper: write a canonical.json next to a stub valve_list.csv. Returns
+    the path to the CSV (which is what Job.output_csv_path stores)."""
+    from webapp.deliverables.canonical import JobCanonical
     out_dir = tmp_path / "job_dir"
-    out_dir.mkdir()
+    out_dir.mkdir(exist_ok=True)
     csv_path = out_dir / "valve_list.csv"
-    csv_path.write_text("pid_no,category\nP-1,GLOBE\n")  # contents don't matter for this test
+    csv_path.write_text("pid_no,category\nP-1,GLOBE\n")
     canonical_path = out_dir / "canonical.json"
-
-    entity1_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "pt-101")
-    entity2_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "ft-201")
     canonical = JobCanonical(
         job_id=9001,
         canonical_schema_version="1.0.0",
         customer_template_slug="default",
-        entities=[
-            CanonicalEntity(
-                entity_id=entity1_id, entity_class="instrument",
-                sub_class="PT", tag="PT-101",
-                pid_number="T-301", sheet_number=1,
-                bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
-            ),
-            CanonicalEntity(
-                entity_id=entity2_id, entity_class="instrument",
-                sub_class="FT", tag="FT-201",
-                pid_number="T-301", sheet_number=1,
-                bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
-            ),
-        ],
+        entities=entities,
     )
     canonical_path.write_text(canonical.model_dump_json())
+    return str(csv_path)
 
+
+def test_detections_attach_entity_id_by_tag(client, db_session, user, api_key_pair, tmp_path):
+    """D1.5 Step 1+2: when a detection carries a tag-shaped string (legacy
+    GPU worker output that included OCR'd tags), match against canonical
+    entity tag for entity_id. Detections without a tag-match fall back to
+    class-based matching."""
+    import json as _json
+    from webapp.deliverables.canonical import CanonicalEntity
+    import uuid as _uuid
+
+    entity1_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "pt-101")
+    entity2_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "ft-201")
+    csv_path = _build_canonical_fixture(tmp_path, [
+        CanonicalEntity(
+            entity_id=entity1_id, entity_class="instrument",
+            sub_class="PT", tag="PT-101",
+            pid_number="T-301", sheet_number=1,
+            bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
+        ),
+        CanonicalEntity(
+            entity_id=entity2_id, entity_class="instrument",
+            sub_class="FT", tag="FT-201",
+            pid_number="T-301", sheet_number=1,
+            bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
+        ),
+    ])
     job = models.Job(
         user_id=user.id, pid_no="T-301", status="done", valve_count=0,
         original_filename="x.pdf", stored_filename="y.pdf",
-        output_csv_path=str(csv_path),
+        output_csv_path=csv_path,
         gpu_detections=_json.dumps([
-            {"bbox": [10, 20, 30, 40], "label": "PT-101"},   # matches entity1
-            {"bbox": [50, 60, 70, 80], "label": "FT-201"},   # matches entity2
-            {"bbox": [90, 100, 110, 120], "label": "valve_bf"},  # no canonical match
+            {"bbox": [10, 20, 30, 40], "label": "PT-101"},          # label-as-tag, matches entity1
+            {"bbox": [50, 60, 70, 80], "valve_tag": "FT-201"},      # explicit tag carrier, matches entity2
+            {"bbox": [90, 100, 110, 120], "label": "arrow_up"},     # direction class — never matches
         ]),
     )
     db_session.add(job)
@@ -322,7 +326,119 @@ def test_detections_attach_entity_id_from_canonical(client, db_session, user, ap
     assert dets[0]["entity_id"] == str(entity1_id)
     assert dets[0]["entity_class"] == "instrument"
     assert dets[1]["entity_id"] == str(entity2_id)
-    assert dets[2]["entity_id"] is None  # symbol-class label, no tag match
+    assert dets[2]["entity_id"] is None  # direction labels never editable
+
+
+def test_detections_attach_entity_id_by_class_v1_10_shape(
+    client, db_session, user, api_key_pair, tmp_path,
+):
+    """D1.5 Step 3: realistic production shape. Detection has `label` field
+    holding a YOLO class string (e.g. "valve_bf"), NOT a tag — this is what
+    the in-process inference module (`webapp.inference`) emits as of v1-10
+    (FEATURES #28 + #30). Matching is class-compatibility + FIFO over the
+    detection iteration order."""
+    import json as _json
+    from webapp.deliverables.canonical import CanonicalEntity
+    import uuid as _uuid
+
+    valve1_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "62-BV-100")
+    valve2_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "62-BV-200")
+    valve3_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "62-BF-300")
+    inst1_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "FT-401")
+    csv_path = _build_canonical_fixture(tmp_path, [
+        CanonicalEntity(
+            entity_id=valve1_id, entity_class="valve", sub_class="BV",
+            tag="62-BV-100", pid_number="T-301", sheet_number=1,
+            bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
+        ),
+        CanonicalEntity(
+            entity_id=valve2_id, entity_class="valve", sub_class="BV",
+            tag="62-BV-200", pid_number="T-301", sheet_number=1,
+            bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
+        ),
+        CanonicalEntity(
+            entity_id=valve3_id, entity_class="valve", sub_class="BF",
+            tag="62-BF-300", pid_number="T-301", sheet_number=1,
+            bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
+        ),
+        CanonicalEntity(
+            entity_id=inst1_id, entity_class="instrument", sub_class="",
+            tag="FT-401", pid_number="T-301", sheet_number=1,
+            bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
+        ),
+    ])
+    job = models.Job(
+        user_id=user.id, pid_no="T-301", status="done", valve_count=0,
+        original_filename="x.pdf", stored_filename="y.pdf",
+        output_csv_path=csv_path,
+        gpu_detections=_json.dumps([
+            {"bbox": [1, 2, 3, 4], "label": "valve_bv"},     # → valve1 (first BV)
+            {"bbox": [5, 6, 7, 8], "label": "valve_bv"},     # → valve2 (second BV)
+            {"bbox": [9, 10, 11, 12], "label": "valve_bf"},  # → valve3 (only BF)
+            {"bbox": [13, 14, 15, 16], "label": "inst_field"},  # → inst1 (any instrument)
+            {"bbox": [17, 18, 19, 20], "label": "valve_bv"}, # → null (BV bucket exhausted)
+            {"bbox": [21, 22, 23, 24], "label": "connector_in"},  # direction — null
+        ]),
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    full_key, _ = api_key_pair
+    resp = client.get(
+        f"/api/v1/jobs/{job.id}/detections",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 200
+    dets = resp.json()["detections"]
+    assert dets[0]["entity_id"] == str(valve1_id)
+    assert dets[0]["entity_class"] == "valve"
+    assert dets[1]["entity_id"] == str(valve2_id)
+    assert dets[2]["entity_id"] == str(valve3_id)
+    assert dets[3]["entity_id"] == str(inst1_id)
+    assert dets[3]["entity_class"] == "instrument"
+    assert dets[4]["entity_id"] is None  # ran out of BV entities
+    assert dets[5]["entity_id"] is None  # connector_in not editable
+
+
+def test_detections_attach_entity_id_legacy_yolo_class_field(
+    client, db_session, user, api_key_pair, tmp_path,
+):
+    """D1.5 Step 3 backward-compat: the legacy Windows GPU worker wrote
+    `yolo_class` (not `label`). The matcher must read either field so old
+    job rows continue to work after we deploy this fix."""
+    import json as _json
+    from webapp.deliverables.canonical import CanonicalEntity
+    import uuid as _uuid
+
+    valve_id = _uuid.uuid5(_uuid.NAMESPACE_DNS, "62-BV-100")
+    csv_path = _build_canonical_fixture(tmp_path, [
+        CanonicalEntity(
+            entity_id=valve_id, entity_class="valve", sub_class="BV",
+            tag="62-BV-100", pid_number="T-301", sheet_number=1,
+            bbox=(0.0, 0.0, 0.0, 0.0), fields={}, vendor_match=None,
+        ),
+    ])
+    job = models.Job(
+        user_id=user.id, pid_no="T-301", status="done", valve_count=0,
+        original_filename="x.pdf", stored_filename="y.pdf",
+        output_csv_path=csv_path,
+        gpu_detections=_json.dumps([
+            # Legacy shape: yolo_class instead of label, bbox_tile instead of bbox
+            {"bbox_tile": [10, 20, 30, 40], "yolo_class": "valve_bv", "yolo_conf": 0.91},
+        ]),
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    full_key, _ = api_key_pair
+    resp = client.get(
+        f"/api/v1/jobs/{job.id}/detections",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 200
+    dets = resp.json()["detections"]
+    assert dets[0]["entity_id"] == str(valve_id)
+    assert dets[0]["entity_class"] == "valve"
 
 
 def test_detections_includes_valve_rows(client, db_session, user, api_key_pair):
