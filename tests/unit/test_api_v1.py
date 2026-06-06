@@ -400,6 +400,58 @@ def test_detections_attach_entity_id_by_class_v1_10_shape(
     assert dets[5]["entity_id"] is None  # connector_in not editable
 
 
+def test_detections_normalize_legacy_shape_for_canvas_rendering(
+    client, db_session, user, api_key_pair,
+):
+    """Frontend PidCanvas reads `bbox`, `label`, `tile` (in-process inference
+    shape, FEATURES #28). Legacy Windows GPU worker rows have `bbox_tile`,
+    `yolo_class`, plus `tile_page/row/col` (no `tile`). Without normalisation
+    the canvas silently renders zero detections on legacy jobs even after
+    D1.5 attaches entity_id. Endpoint must coerce both shapes to a uniform
+    output."""
+    import json as _json
+    legacy_only = {
+        "bbox_tile": [10, 20, 30, 40],
+        "yolo_class": "valve_bv",
+        "yolo_conf": 0.91,
+        "tile_page": 0, "tile_row": 1, "tile_col": 2,
+        "valve_tag": None,
+    }
+    new_shape = {
+        "bbox": [50, 60, 70, 80],
+        "label": "valve_bf",
+        "confidence": 0.87,
+        "tile_page": 0, "tile_row": 0, "tile_col": 0,
+        "tile": "tile_p0_r0_c0.png",
+    }
+    job = models.Job(
+        user_id=user.id, pid_no="T-510", status="done", valve_count=0,
+        original_filename="x.pdf", stored_filename="y.pdf",
+        gpu_detections=_json.dumps([legacy_only, new_shape]),
+    )
+    db_session.add(job)
+    db_session.commit()
+    full_key, _ = api_key_pair
+    resp = client.get(
+        f"/api/v1/jobs/{job.id}/detections",
+        headers={"Authorization": f"Bearer {full_key}"},
+    )
+    assert resp.status_code == 200
+    dets = resp.json()["detections"]
+    # Legacy row now carries the new-shape keys too
+    assert dets[0]["bbox"] == [10, 20, 30, 40]
+    assert dets[0]["label"] == "valve_bv"
+    assert dets[0]["confidence"] == 0.91
+    assert dets[0]["tile"] == "tile_p0_r1_c2.png"
+    # Original legacy keys still present (don't clobber)
+    assert dets[0]["bbox_tile"] == [10, 20, 30, 40]
+    assert dets[0]["yolo_class"] == "valve_bv"
+    # New-shape row untouched
+    assert dets[1]["bbox"] == [50, 60, 70, 80]
+    assert dets[1]["label"] == "valve_bf"
+    assert dets[1]["tile"] == "tile_p0_r0_c0.png"
+
+
 def test_detections_attach_entity_id_legacy_yolo_class_field(
     client, db_session, user, api_key_pair, tmp_path,
 ):

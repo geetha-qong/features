@@ -282,6 +282,36 @@ def _yolo_class_to_canonical(label: Optional[str]) -> tuple:
     return None, None
 
 
+def _normalize_detection_shape(detections: list) -> None:
+    """Smooth over the two stored shapes for `gpu_detections`:
+
+      - Legacy Windows GPU worker rows: ``bbox_tile``, ``yolo_class``,
+        ``yolo_conf``, ``tile_page/row/col`` (no ``tile`` filename).
+      - In-process YOLO inference rows (FEATURES #28, #30): ``bbox``,
+        ``label``, ``confidence``, ``tile`` filename + ``tile_page/row/col``.
+
+    The frontend ``PidCanvas`` only reads the second shape (``bbox``,
+    ``label``, ``tile``). Without normalisation, legacy jobs have detections
+    in the DB but zero overlay rendered on the canvas, which silently
+    breaks D2 even after D1.5 attaches entity_id correctly.
+
+    Mutates each dict in-place; never overwrites a value that's already set.
+    """
+    for det in detections:
+        if "bbox" not in det and "bbox_tile" in det:
+            det["bbox"] = det["bbox_tile"]
+        if "label" not in det and "yolo_class" in det:
+            det["label"] = det["yolo_class"]
+        if "confidence" not in det and "yolo_conf" in det:
+            det["confidence"] = det["yolo_conf"]
+        if "tile" not in det:
+            page = det.get("tile_page")
+            row = det.get("tile_row")
+            col = det.get("tile_col")
+            if all(v is not None for v in (page, row, col)):
+                det["tile"] = f"tile_p{page}_r{row}_c{col}.png"
+
+
 def _attach_entity_ids(detections: list, entities: list) -> None:
     """Mutate each detection dict in-place, adding ``entity_id`` and
     ``entity_class``. See the docstring on ``api_job_detections`` for the
@@ -408,6 +438,11 @@ async def api_job_detections(
                 detections = parsed
         except (ValueError, TypeError):
             detections = []
+
+    # Normalize legacy GPU-worker shape (bbox_tile, yolo_class, ...) onto the
+    # in-process inference shape the frontend expects (bbox, label, tile).
+    if detections:
+        _normalize_detection_shape(detections)
 
     if detections and job.output_csv_path:
         try:
