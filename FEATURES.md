@@ -24,6 +24,39 @@
 
 ---
 
+## [2026-06-06] #31 — D1.5: class-based entity_id matching on canvas detections (Spec A unblock)
+
+**Type:** bugfix
+**Stage:** webapp
+**Status:** shipped (deployed to dev.qongsystems.com 2026-06-06)
+
+**Why:** The `/api/v1/jobs/{id}/detections` endpoint was supposed to attach `entity_id` to each YOLO bbox so the studio canvas click → DatasheetDrawer flow could key entities by UUID. The existing logic matched by string equality of `detection.label` → `canonical_entity.tag` — which never fires in production because `webapp/inference.py` emits YOLO class names (`"valve_bf"`) as `label`, never engineering tags. Effect: every detection had `entity_id=null`, blocking Spec A D2 (DatasheetDrawer real-data wiring) since the post-v1-9 deploy. Fix surfaced when starting D1.5 work post-v1-10.
+
+**What:**
+
+- `webapp/routers/api_v1.py`: rewrote the enrichment block as a 3-step matcher (`_attach_entity_ids` helper):
+  1. **Tag-equality.** `detection.valve_tag` / `tag` / tag-shaped `label` → `entity.tag`. Preserves the legacy GPU-worker path + existing fixture shape.
+  2. **Label-as-tag.** Same lookup keyed by `label`.
+  3. **Class compatibility (FIFO).** YOLO class string (from `label` *or* legacy `yolo_class`) → `(entity_class, sub_class)` via `_yolo_class_to_canonical()`, then take the first un-consumed canonical entity matching that class. Sub-class match preferred; falls back to class-only.
+- `_yolo_class_to_canonical` mapping (covers v1-10's 23 classes + v1-9 legacy labels):
+  - `valve_*` → `("valve", <suffix>.upper())`
+  - `inst_*`, `interlock`, `SIS-R` → `("instrument", None)`
+  - `Motor`, `Pump/Dwg Pump`, `Pump_Dwg_Pump` → `("equipment", None)`
+  - `arrow_*`, `connector_*` → `(None, None)` (direction labels not editable)
+- Tests: replaced single unrealistic test with 3 focused tests covering (a) tag carriers, (b) realistic v1-10 `label`-as-class shape, (c) legacy `yolo_class` field shape. All 7 detections tests pass.
+
+**Result:**
+
+Detections with a canonical-class peer (valve, instrument, equipment) now get a real `entity_id`. DatasheetDrawer canvas-click now opens for the matched class. Pairing is order-based (not spatially correct) because canonical entities' bboxes are still `(0,0,0,0)` placeholders — see notes.
+
+**Notes:**
+
+- **Spatial IoU matching is the v2 of D1.5,** deferred until `pipeline_emitter` populates real bboxes on canonical entities. Today two `valve_bv` detections pair with the first two `valve_bv` canonical entities in iteration order; a user clicking the second-from-left valve will see whichever entity is second in the canonical list, not necessarily the one physically there. Acceptable degraded state for the field-edit flow but produces wrong-pair UX on dense same-class clusters.
+- Direction labels (`arrow_*`, `connector_*`) are intentionally non-editable. They render on the canvas but click does nothing.
+- Pre-existing failing test `test_sheets_empty_when_no_tiles` (Postgres DB-state leak between tests) is unrelated and fails on the prior commit too — left alone.
+
+---
+
 ## [2026-06-05] #30 — v1-10 YOLO ONNX deployed (23 classes incl. flow direction, 2× mAP50 over v1-9)
 
 **Type:** model-swap
