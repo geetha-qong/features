@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
+from webapp.label_studio_client import extract_pdf_path_from_task_data
 from webapp.queue import get_cpu_queue
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
@@ -62,9 +63,10 @@ async def ls_tasks_created(
         "tasks":   [ { "id": 877, "data": {"image": "/data/upload/32/<uuid>.pdf"}, ... }, ... ]
       }
 
-    For each task whose `data.image` ends in `.pdf`, enqueue an auto-tile job.
-    PNG tasks are no-ops (most common case after our own upload step succeeds —
-    we keep responding 200 so LS doesn't disable the webhook).
+    For each task whose `data` carries a `.pdf` value (under ANY key — LS Import
+    UI uses `$undefined$` for unknown media types, not `image`), enqueue an
+    auto-tile job. PNG tasks are no-ops; we still respond 200 so LS doesn't
+    disable the webhook over a "wrong response" signal.
     """
     _verify_secret(authorization, x_ls_webhook_secret)
 
@@ -86,11 +88,9 @@ async def ls_tasks_created(
     queue = get_cpu_queue()
     enqueued: List[int] = []
     for task in tasks:
-        image_path = (task.get("data") or {}).get("image")
+        image_path = extract_pdf_path_from_task_data(task.get("data") or {})
         task_id = task.get("id")
         if not image_path or not task_id:
-            continue
-        if not image_path.lower().endswith(".pdf"):
             continue
         queue.enqueue(
             "webapp.auto_tile.auto_tile_ls_task_rq",

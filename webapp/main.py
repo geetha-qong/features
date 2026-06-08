@@ -83,8 +83,21 @@ def _ensure_super_admin() -> None:
         db.close()
 
 
+def _reconcile_ls_webhooks() -> None:
+    """Best-effort: attach the auto-tile webhook to any LS project that's
+    missing it, and enqueue tiling for leftover PDF tasks. Covers LS Import UI
+    projects that bypass `get_or_create_project`. Failures are swallowed so a
+    flaky LS or network blip can't block webapp boot."""
+    try:
+        from webapp.label_studio_client import reconcile_project_webhooks
+        reconcile_project_webhooks(enqueue_pdf_backlog=True)
+    except Exception as e:
+        print(f"[startup] LS webhook reconcile skipped: {e!r}")
+
+
 _reset_stale_jobs()
 _ensure_super_admin()
+_reconcile_ls_webhooks()
 
 app = FastAPI(title="Qong — P&ID Valve Extractor")
 

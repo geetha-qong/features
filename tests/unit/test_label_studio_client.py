@@ -149,4 +149,154 @@ def test_get_or_create_project_unconfigured_returns_none(monkeypatch):
         result = ls.get_or_create_project("ANYTHING")
         assert result is None
         mock_get.assert_not_called()
-        mock_post.assert_not_called()
+
+
+# ── extract_pdf_path_from_task_data — covers LS's `$undefined$` quirk ─────────
+
+
+def test_extract_pdf_path_finds_image_key(monkeypatch):
+    ls = _reload_ls_client(monkeypatch)
+    assert ls.extract_pdf_path_from_task_data(
+        {"image": "/data/upload/35/abc-foo.pdf"}
+    ) == "/data/upload/35/abc-foo.pdf"
+
+
+def test_extract_pdf_path_finds_undefined_key(monkeypatch):
+    """LS Import UI stashes non-image uploads under `$undefined$`. The receiver
+    used to look at `data.image` only and miss every PDF uploaded via LS UI."""
+    ls = _reload_ls_client(monkeypatch)
+    assert ls.extract_pdf_path_from_task_data(
+        {"$undefined$": "/data/upload/38/xyz.PDF"}
+    ) == "/data/upload/38/xyz.PDF"
+
+
+def test_extract_pdf_path_returns_none_for_png(monkeypatch):
+    """Tile tasks (post-auto-tile) carry a PNG — must NOT match, otherwise we'd
+    re-tile our own outputs in an infinite loop."""
+    ls = _reload_ls_client(monkeypatch)
+    assert ls.extract_pdf_path_from_task_data(
+        {"image": "/data/upload/35/abc-tile_p0_r1_c2.png"}
+    ) is None
+
+
+def test_extract_pdf_path_returns_none_for_empty_or_garbage(monkeypatch):
+    ls = _reload_ls_client(monkeypatch)
+    assert ls.extract_pdf_path_from_task_data({}) is None
+    assert ls.extract_pdf_path_from_task_data({"image": ""}) is None
+    assert ls.extract_pdf_path_from_task_data({"image": None}) is None
+    assert ls.extract_pdf_path_from_task_data(None) is None  # type: ignore[arg-type]
+
+
+# ── reconcile_project_webhooks — startup self-heal ───────────────────────────
+
+
+def test_reconcile_adds_webhook_to_project_missing_one(monkeypatch):
+    """A project with zero webhooks must get our auto-tile webhook attached.
+    The webhook list probe + POST register must both fire."""
+    ls = _reload_ls_client(monkeypatch)
+
+    def fake_get(url, headers=None, timeout=None):
+        if url.endswith("/api/projects/?page_size=500"):
+            return _mk_response(200, {"results": [{"id": 38}]})
+        if "/api/webhooks/?project=38" in url:
+            return _mk_response(200, [])  # no webhooks yet
+        if "/api/projects/38/tasks" in url:
+            return _mk_response(200, {"tasks": []})  # no backlog
+        return _mk_response(404)
+
+    posts = []
+    def fake_post(url, headers=None, json=None, timeout=None):
+        posts.append({"url": url, "json": json})
+        if url.endswith("/api/webhooks/"):
+            return _mk_response(201, {"id": 99})
+        return _mk_response(404)
+
+    with patch.object(ls.requests, "get", side_effect=fake_get), \
+         patch.object(ls.requests, "post", side_effect=fake_post), \
+         patch("webapp.queue.get_cpu_queue"):
+        out = ls.reconcile_project_webhooks(enqueue_pdf_backlog=True)
+
+    assert out["status"] == "ok"
+    assert out["webhooks_added"] == 1
+    # One POST to /api/webhooks/ — and it MUST target proj 38 with our secret
+    webhook_posts = [p for p in posts if p["url"].endswith("/api/webhooks/")]
+    assert len(webhook_posts) == 1
+    assert webhook_posts[0]["json"]["project"] == 38
+    assert webhook_posts[0]["json"]["actions"] == ["TASKS_CREATED"]
+    assert webhook_posts[0]["json"]["headers"]["X-LS-Webhook-Secret"] == "test-secret"
+
+
+def test_reconcile_skips_project_that_already_has_webhook(monkeypatch):
+    """Idempotent on rerun — if our webhook is already there, don't double-add."""
+    ls = _reload_ls_client(monkeypatch)
+    existing = [{
+        "id": 50,
+        "is_active": True,
+        "actions": ["TASKS_CREATED"],
+        "url": "https://test.example.com/api/v1/webhooks/label-studio/tasks-created",
+    }]
+
+    def fake_get(url, headers=None, timeout=None):
+        if url.endswith("/api/projects/?page_size=500"):
+            return _mk_response(200, {"results": [{"id": 35}]})
+        if "/api/webhooks/?project=35" in url:
+            return _mk_response(200, existing)
+        if "/api/projects/35/tasks" in url:
+            return _mk_response(200, {"tasks": []})
+        return _mk_response(404)
+
+    posts = []
+    with patch.object(ls.requests, "get", side_effect=fake_get), \
+         patch.object(ls.requests, "post", side_effect=lambda *a, **k: posts.append(k) or _mk_response(201, {"id": 1})), \
+         patch("webapp.queue.get_cpu_queue"):
+        out = ls.reconcile_project_webhooks(enqueue_pdf_backlog=True)
+
+    assert out["status"] == "ok"
+    assert out["webhooks_added"] == 0
+    # No registration POST should have been issued.
+    assert not any(p.get("json", {}).get("actions") == ["TASKS_CREATED"] for p in posts)
+
+
+def test_reconcile_enqueues_pdf_backlog(monkeypatch):
+    """Existing PDF tasks (from LS-UI uploads predating the webhook) get tiling
+    jobs queued on the cpu-worker. Without this, every new LS-UI project leaves
+    a stale PDF sitting in LS forever."""
+    ls = _reload_ls_client(monkeypatch)
+
+    def fake_get(url, headers=None, timeout=None):
+        if url.endswith("/api/projects/?page_size=500"):
+            return _mk_response(200, {"results": [{"id": 38}]})
+        if "/api/webhooks/?project=38" in url:
+            return _mk_response(200, [])
+        if "/api/projects/38/tasks" in url:
+            return _mk_response(200, {"tasks": [
+                {"id": 1246, "data": {"$undefined$": "/data/upload/38/foo.pdf"}},
+                {"id": 1247, "data": {"image": "/data/upload/38/tile_p0_r0_c0.png"}},  # skip
+            ]})
+        return _mk_response(404)
+
+    fake_queue = MagicMock()
+    with patch.object(ls.requests, "get", side_effect=fake_get), \
+         patch.object(ls.requests, "post", return_value=_mk_response(201, {"id": 99})), \
+         patch("webapp.queue.get_cpu_queue", return_value=fake_queue):
+        out = ls.reconcile_project_webhooks(enqueue_pdf_backlog=True)
+
+    assert out["pdf_backlog_enqueued"] == 1
+    fake_queue.enqueue.assert_called_once()
+    call_kwargs = fake_queue.enqueue.call_args.kwargs["kwargs"]
+    assert call_kwargs == {
+        "project_id": 38,
+        "task_id": 1246,
+        "image_path": "/data/upload/38/foo.pdf",
+    }
+
+
+def test_reconcile_skipped_when_secret_unset(monkeypatch):
+    """No LS_WEBHOOK_SECRET → can't auth callbacks → don't register anything."""
+    ls = _reload_ls_client(monkeypatch, secret="")
+    with patch.object(ls.requests, "get") as mock_get, \
+         patch.object(ls.requests, "post") as mock_post:
+        out = ls.reconcile_project_webhooks(enqueue_pdf_backlog=True)
+    assert out["status"] == "skipped"
+    mock_get.assert_not_called()
+    mock_post.assert_not_called()

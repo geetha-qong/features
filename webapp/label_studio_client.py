@@ -162,6 +162,145 @@ def _register_tasks_created_webhook(project_id: int) -> bool:
     return False
 
 
+def extract_pdf_path_from_task_data(data: dict) -> Optional[str]:
+    """Return the first string value in `data` that looks like a PDF path.
+
+    LS Import UI stores PDF uploads under `data["$undefined$"]` (not
+    `data["image"]`) because PDFs aren't a first-class LS media type — when
+    the project's `label_config` declares `<Image value="$image"/>` and you
+    upload a non-image, LS falls back to the `$undefined$` slot. We also see
+    `image`, `pdf`, `url`, and `file` keys in the wild from other LS upload
+    paths. Rather than enumerate, scan all string values once.
+
+    Returns None if no value ends in `.pdf` (case-insensitive).
+    """
+    if not isinstance(data, dict):
+        return None
+    for v in data.values():
+        if isinstance(v, str) and v.lower().endswith(".pdf"):
+            return v
+    return None
+
+
+def list_project_webhooks(project_id: int) -> list:
+    """Return the webhook rows attached to one project, or `[]` on error."""
+    if not is_configured():
+        return []
+    try:
+        resp = requests.get(
+            f"{LS_URL}/api/webhooks/?project={project_id}",
+            headers=_headers(),
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return resp.json() or []
+    except Exception as e:
+        print(f"[label_studio] list_project_webhooks({project_id}) error: {e!r}")
+    return []
+
+
+def _project_has_tasks_created_webhook(project_id: int) -> bool:
+    """True iff the project already has at least one active TASKS_CREATED webhook
+    pointing at *our* receiver URL. Both checks matter — a stale webhook left
+    behind by a prior deployment shouldn't satisfy the precondition."""
+    expected = f"{WEBAPP_BASE_URL}/api/v1/webhooks/label-studio/tasks-created"
+    for h in list_project_webhooks(project_id):
+        if not h.get("is_active"):
+            continue
+        actions = h.get("actions") or []
+        if "TASKS_CREATED" not in actions:
+            continue
+        if h.get("url") == expected:
+            return True
+    return False
+
+
+def reconcile_project_webhooks(enqueue_pdf_backlog: bool = True) -> dict:
+    """Best-effort sweep: ensure every LS project has the auto-tile webhook,
+    and (optionally) enqueue auto-tile RQ jobs for any leftover PDF tasks.
+
+    Called on webapp startup. Covers the gap where LS Import UI creates a
+    project directly inside LS (bypassing `get_or_create_project`), so the
+    webhook never gets attached and PDF uploads sit unprocessed.
+
+    `enqueue_pdf_backlog`: when True, also scans each project for existing
+    tasks whose `data` contains a PDF path and enqueues `auto_tile_ls_task_rq`
+    for each. Idempotent on re-run only because auto_tile deletes the source
+    task once tiling succeeds — a half-processed project could double-enqueue
+    until the prior run finishes. Single-threaded cpu-worker makes that safe
+    in practice.
+    """
+    summary = {"projects_seen": 0, "webhooks_added": 0, "pdf_backlog_enqueued": 0, "errors": 0}
+    if not is_configured():
+        return {"status": "skipped", "reason": "LS not configured", **summary}
+    if not LS_WEBHOOK_SECRET:
+        return {"status": "skipped", "reason": "LS_WEBHOOK_SECRET unset", **summary}
+
+    try:
+        resp = requests.get(
+            f"{LS_URL}/api/projects/?page_size=500",
+            headers=_headers(),
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return {"status": "fail", "reason": f"projects list HTTP {resp.status_code}", **summary}
+        projects = resp.json().get("results", [])
+    except Exception as e:
+        return {"status": "fail", "reason": f"projects list error: {e!r}", **summary}
+
+    # Local import dodges a circular dep — auto_tile imports this module.
+    from webapp.queue import get_cpu_queue
+    queue = get_cpu_queue() if enqueue_pdf_backlog else None
+
+    for p in projects:
+        pid = p.get("id")
+        if pid is None:
+            continue
+        summary["projects_seen"] += 1
+        try:
+            if not _project_has_tasks_created_webhook(pid):
+                ok = _register_tasks_created_webhook(pid)
+                if ok:
+                    summary["webhooks_added"] += 1
+            if not enqueue_pdf_backlog or queue is None:
+                continue
+            # Look for tasks that still carry a PDF path — these were created
+            # before the webhook existed (or by the LS-UI bypass path).
+            tr = requests.get(
+                f"{LS_URL}/api/projects/{pid}/tasks?page_size=200",
+                headers=_headers(),
+                timeout=15,
+            )
+            if tr.status_code != 200:
+                continue
+            data = tr.json()
+            tasks = data if isinstance(data, list) else data.get("tasks", [])
+            for t in tasks:
+                pdf_path = extract_pdf_path_from_task_data(t.get("data") or {})
+                if not pdf_path:
+                    continue
+                task_id = t.get("id")
+                if not task_id:
+                    continue
+                queue.enqueue(
+                    "webapp.auto_tile.auto_tile_ls_task_rq",
+                    kwargs={
+                        "project_id": pid,
+                        "task_id": task_id,
+                        "image_path": pdf_path,
+                    },
+                    job_timeout=300,
+                )
+                summary["pdf_backlog_enqueued"] += 1
+                print(f"[label_studio] reconcile: enqueued auto-tile proj={pid} task={task_id} pdf={pdf_path}")
+        except Exception as e:
+            summary["errors"] += 1
+            print(f"[label_studio] reconcile project {pid} error: {e!r}")
+
+    print(f"[label_studio] reconcile complete: {summary}")
+    return {"status": "ok", **summary}
+
+
 def get_or_create_project(pid_no: str) -> Optional[int]:
     """Return existing Label Studio project id for this P&ID or create a new one.
 
