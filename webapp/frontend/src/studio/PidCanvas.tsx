@@ -475,9 +475,12 @@ function TileWithOverlay({
           boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
           userSelect: "none",
           pointerEvents: "none",
-          // Sharper line work when CSS-zoomed past 1x. Default interpolation
-          // blurs thin engineering linework on raster tiles.
-          imageRendering: "pixelated",
+          // `auto` lets the browser bicubic-downscale tiles when the viewport
+          // shows them below 1:1 — `pixelated` (prior value) used nearest-
+          // neighbor, which left thin engineering linework looking chunky at
+          // small zoom. Paired with a higher source-pixel-density tile (see
+          // `pdf_to_tiles.py:zoom`) so zoom-in stays sharp too.
+          imageRendering: "auto",
         }}
         draggable={false}
       />

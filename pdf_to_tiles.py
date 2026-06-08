@@ -1,6 +1,15 @@
 """
 Stage 1: Convert P&ID PDF to overlapping PNG tiles.
-Renders the PDF at 3x zoom and splits into a grid with overlap.
+Renders the PDF at 4x zoom and splits into a grid with overlap.
+
+Why 4x (bumped from 3x on 2026-06-08): the studio canvas displays tiles inside
+a viewport that's typically smaller than the rendered tile dimensions, so the
+browser is *downscaling*. Higher source DPI = more pixels for the browser's
+bicubic step to work with, which keeps thin engineering linework crisp at
+zoom-out. Bytes grow ~1.78x; YOLO inference is unaffected (v1-10's `_preprocess`
+letterboxes to 640 regardless of source size); OpenRouter Vision pass benefits
+from sharper small-text rendering. If disk/bandwidth becomes the bottleneck,
+4.0 is the right cap — 5.0+ doubles cost for diminishing visual gain.
 """
 import fitz  # PyMuPDF
 from pathlib import Path
@@ -11,7 +20,7 @@ import math
 def pdf_to_tiles(
     pdf_path: str,
     output_dir: str = "tmp",
-    zoom: float = 3.0,
+    zoom: float = 4.0,
     grid_rows: int = 3,
     grid_cols: int = 3,
     overlap_pct: float = 0.20,
