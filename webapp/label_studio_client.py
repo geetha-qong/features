@@ -14,6 +14,15 @@ LS_URL = os.environ.get("LS_URL", "http://localhost:8080").rstrip("/")
 LS_API_KEY = os.environ.get("LS_API_KEY", "")
 # Browser-accessible LS URL (for links shown to users). Default: direct port access.
 LS_EXTERNAL_URL = os.environ.get("LS_EXTERNAL_URL", "http://localhost:9001").rstrip("/")
+# Public-facing webapp URL — used to build the webhook callback URL that LS POSTs to.
+# Must match what's set on the `web` service (docker-compose.yml). Falls back to
+# local-dev value so tests + offline builds don't fail at import time.
+WEBAPP_BASE_URL = os.environ.get("WEBAPP_BASE_URL", "http://localhost:8000").rstrip("/")
+# Shared secret LS includes in the webhook header. Must match LS_WEBHOOK_SECRET on
+# the webapp side (verified by webapp/routers/webhooks.py:_verify_secret). Empty
+# string disables webhook registration — projects still get created, just without
+# the auto-tile path wired up.
+LS_WEBHOOK_SECRET = os.environ.get("LS_WEBHOOK_SECRET", "")
 
 LABEL_CONFIG = """<View>
   <Image name="image" value="$image"/>
@@ -106,8 +115,61 @@ def is_configured() -> bool:
     return bool(LS_API_KEY)
 
 
+def _register_tasks_created_webhook(project_id: int) -> bool:
+    """Register the auto-tile TASKS_CREATED webhook on a freshly-created LS project.
+
+    LS 1.23 Community has no org-level webhooks (FEATURES #30), so every project
+    that should auto-tile PDF uploads from the LS Import UI needs its own
+    webhook row. This helper is called by `get_or_create_project` immediately
+    after a new project is created. Existing projects are not mutated — the
+    caller's existing-project branch returns early before this runs.
+
+    Best-effort: failures are logged and swallowed. The caller still treats
+    project creation as successful, because tile-push (the primary job) does
+    not depend on the webhook — only the LS-side PDF-import path does.
+
+    Returns True on success, False on any failure or skip.
+    """
+    if not LS_WEBHOOK_SECRET:
+        # Without the secret, the webhook handler would 401 anything LS posts.
+        # Registering a hook in that state would be worse than not registering.
+        print(f"[label_studio] project {project_id}: LS_WEBHOOK_SECRET unset — skipping webhook registration")
+        return False
+    webhook_url = f"{WEBAPP_BASE_URL}/api/v1/webhooks/label-studio/tasks-created"
+    body = {
+        "project": project_id,
+        "url": webhook_url,
+        "send_payload": True,
+        "send_for_all_actions": False,
+        "actions": ["TASKS_CREATED"],
+        "headers": {"X-LS-Webhook-Secret": LS_WEBHOOK_SECRET},
+        "is_active": True,
+    }
+    try:
+        resp = requests.post(
+            f"{LS_URL}/api/webhooks/",
+            headers=_headers(),
+            json=body,
+            timeout=10,
+        )
+        if resp.status_code in (200, 201):
+            wh_id = resp.json().get("id") if resp.headers.get("content-type", "").startswith("application/json") else "?"
+            print(f"[label_studio] project {project_id}: registered TASKS_CREATED webhook id={wh_id}")
+            return True
+        print(f"[label_studio] project {project_id}: webhook registration HTTP {resp.status_code} body={resp.text[:200]}")
+    except Exception as e:
+        print(f"[label_studio] project {project_id}: webhook registration error {e!r}")
+    return False
+
+
 def get_or_create_project(pid_no: str) -> Optional[int]:
-    """Return existing Label Studio project id for this P&ID or create a new one."""
+    """Return existing Label Studio project id for this P&ID or create a new one.
+
+    On creation, also registers the TASKS_CREATED auto-tile webhook (best-effort,
+    see `_register_tasks_created_webhook`). Existing projects are not touched —
+    use the admin sync-labels flow if you need to backfill webhooks on old
+    projects.
+    """
     if not is_configured():
         return None
     try:
@@ -124,7 +186,9 @@ def get_or_create_project(pid_no: str) -> Optional[int]:
             timeout=10,
         )
         if resp.status_code == 201:
-            return resp.json()["id"]
+            project_id = resp.json()["id"]
+            _register_tasks_created_webhook(project_id)
+            return project_id
     except Exception as e:
         print(f"[label_studio] get_or_create_project error: {e}")
     return None

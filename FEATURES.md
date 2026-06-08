@@ -24,6 +24,68 @@
 
 ---
 
+## [2026-06-08] #32 — Auto-register TASKS_CREATED webhook on new LS projects
+
+**Type:** bugfix
+**Stage:** webapp
+**Status:** shipped (committed on `dev`, auto-deploys via `deploy-dev.yml`)
+
+**Why:** LS 1.23 Community has no org-level webhooks (FEATURES #30) — every
+project needs its own row. The auto-tile feature (PDF dropped via LS Import →
+9 PNG tiles) only works on projects whose webhook is registered. Until today,
+`get_or_create_project()` created the project but did NOT register a hook, so
+any project created after the initial backfill silently missed the auto-tile
+flow. Found on 2026-06-08: 3 of 36 dev LS projects (35/36/37 — `void1`/`void1`/
+`void2`) were hookless; PDFs dropped there never tiled. Same root cause is
+about to bite the new LS projects that get spawned when jobs 47-49 are re-run
+post `OPENROUTER_MODEL` fix — each will create a fresh project, none of which
+would have the hook without this fix.
+
+**What:**
+
+- `webapp/label_studio_client.py`:
+  - Added module constants `WEBAPP_BASE_URL` (defaults `http://localhost:8000`,
+    overridden by env on AWS) and `LS_WEBHOOK_SECRET` (empty disables
+    registration — empty-string means the receiver would 401 anyway, so we
+    don't bother creating a poisoned hook).
+  - New `_register_tasks_created_webhook(project_id)` — POSTs to
+    `LS_URL/api/webhooks/` with body
+    `{project, url, actions=["TASKS_CREATED"], headers={"X-LS-Webhook-Secret": ...}, is_active=True}`.
+    Best-effort: logs and returns False on any 4xx/5xx/exception. Caller still
+    treats project creation as successful — tile-push doesn't depend on the
+    hook, only the LS-Import-UI PDF path does.
+  - `get_or_create_project()` now invokes the helper immediately after a 201
+    on `POST /api/projects/`. Existing-project branch is unchanged (no
+    mutation of pre-existing config — backfill remains a separate admin
+    concern).
+- `tests/unit/test_label_studio_client.py` (new, 5 tests):
+  - existing-project short-circuits → no POST calls
+  - new-project → webhook POST with correct URL + body + secret header
+  - webhook 5xx → project_id still returned (best-effort contract)
+  - empty `LS_WEBHOOK_SECRET` → webhook step skipped silently
+  - `is_configured()` false → returns None immediately, no HTTP
+
+**Result:** 5/5 new tests pass; existing 56 unit tests unchanged (the one
+pre-existing `test_sheets_empty_when_no_tiles` failure is the Postgres DB-leak
+flake noted in SESSION_STATE — predates this commit).
+
+**Notes:**
+
+- The 3 unhooked projects (35/36/37) were patched up via one-off SSM script
+  this morning (cmd id `d6a671d8`). They now have webhook ids 34/35/36
+  respectively.
+- This fix only covers the *creation* path. Pre-existing projects without a
+  webhook still need the one-off admin script — `webapp/scripts/` would be
+  the natural home for a "backfill webhooks" CLI but it's not worth one until
+  someone needs it again.
+- The webhook receiver enforces shared-secret via `hmac.compare_digest`
+  (`webapp/routers/webhooks.py:_verify_secret`). The Authorization-Bearer
+  fallback in the receiver isn't used here — we set `X-LS-Webhook-Secret`
+  explicitly, which is the recommended path per the receiver's docstring.
+- No model retraining or schema migration needed.
+
+---
+
 ## [2026-06-06] #31 — D1.5: class-based entity_id matching on canvas detections (Spec A unblock)
 
 **Type:** bugfix
