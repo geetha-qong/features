@@ -38,7 +38,11 @@ const EDGES: PidEdge[] = [
 
 interface Props {
   selectedId: string;
-  onSelect: (id: string) => void;
+  /** Selecting a detection emits both the entity_id (drives drawer fetch) and
+   *  the entity_class hint (drives the drawer's initial deliverable_type so a
+   *  clicked valve doesn't open the Instrument Index by default). For prototype
+   *  SVG clicks there's no entity_class — second arg is undefined. */
+  onSelect: (id: string, entityClass?: string) => void;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   pan: { x: number; y: number };
@@ -431,7 +435,7 @@ function TileWithOverlay({
   tileImageUrl: string;
   tileFilename: string | null;
   detections: DetectionItem[];
-  onSelect: (id: string) => void;
+  onSelect: (id: string, entityClass?: string) => void;
   selectedId: string;
 }) {
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
@@ -512,7 +516,11 @@ function TileWithOverlay({
                     pointerEvents: clickable ? "auto" : "none",
                     cursor: clickable ? "pointer" : "default",
                   }}
-                  onClick={clickable ? () => onSelect(d.entity_id as string) : undefined}
+                  onClick={
+                    clickable
+                      ? () => onSelect(d.entity_id as string, d.entity_class)
+                      : undefined
+                  }
                 >
                   {clickable && <title>{d.label} — click to edit</title>}
                 </rect>

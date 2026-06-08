@@ -68,6 +68,14 @@ export default function Studio({ project, userName, onBack }: Props) {
   const defaultSheetIdx = sheets.findIndex((s) => s.status === "issues");
   const [activeSheet, setActiveSheet] = useState(defaultSheetIdx >= 0 ? defaultSheetIdx : 2);
   const [selectedId, setSelectedId] = useState<string>("PV-203");
+  // entity_class for the currently-selected detection (post-D1.5). Undefined
+  // for prototype SVG clicks. Drives the DatasheetDrawer's initial doctype so
+  // clicking a valve opens Valve List, not Instrument Index.
+  const [selectedClass, setSelectedClass] = useState<string | undefined>(undefined);
+  const handleSelect = (id: string, entityClass?: string) => {
+    setSelectedId(id);
+    setSelectedClass(entityClass);
+  };
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [datasheetOpen, setDatasheetOpen] = useState(false);
@@ -173,11 +181,12 @@ export default function Studio({ project, userName, onBack }: Props) {
         projectName={project.name}
         initialDeliverableType={activeDeliverableType}
         onBack={() => setMode("studio")}
-        onOpenEntity={(entityId) => {
+        onOpenEntity={(entityId, entityClass) => {
           // BulkReview row → Studio drawer. `entityId` is the canonical UUID
           // (string). Studio's `selectedId` is happy to hold either a UUID
           // (D1.5+ canvas selections) or a prototype tag, so this just works.
-          setSelectedId(entityId);
+          // `entityClass` drives the drawer's initial deliverable_type.
+          handleSelect(entityId, entityClass);
           setMode("studio");
           setDatasheetOpen(true);
         }}
@@ -212,7 +221,7 @@ export default function Studio({ project, userName, onBack }: Props) {
         <section className="canvas-col">
           <PidCanvas
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={handleSelect}
             zoom={zoom}
             setZoom={setZoom}
             pan={pan}
@@ -253,7 +262,7 @@ export default function Studio({ project, userName, onBack }: Props) {
         <PropertiesPanel
           elements={DEMO_ELEMENT_DATA}
           selectedId={selectedId}
-          onSelect={setSelectedId}
+          onSelect={(id) => handleSelect(id, undefined)}
           sessionEvents={sessionEvents}
           hasDatasheet={hasDatasheet}
           onOpenDatasheet={onOpenDatasheet}
@@ -271,6 +280,7 @@ export default function Studio({ project, userName, onBack }: Props) {
          * The drawer's GET will simply 404-equivalent ("not in canonical") on
          * prototype IDs, and render the "Entity not found" panel — no crash. */
         entityId={selectedId}
+        entityClass={selectedClass}
         fallbackTag={sel.tag}
         fallbackType={sel.type}
         onBulkReview={onBulkReview}

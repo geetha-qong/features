@@ -32,6 +32,13 @@ interface Props {
    *  Null when the canvas hasn't selected anything canonical yet (e.g. user
    *  clicked a prototype demo element on a job without canonical.json). */
   entityId: string | null;
+  /** Canonical entity_class for the selected entity ("valve" | "instrument" |
+   *  "equipment"). Drives the drawer's initial deliverable-type so a clicked
+   *  valve opens as Valve List rather than the previous always-Instrument-Index
+   *  default — which surfaced as a phantom "Entity not found" because a valve
+   *  UUID isn't in the instrument_index filter. Undefined → fall back to the
+   *  prior default. */
+  entityClass?: string;
   /** Optional fallback labels for the drawer head when the API hasn't loaded
    *  yet — keeps the header from flashing empty during the GET. */
   fallbackTag?: string;
@@ -39,6 +46,16 @@ interface Props {
   onBulkReview?: () => void;
   totalCount?: number;
 }
+
+/** Inverse of DOC_TYPE_TO_DELIVERABLE for the initial-default path. A clicked
+ *  detection's `entity_class` decides which deliverable the drawer opens with.
+ *  `instrument` maps to `index` (preserves the historical default; users can
+ *  still flip to `datasheet` via the picker — both deliver the same UUID). */
+const ENTITY_CLASS_TO_DOC_TYPE: Record<string, DocTypeKey> = {
+  valve: "valves",
+  instrument: "index",
+  equipment: "equip",
+};
 
 /** 4 of 10 doc-types map to a real backend deliverable_type. The other 6 are
  *  "Coming soon" — visible in the dropdown so the design intent is preserved,
@@ -92,13 +109,29 @@ export default function DatasheetDrawer({
   onClose,
   jobId,
   entityId,
+  entityClass,
   fallbackTag,
   fallbackType,
   onBulkReview,
   totalCount = 0,
 }: Props) {
-  const [docType, setDocType] = useState<DocTypeKey>("index");
+  const [docType, setDocType] = useState<DocTypeKey>(
+    () => (entityClass && ENTITY_CLASS_TO_DOC_TYPE[entityClass]) || "index",
+  );
   const [showDocPicker, setShowDocPicker] = useState(false);
+
+  // Realign the drawer's deliverable to the clicked entity's class. We *only*
+  // do this on entityId/class change, not on every docType state-update — so
+  // the user can manually flip Instrument Index → Datasheet without us
+  // snapping them back. Effect-guard: an undefined class (prototype IDs,
+  // pre-D1.5 detections) leaves docType alone.
+  useEffect(() => {
+    if (!entityClass) return;
+    const target = ENTITY_CLASS_TO_DOC_TYPE[entityClass];
+    if (target) setDocType(target);
+    // Intentionally not listing docType — we want to drive it, not react to it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityId, entityClass]);
 
   // Backend response + drift between original (pre-edit snapshot) and the
   // editable working copy. `originalEntity` powers the diff that drives Save

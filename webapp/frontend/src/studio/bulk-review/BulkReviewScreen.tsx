@@ -53,8 +53,10 @@ interface Props {
   /** Click "Open in Studio" on a row → close workbench, surface the drawer
    *  upstream by selecting the entity. The parent (Studio.tsx) decides
    *  what to do — currently flips `mode` back to "studio" and opens the
-   *  DatasheetDrawer with the entity_id. */
-  onOpenEntity: (entityId: string) => void;
+   *  DatasheetDrawer with the entity_id. Class is also forwarded so the
+   *  drawer can default its deliverable_type to match (clicking a valve in
+   *  Bulk Review shouldn't open the Instrument Index in Studio). */
+  onOpenEntity: (entityId: string, entityClass?: string) => void;
 }
 
 /** Stringify any canonical-ish JSON value for the cell input. Mirrors
@@ -573,7 +575,7 @@ export default function BulkReviewScreen({
                         }}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onOpenEntity(r.entity_id);
+                          onOpenEntity(r.entity_id, r.entity_class);
                         }}
                         title="Open this entity in Studio (datasheet drawer)"
                       >
@@ -752,7 +754,7 @@ export default function BulkReviewScreen({
                 <div className="actions" style={{ marginTop: 16, display: "flex", gap: 8 }}>
                   <button
                     className="br-btn small primary"
-                    onClick={() => onOpenEntity(selectedRow.entity_id)}
+                    onClick={() => onOpenEntity(selectedRow.entity_id, selectedRow.entity_class)}
                   >
                     <ArrowUpRight size={11} strokeWidth={1.6} /> Open in Studio
                   </button>
