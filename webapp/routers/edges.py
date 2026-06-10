@@ -287,8 +287,9 @@ def patch_edge(
 @router.delete(
     "/{job_id}/edges/{edge_id}",
     status_code=204,
+    # Don't add `responses={204: ...}` — newer FastAPI asserts no body is
+    # allowed for 204 at route-registration time when a response is declared.
     responses={
-        204: {"description": "Edge deleted"},
         404: {"description": "Job or edge not found / not owned by caller"},
     },
 )

@@ -413,8 +413,11 @@ def patch_annotation(
 @router.delete(
     "/{job_id}/annotations/{entity_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    # NOTE: don't add a `responses={204: …}` entry — newer FastAPI asserts
+    # `is_body_allowed_for_status_code(204) == False` at route registration
+    # time when a declared response exists for a body-forbidden status.
+    # The 204 status is documented by `status_code=` alone.
     responses={
-        204: {"description": "Annotation deleted"},
         404: {"description": "Job or annotation not found / not owned by caller"},
     },
 )
