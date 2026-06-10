@@ -62,13 +62,24 @@ export interface JobDetectionsResp {
   valves: ValveRow[];
 }
 
+// HttpError is declared before `call<T>` so reads can also throw it; the
+// DatasheetDrawer branches on `e instanceof HttpError && e.status === 404`
+// to render the "not in canonical" UX instead of the raw error message.
+export class HttpError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function call<T>(path: string): Promise<T> {
   const res = await fetch(path, { credentials: "include", redirect: "manual" });
   if (res.status === 0 || res.type === "opaqueredirect") {
-    throw new Error("Not authenticated");
+    throw new HttpError("Not authenticated", 401);
   }
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status}`);
+    throw new HttpError(`HTTP ${res.status}`, res.status);
   }
   return (await res.json()) as T;
 }
@@ -78,13 +89,6 @@ async function call<T>(path: string): Promise<T> {
  *  can distinguish 404 (entity not in canonical) from 400 (read-only field)
  *  from 401 (login expired). Mirrors the shape of `call<T>` so the same
  *  cookie-credential rules apply. */
-export class HttpError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
 
 async function callJson<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {

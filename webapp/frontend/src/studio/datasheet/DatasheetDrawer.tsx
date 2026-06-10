@@ -415,12 +415,15 @@ export default function DatasheetDrawer({
           {isDeliverableSupported && !loading && !fetchError && notFound && (
             <div className="ds-empty-state" style={{ padding: 32, textAlign: "center" }}>
               <p style={{ fontSize: 14, color: "var(--fg-2)" }}>
-                <strong>Entity not found in canonical output.</strong>
+                <strong>No editable entities for this job.</strong>
               </p>
               <p style={{ fontSize: 12, color: "var(--fg-3)", marginTop: 8 }}>
-                This detection has no canonical match yet — likely the pipeline
-                hadn't emitted <code>canonical.json</code> at click time, or this
-                entity belongs to a different deliverable type.
+                Most likely this is a legacy job processed before the
+                editable-entities feature shipped (2026-05-28). Re-run the job
+                from the dashboard to regenerate <code>canonical.json</code>,
+                or open a newer job. Other possibility: this detection's
+                entity belongs to a different deliverable type than the
+                current selection.
               </p>
               <button className="btn btn-secondary btn-sm" onClick={onClose} style={{ marginTop: 16 }}>
                 Close
