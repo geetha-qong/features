@@ -24,6 +24,66 @@
 
 ---
 
+## [2026-06-11] #38 — Qong Studio marking + graph annotation system (6-phase end-to-end)
+
+**Type:** feature | architecture
+**Stage:** webapp | webapp/frontend | training
+**Status:** shipped (deployed to dev.qongsystems.com 2026-06-11)
+**Spec:** `docs/superpowers/specs/2026-06-10-qong-studio-marking-design.md`
+
+**Why:** Studio could surface model detections but couldn't accept user marks, confirmations, rejections, or line-drawing. We needed one prod-grade annotation surface that captures every action as YOLO/graph training signal, lets users define their own shortcuts, and renders the whole page (not just one tile) so cross-tile pipes/loops/interlocks become trivial. User authorized direct build (no approval gate).
+
+**What (one session, six phases, multi-agent):**
+
+**Phase 1 — Backend schema + APIs** (commits `4af85c1`, `ac505dc`, `e6a6314`):
+- `user_annotations` + `graph_corrections` tables (file-first + DB-read-index pattern; same architecture as `canonical_entities`).
+- `users.shortcuts` JSONB column for per-user keymap.
+- POST/GET/PATCH/DELETE on `/api/v1/jobs/{id}/{annotations,edges}` with collision rule (same-class on existing detection → user_confirmed; different-class → user_added + model_corrections(delete); empty region → user_added + model_corrections(add) linked via FK).
+- `/api/v1/jobs/{id}/page/{n}/full` (cookie-authed FileResponse of the full-page render that pdf_to_tiles already emits).
+- `/api/v1/users/me/shortcuts` GET/PATCH/POST(reset). 14 DEFAULT bindings; modifier-chord + multi-char keys rejected.
+- 41 pytest cases (10+13+5+13).
+
+**Phase 2 — Studio canvas pivot to full-page** (commit `d5cd41d`):
+- PidCanvas now renders `page_{n}_full.png` and translates every model-detection bbox from tile-local into page-pixel coords via `computeTileOffsets()` (mirror of pdf_to_tiles 3×3/20% geometry).
+- 4-layer SVG: model detections + user_annotations + edges + in-flight edge preview.
+- Theme-coherent status palette (`--info`/`--qong-pink`/`--ok`/`--error`) and line-type stroke styles (`--scan-cyan` solid / `--qong-pink` dashed / `--qong-purple` long-dash / `--warn` dash-dot) with arrowheads on flowing lines.
+- Mode-aware event handlers (`select`/`mark-symbol`/`draw-edge`), entity snap (28 px) on edge draw, Escape cancels in-flight draws.
+- Legacy single-tile mode preserved as fallback.
+
+**Phase 3 — Symbol palette + status states** (commit `23b0566`):
+- `PalettePanel` (220 px left rail, hierarchical class→sub_class), `ModeToolbar`, `StatusBadge` pill renderer, `useAnnotations` hook with optimistic create/patch/delete.
+
+**Phase 4 — Edge drawing** (commit `23b0566`):
+- `LineTypeToolbar` (4 buttons with live SVG stroke previews), `EdgeMetadataDrawer` (slide-up panel for relation_type + group_id + metadata K/V), `useEdges` hook.
+
+**Phase 5 — Per-user shortcuts** (commit `23b0566`):
+- `/account/shortcuts` page (capture input + action picker + conflict warning + reset), `useShortcuts` + `useShortcutDispatcher` hooks, pure `normalizeKey()` with input/textarea bypass + modifier-chord rejection.
+
+**Phase 6 — Training loop + metrics** (commit `23b0566`):
+- `export_annotations_for_yolo.py` (page-pixel → tile-local normalized YOLO labels, idempotent append), `export_graph_for_training.py` (JSONL), `/api/v1/admin/annotations/metrics` endpoint (totals, by_status, per_day_last_30), `AdminAnnotationMetrics` admin page.
+
+**Result:**
+
+| Metric | Value |
+|---|---|
+| New backend tables | 2 (`user_annotations`, `graph_corrections`) + 1 column |
+| New API endpoints | 12 |
+| New frontend routes | 2 (`/account/shortcuts`, `/admin/annotation-metrics`) |
+| New frontend components | 9 (PalettePanel, ModeToolbar, StatusBadge, LineTypeToolbar, EdgeMetadataDrawer, Shortcuts, AdminAnnotationMetrics + 2 hooks) |
+| pytest cases added | 63 (40 router + 22 export + 1 admin metrics — actually 4) |
+| vitest cases added | 45 (palette 6, badge 8, mode toolbar implicit, line-type 3, edge-drawer 4, shortcuts 8, keyboard 12, admin metrics 4) |
+| Total new tests this session | 108, all green |
+
+**Notes:**
+- **FastAPI 204 quirk:** 204 endpoints in this codebase MUST use `status_code=204`, `response_class=Response`, NO `-> None` return annotation, NO `responses[204]`, and `return Response(status_code=204)` explicitly. Production FastAPI tripped a registration-time assertion otherwise; local pytest's older FastAPI didn't catch it. Two patches (`ac505dc`, `e6a6314`) sorted it. Worth a CLAUDE.md note.
+- **Tile geometry duplicated** in `pdf_to_tiles.py` and `PidCanvas.computeTileOffsets` (3×3, 20% overlap). If those defaults ever change, change BOTH ends in the same PR.
+- **Tile-local → page-pixel translation** happens client-side via the page-full image's `naturalWidth/Height`. No new backend coord-translation endpoint needed.
+- **Collision rule** at POST /annotations is the magic that makes "click an existing detection to confirm" feel natural without a separate API verb.
+- **page-full endpoint is cookie-authed** so plain `<img src>` works same-origin. Cross-origin (LS-style) consumers would need a separate no-auth route.
+- **Status colors are part of the brand palette now** — `--qong-pink` for user marks signals "this is yours" everywhere it appears.
+
+---
+
 ## [2026-06-10] #37 — Cross-job duplicate-tag audit surface
 
 **Type:** feature
