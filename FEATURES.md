@@ -24,6 +24,34 @@
 
 ---
 
+## [2026-06-10] #36 — Admin Entity Index UI (visual surface for cross-job queries)
+
+**Type:** feature
+**Stage:** webapp/frontend
+**Status:** shipped (deployed to dev.qongsystems.com 2026-06-10)
+
+**Why:** FEATURES #35 exposed `/api/v1/admin/entities` + `/aggregates` but the data wasn't reachable without a curl loop. A frontend page makes the cross-job query power visible to anyone with super_admin role.
+
+**What:**
+- `webapp/frontend/src/admin/AdminEntities.tsx` (new) — three workflows on one page:
+  1. **Aggregates strip**: total entities, per-class counts (1,304 / 625 instruments / 679 valves on dev today).
+  2. **Top sub-classes + top jobs** as two side-by-side clickable lists. Clicking a sub-class filters the table to `entity_class=valve, sub_class=X`; clicking a job filters to `job_id=N`.
+  3. **Filter bar + paginated table**: tag-substring search, class + sub_class dropdowns, job-ID input. 50 rows per page. Each row links to `/jobs/{id}` (Studio).
+- Sub-class dropdown options derived from the live `top_valve_sub_classes` payload so it stays in sync without a separate API call.
+- Wired into `AdminLayout` nav (new "Entity Index" item, Database icon), `App.tsx` (`/admin/entities` route), `admin/api.ts` (`getEntityAggregates`, `searchEntities`), `admin/types.ts` (3 new interfaces).
+
+**Result (Playwright-verified live on dev):**
+- Page loads at `/admin/entities` with full aggregates: total=1,304, by_class={valve:679, instrument:625}.
+- Top valve sub_classes correctly shown: VB(205), BV(154), VF(90), DB(69), BF(68), VD(17), GL(14), CK(14), PV(13), VCS(10).
+- Tag-substring search `"32047"` returns exactly **2 hits**: job 38 `61-BV-32047` + job 43 `61-BV-32047`, both on `MUK-61-0-0218-002-25L3`. Confirms duplicate is the *same drawing across two job runs* (re-extraction), not two physical valves on different drawings — actionable audit signal previously invisible.
+
+**Notes:**
+- The 2-hit duplicate is now visible from the UI without curl. Earlier scope for an audit endpoint isn't necessary — the existing search + tag substring covers the use case.
+- Sub-class dropdown only appears when `entity_class=valve` — keeps the UI from showing a meaningless filter when the user picked instruments.
+- Screenshot: `themes/screenshots/admin-entities-search-32047.png`.
+
+---
+
 ## [2026-06-10] #35 — Admin cross-job entity search + aggregates endpoints
 
 **Type:** feature
