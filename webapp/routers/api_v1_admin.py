@@ -841,3 +841,102 @@ def admin_canonical_entity_aggregates(
             for t, jc, rc in dup_tags
         ],
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Annotation metrics — model-vs-user volume + last-30-days breakdown.
+# Reads `user_annotations.status` for the user side and `Job.gpu_detections`
+# (JSON list per job) for the model side. Cheap aggregations; super-admin only.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/annotations/metrics")
+def admin_annotations_metrics(
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Training-feedback dashboard data.
+
+    Returns:
+      - `total_model_detections`  — sum of len(Job.gpu_detections) across
+        `done` jobs that have a non-null detections JSON.
+      - `total_user_annotations` — total rows in `user_annotations`.
+      - `by_status`              — counts per status bucket
+        (`user_added`, `user_confirmed`, `user_rejected`, `model_found`).
+      - `per_day_last_30`        — last 30 days of (date, model, user)
+        with the model count derived from Job.completed_at falling in the
+        day window and the user count from UserAnnotation.created_at.
+    """
+    import json as _json
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    # User annotations — by status.
+    rows = (
+        db.query(models.UserAnnotation.status, func.count(models.UserAnnotation.id))
+        .group_by(models.UserAnnotation.status)
+        .all()
+    )
+    by_status = {s: int(n) for s, n in rows}
+    for bucket in ("user_added", "user_confirmed", "user_rejected", "model_found"):
+        by_status.setdefault(bucket, 0)
+    total_user_annotations = (
+        db.query(func.count(models.UserAnnotation.id)).scalar() or 0
+    )
+
+    # Model detections — total = sum(len(json_list)) across done jobs.
+    total_model_detections = 0
+    done_jobs = (
+        db.query(models.Job.id, models.Job.gpu_detections, models.Job.completed_at)
+        .filter(models.Job.status == "done")
+        .all()
+    )
+    # Build a per-day model count alongside the total so we only parse JSON once.
+    model_per_day: dict = {}
+    for _id, gd_raw, completed_at in done_jobs:
+        if not gd_raw:
+            continue
+        try:
+            parsed = _json.loads(gd_raw) if isinstance(gd_raw, str) else gd_raw
+        except Exception:
+            continue
+        if not isinstance(parsed, list):
+            continue
+        n = len(parsed)
+        total_model_detections += n
+        if completed_at is not None:
+            day = completed_at.date().isoformat()
+            model_per_day[day] = model_per_day.get(day, 0) + n
+
+    # User annotations per-day (created_at).
+    user_rows = (
+        db.query(
+            func.date(models.UserAnnotation.created_at).label("d"),
+            func.count(models.UserAnnotation.id),
+        )
+        .group_by(func.date(models.UserAnnotation.created_at))
+        .all()
+    )
+    user_per_day: dict = {}
+    for d, n in user_rows:
+        if d is None:
+            continue
+        key = d.isoformat() if hasattr(d, "isoformat") else str(d)
+        user_per_day[key] = int(n)
+
+    # Stitch last 30 days inclusive of today.
+    today = _dt.now(_tz.utc).date()
+    per_day_last_30 = []
+    for offset in range(29, -1, -1):
+        day = (today - _td(days=offset)).isoformat()
+        per_day_last_30.append({
+            "date": day,
+            "model": int(model_per_day.get(day, 0)),
+            "user": int(user_per_day.get(day, 0)),
+        })
+
+    return {
+        "total_model_detections": total_model_detections,
+        "total_user_annotations": int(total_user_annotations),
+        "by_status": by_status,
+        "per_day_last_30": per_day_last_30,
+    }

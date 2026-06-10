@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Key, Receipt, CreditCard, ArrowRight } from "lucide-react";
+import { Key, Keyboard, Receipt, CreditCard, ArrowRight } from "lucide-react";
 import { detectBrowserTimezone, useAuth } from "../auth/AuthContext";
 import {
   getAccount,
@@ -139,6 +139,20 @@ export default function Account() {
         </div>
         <p style={{ color: "#666", margin: 0 }}>
           Programmatic access via <code>Authorization: Bearer qk_…</code>.
+        </p>
+      </section>
+
+      <section style={{ marginBottom: 32 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h2 style={{ fontSize: 18, margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+            <Keyboard size={18} /> Studio Shortcuts
+          </h2>
+          <Link to="/account/shortcuts" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            Configure <ArrowRight size={14} />
+          </Link>
+        </div>
+        <p style={{ color: "#666", margin: 0 }}>
+          Bind keyboard shortcuts to mark valves, instruments, and switch canvas modes.
         </p>
       </section>
 

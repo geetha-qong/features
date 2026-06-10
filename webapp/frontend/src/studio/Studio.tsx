@@ -19,6 +19,17 @@ import {
 } from "./api";
 import { buildElementsForTile, buildEntityIndex } from "./buildElements";
 import type { CanvasElement, ProjectLike, SessionEvent } from "./types";
+// FEATURES #38 — marking + edge drawing wiring
+import type { CanvasMode, LineType, UserAnnotationLite, EdgeLite } from "./PidCanvas";
+import PalettePanel from "./annotations/PalettePanel";
+import ModeToolbar from "./annotations/ModeToolbar";
+import { useAnnotations } from "./annotations/useAnnotations";
+import LineTypeToolbar from "./edges/LineTypeToolbar";
+import { EdgeMetadataDrawer } from "./edges/EdgeMetadataDrawer";
+import { useEdges } from "./edges/useEdges";
+import { useShortcuts } from "./shortcuts/useShortcuts";
+import { useShortcutDispatcher } from "./shortcuts/useShortcutDispatcher";
+import type { ShortcutBinding } from "./shortcuts/api";
 
 /**
  * Studio — full-bleed P&ID reviewer. Three-pane: sheet rail · canvas · properties.
@@ -173,6 +184,101 @@ export default function Studio({ project, userName, onBack }: Props) {
     ? `/jobs/${project.id}/page/${activePageIndex}/full`
     : null;
 
+  // ── FEATURES #38: marking + edge drawing state ──────────────────────────
+  const [canvasMode, setCanvasMode] = useState<CanvasMode>("select");
+  const [activeMarkClass, setActiveMarkClass] = useState<
+    { entity_class: string; sub_class: string } | null
+  >(null);
+  const [activeLineType, setActiveLineType] = useState<LineType>("process_pipe");
+  const [pendingEdgeForMetadata, setPendingEdgeForMetadata] = useState<EdgeLite | null>(null);
+
+  const { annotations, create: createAnnotation } = useAnnotations(project.id);
+  const { edges, create: createEdge, patch: patchEdge } = useEdges(project.id);
+  const { shortcuts } = useShortcuts();
+
+  // Filter to current sheet — both stores carry sheet_number for multi-page jobs.
+  const activeSheetNumber = activePageIndex + 1;
+  const sheetAnnotations: UserAnnotationLite[] = useMemo(
+    () => annotations.filter((a) => a.sheet_number === activeSheetNumber),
+    [annotations, activeSheetNumber],
+  );
+  const sheetEdges: EdgeLite[] = useMemo(
+    () => edges.filter((e) => e.sheet_number === activeSheetNumber),
+    [edges, activeSheetNumber],
+  );
+
+  function onDropMark(
+    bbox: [number, number, number, number],
+    sub_class: string,
+    entity_class: string,
+  ) {
+    // entity_class comes from PalettePanel (string-typed at the canvas boundary)
+    // but the backend only accepts the EntityClass union. Reject anything else
+    // up-front rather than narrow with `as`.
+    if (entity_class !== "valve" && entity_class !== "instrument" && entity_class !== "equipment") return;
+    void createAnnotation({
+      entity_class,
+      sub_class,
+      bbox,
+      sheet_number: activeSheetNumber,
+      linked_detection_index: null,
+    });
+    // Stay armed for rapid placement; press Esc or click the palette button
+    // again to disarm.
+  }
+
+  async function onEdgeDrawn(
+    source_entity_id: string,
+    target_entity_id: string,
+    polyline: Array<[number, number]>,
+    line_type: LineType,
+  ) {
+    const created = await createEdge({
+      line_type,
+      source_entity_id,
+      target_entity_id,
+      polyline,
+      sheet_number: activeSheetNumber,
+    });
+    if (created) setPendingEdgeForMetadata(created);
+  }
+
+  function dispatchShortcut(binding: ShortcutBinding) {
+    switch (binding.action) {
+      case "select-class":
+        if (binding.entity_class && binding.sub_class) {
+          setActiveMarkClass({
+            entity_class: binding.entity_class,
+            sub_class: binding.sub_class,
+          });
+          setCanvasMode("mark-symbol");
+        }
+        break;
+      case "mode":
+        if (binding.mode === "select" || binding.mode === "mark-symbol" || binding.mode === "draw-edge") {
+          setCanvasMode(binding.mode as CanvasMode);
+        }
+        break;
+      case "cancel":
+        setCanvasMode("select");
+        setActiveMarkClass(null);
+        setPendingEdgeForMetadata(null);
+        break;
+      case "delete-selected":
+        // Hook for Phase 3+ — when an annotation is selected, fire delete.
+        // Left as no-op in v1 to avoid accidental data loss.
+        break;
+    }
+  }
+
+  // Disable the dispatcher while the datasheet drawer or edge metadata
+  // drawer is open (those own their own keyboard focus). useShortcuts
+  // returns an empty map while loading, so the dispatcher safely runs
+  // from the first render — it just won't match anything yet.
+  useShortcutDispatcher(shortcuts, dispatchShortcut, {
+    enabled: !datasheetOpen && !pendingEdgeForMetadata,
+  });
+
   // Lock body scroll while studio is mounted (full-bleed surface)
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -307,7 +413,27 @@ export default function Studio({ project, userName, onBack }: Props) {
           realSheets={realSheets}
         />
 
+        <PalettePanel
+          activeMarkClass={activeMarkClass}
+          onChange={(next) => {
+            setActiveMarkClass(next);
+            // Arming a class auto-enters mark-symbol mode; disarming returns to select.
+            setCanvasMode(next ? "mark-symbol" : "select");
+          }}
+          dark={dark}
+        />
+
         <section className="canvas-col">
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", flexWrap: "wrap" }}>
+            <ModeToolbar mode={canvasMode} setMode={setCanvasMode} dark={dark} />
+            {canvasMode === "draw-edge" && (
+              <LineTypeToolbar
+                activeLineType={activeLineType}
+                setActiveLineType={setActiveLineType}
+                dark={dark}
+              />
+            )}
+          </div>
           <PidCanvas
             selectedId={selectedId}
             onSelect={handleSelect}
@@ -323,6 +449,13 @@ export default function Studio({ project, userName, onBack }: Props) {
             detections={detResp?.detections}
             valveCount={detResp?.valves.length ?? 0}
             valveCountTotal={detResp?.valve_count ?? 0}
+            mode={canvasMode}
+            userAnnotations={sheetAnnotations}
+            edges={sheetEdges}
+            onDropMark={onDropMark}
+            onEdgeDrawn={onEdgeDrawn}
+            activeLineType={activeLineType}
+            activeMarkClass={activeMarkClass}
           />
           <div className="zoom-ctl">
             <button
@@ -361,6 +494,17 @@ export default function Studio({ project, userName, onBack }: Props) {
       </div>
 
       <StudioFoot />
+
+      {pendingEdgeForMetadata && (
+        <EdgeMetadataDrawer
+          edge={pendingEdgeForMetadata}
+          onSave={async (patch) => {
+            await patchEdge(pendingEdgeForMetadata.edge_id, patch);
+            setPendingEdgeForMetadata(null);
+          }}
+          onClose={() => setPendingEdgeForMetadata(null)}
+        />
+      )}
 
       <DatasheetDrawer
         open={datasheetOpen}

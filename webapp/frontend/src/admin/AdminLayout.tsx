@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import {
   Activity,
+  BarChart3,
   Columns3,
   CreditCard,
   Database,
@@ -21,6 +22,7 @@ const NAV: Array<{ to: string; label: string; icon: typeof Users }> = [
   { to: "/admin/custom-columns", label: "Custom Columns", icon: Columns3 },
   { to: "/admin/label-studio", label: "Label Studio", icon: GitBranch },
   { to: "/admin/entities", label: "Entity Index", icon: Database },
+  { to: "/admin/annotation-metrics", label: "Annotation Metrics", icon: BarChart3 },
 ];
 
 export default function AdminLayout() {

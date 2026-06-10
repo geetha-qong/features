@@ -22,6 +22,9 @@ import AdminPlans from "./admin/AdminPlans";
 import AdminLabelStudio from "./admin/AdminLabelStudio";
 import AdminCustomColumns from "./admin/AdminCustomColumns";
 import AdminEntities from "./admin/AdminEntities";
+// FEATURES #38 Phase 5 + 6 — marking shortcuts + annotation metrics
+import AccountShortcuts from "./account/Shortcuts";
+import AdminAnnotationMetrics from "./admin/AdminAnnotationMetrics";
 
 export default function App() {
   return (
@@ -55,6 +58,7 @@ function AppRoutes() {
             <Route path="jobs/:jobId/review" element={<ReviewCanvas />} />
             <Route path="account" element={<Account />} />
             <Route path="account/api-keys" element={<AccountApiKeys />} />
+            <Route path="account/shortcuts" element={<AccountShortcuts />} />
             <Route path="feedback" element={<Feedback />} />
             <Route path="admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
@@ -65,6 +69,7 @@ function AppRoutes() {
               <Route path="plans" element={<AdminPlans />} />
               <Route path="label-studio" element={<AdminLabelStudio />} />
               <Route path="entities" element={<AdminEntities />} />
+              <Route path="annotation-metrics" element={<AdminAnnotationMetrics />} />
               <Route path="custom-columns" element={<AdminCustomColumns />} />
             </Route>
           </Route>
