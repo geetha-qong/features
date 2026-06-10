@@ -297,8 +297,20 @@ def run_pipeline_for_job_rq(
 
         # Emit canonical.json so the deliverables export endpoint can serve this job
         # (Plan A.5 #11). Failures here are non-fatal — pipeline state stays "done".
+        # Also dual-write into the `canonical_entities` table (FEATURES #34) so
+        # admin dashboards + cross-job queries don't need to parse N JSON files.
+        # DB sync failures are likewise non-fatal — the JSON is the source of truth.
         try:
+            from webapp.deliverables.canonical_db_index import sync_canonical_to_db
+            from webapp.deliverables.job_loader import load_canonical_for_job
+
             write_canonical_for_job(job_dir=job_dir, job_id=job_id)
+            try:
+                canonical = load_canonical_for_job(str(job_dir / "valve_list.csv"))
+                ins, upd = sync_canonical_to_db(canonical, db)
+                print(f"[canonical-db] job {job_id}: inserted={ins} updated={upd}")
+            except Exception as _db_err:
+                print(f"[canonical-db] job {job_id}: {_db_err}", file=sys.stderr)
         except Exception as _emit_err:
             print(f"[canonical-emit] job {job_id}: {_emit_err}", file=sys.stderr)
 

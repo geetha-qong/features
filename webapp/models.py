@@ -277,3 +277,47 @@ class UserFeedback(Base):
     status = Column(String, default="new")               # 'new'|'in_progress'|'resolved'|'wontfix'
     admin_notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+class CanonicalEntityRow(Base):
+    """DB index of canonical entities — mirrors `canonical.json` for cross-job
+    SQL queries (admin dashboards, "all valves of size 8 across customer X's
+    jobs", per-job aggregations) without N filesystem reads + JSON parses.
+
+    **Source of truth remains the on-disk `canonical.json`** (FEATURES #26 /
+    #33). This table is a denormalised read-index — populated by dual-write
+    in `webapp.deliverables.pipeline_emitter.write_canonical_for_job()` when
+    the pipeline emits a fresh file, and back-populated for legacy jobs via
+    `webapp/scripts/index_canonical_to_db.py`. Deliverable generators still
+    read the canonical file + merge `entity_overrides` at request time —
+    this table doesn't change the read path.
+
+    User edits are NOT applied here. `entity_overrides` is the edit store;
+    a row in this table reflects what the pipeline emitted, not what the
+    user has changed since. If you need "what the user sees", join through
+    the deliverables API.
+
+    Unique on (job_id, entity_id) — re-emit upserts. Indexed on
+    (entity_class, tag) so the common "find all valves with tag X" query
+    is cheap.
+    """
+    __tablename__ = "canonical_entities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
+    entity_id = Column(String, nullable=False, index=True)          # UUID as string (SQLite has no UUID type)
+    entity_class = Column(String, nullable=False, index=True)       # 'valve' | 'instrument' | 'equipment'
+    sub_class = Column(String, nullable=True)                       # 'BV', 'BF', etc. for valves; None for instruments
+    tag = Column(String, nullable=True, index=True)
+    pid_number = Column(String, nullable=False)
+    sheet_number = Column(Integer, nullable=False)
+    bbox = Column(JSON, nullable=False)                             # [x1, y1, x2, y2] floats
+    fields = Column(JSON, nullable=False, default=dict)             # entity-specific scalar map
+    vendor_match = Column(JSON, nullable=True)                      # VendorMatch sub-model when present
+    canonical_schema_version = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "entity_id", name="uq_canonical_entities_je"),
+    )
