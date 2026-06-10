@@ -680,3 +680,141 @@ def sync_job_to_label_studio(
     db.commit()
 
     return {"job_id": job.id, "ls_project_id": project_id, "tiles_pushed": pushed}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Canonical entity index — cross-job query surface (FEATURES #34).
+# Reads from the `canonical_entities` table populated by the dual-write in
+# `pipeline_runner.py` + `webapp/scripts/index_canonical_to_db.py` backfill.
+# Note: this is the *pipeline-emitted* state, NOT user-edited state.
+# Apply entity_overrides via the deliverables API if you need "what the user
+# sees right now".
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class CanonicalEntityRowResp(BaseModel):
+    job_id: int
+    entity_id: str
+    entity_class: str
+    sub_class: Optional[str] = None
+    tag: Optional[str] = None
+    pid_number: str
+    sheet_number: int
+    fields: dict = Field(default_factory=dict)
+    updated_at: Optional[str] = None
+
+
+class EntitySearchResp(BaseModel):
+    total: int           # total rows matching the filter (pre-pagination)
+    returned: int        # rows in this response
+    offset: int
+    limit: int
+    rows: list[CanonicalEntityRowResp]
+
+
+@router.get("/entities", response_model=EntitySearchResp)
+def admin_search_canonical_entities(
+    entity_class: Optional[str] = None,
+    sub_class: Optional[str] = None,
+    tag_contains: Optional[str] = None,
+    job_id: Optional[int] = None,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Search the cross-job canonical entity index.
+
+    All filters AND together. Common queries:
+      - `?entity_class=valve&sub_class=BV` → every ball valve across jobs
+      - `?tag_contains=32047` → duplicate-tag audit
+      - `?job_id=38` → single-job dump (mirrors what canonical.json holds)
+
+    Hard limit cap = 500 rows per response to keep payloads bounded.
+    """
+    limit = max(1, min(500, limit))
+    offset = max(0, offset)
+
+    q = db.query(models.CanonicalEntityRow)
+    if entity_class:
+        q = q.filter(models.CanonicalEntityRow.entity_class == entity_class)
+    if sub_class:
+        q = q.filter(models.CanonicalEntityRow.sub_class == sub_class)
+    if tag_contains:
+        # Cheap LIKE — index covers prefix but a substring scan is the
+        # right ergonomics for the "find tags containing 32047" use case.
+        q = q.filter(models.CanonicalEntityRow.tag.ilike(f"%{tag_contains}%"))
+    if job_id is not None:
+        q = q.filter(models.CanonicalEntityRow.job_id == job_id)
+
+    total = q.count()
+    rows = (
+        q.order_by(models.CanonicalEntityRow.job_id, models.CanonicalEntityRow.id)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return EntitySearchResp(
+        total=total,
+        returned=len(rows),
+        offset=offset,
+        limit=limit,
+        rows=[
+            CanonicalEntityRowResp(
+                job_id=r.job_id,
+                entity_id=r.entity_id,
+                entity_class=r.entity_class,
+                sub_class=r.sub_class,
+                tag=r.tag,
+                pid_number=r.pid_number,
+                sheet_number=r.sheet_number,
+                fields=r.fields or {},
+                updated_at=utc_iso(r.updated_at) if r.updated_at else None,
+            )
+            for r in rows
+        ],
+    )
+
+
+@router.get("/entities/aggregates")
+def admin_canonical_entity_aggregates(
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Quick top-level breakdowns for dashboards: total rows, per-class
+    counts, top-10 sub_classes by count, top-10 jobs by valve count.
+    Single round-trip — cheaper than four `?entity_class=X&count` calls.
+    """
+    Row = models.CanonicalEntityRow
+    total = db.query(func.count(Row.id)).scalar() or 0
+
+    by_class = dict(
+        db.query(Row.entity_class, func.count(Row.id))
+        .group_by(Row.entity_class)
+        .all()
+    )
+
+    top_sub = (
+        db.query(Row.sub_class, func.count(Row.id).label("n"))
+        .filter(Row.entity_class == "valve", Row.sub_class.isnot(None))
+        .group_by(Row.sub_class)
+        .order_by(func.count(Row.id).desc())
+        .limit(10)
+        .all()
+    )
+
+    top_jobs = (
+        db.query(Row.job_id, func.count(Row.id).label("n"))
+        .filter(Row.entity_class == "valve")
+        .group_by(Row.job_id)
+        .order_by(func.count(Row.id).desc())
+        .limit(10)
+        .all()
+    )
+
+    return {
+        "total_rows": total,
+        "by_class": by_class,
+        "top_valve_sub_classes": [{"sub_class": s, "count": n} for s, n in top_sub],
+        "top_jobs_by_valve_count": [{"job_id": j, "count": n} for j, n in top_jobs],
+    }

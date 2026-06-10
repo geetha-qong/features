@@ -11,10 +11,16 @@
 import type { DetectionItem, EntitiesResponse, EntityRow } from "./api";
 import type { CanvasElement } from "./types";
 
-// Human-readable names for the valve sub_class field. Mirrors the
-// `_yolo_class_to_canonical` mapping in webapp/routers/api_v1.py so the
-// label on screen matches what the backend matcher used to key the entity.
+// Human-readable names for the valve sub_class field. Two origins:
+//   1. YOLO-side codes (BV/BF/GT/CK/DB/GL/CV/NCBV/PNEUCTRL/RELIEF_SAFETY/
+//      3WAY_RELIEF) — derived from `_yolo_class_to_canonical` in
+//      webapp/routers/api_v1.py.
+//   2. CSV-side codes (VB/VF/VD/PV/SB/...) — customer-side conventions
+//      that appear in the canonical_entities backfill but not in the
+//      YOLO vocabulary. Inferred semantics from common P&ID engineering
+//      shorthand; revise per-customer if a slug-specific map emerges.
 const VALVE_SUB_CLASS_LABELS: Record<string, string> = {
+  // YOLO vocabulary (FEATURES #31)
   BV: "Ball Valve",
   BF: "Butterfly Valve",
   GT: "Gate Valve",
@@ -26,6 +32,12 @@ const VALVE_SUB_CLASS_LABELS: Record<string, string> = {
   PNEUCTRL: "Pneumatic Control",
   RELIEF_SAFETY: "Relief / Safety Valve",
   "3WAY_RELIEF": "3-Way Relief Valve",
+  // Customer/CSV-side codes surfaced by FEATURES #34 canonical_entities backfill
+  VB: "Block Valve",
+  VF: "Flow Valve",
+  VD: "Drain Valve",
+  PV: "Pressure Valve",
+  SB: "Sample/Bleed Valve",
 };
 
 function humanType(
