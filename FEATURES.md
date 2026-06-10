@@ -24,6 +24,39 @@
 
 ---
 
+## [2026-06-10] #35 — Admin cross-job entity search + aggregates endpoints
+
+**Type:** feature
+**Stage:** webapp
+**Status:** shipped (deployed to dev.qongsystems.com 2026-06-10)
+
+**Why:** FEATURES #34 added the `canonical_entities` DB index but no surface to query it without raw SQL. Production usage (admin dashboards, customer summaries, duplicate-tag audits) needs an authenticated HTTP endpoint.
+
+**What:**
+
+- `GET /api/v1/admin/entities` — filterable cross-job search. Query params: `entity_class`, `sub_class`, `tag_contains` (ILIKE substring), `job_id`. Pagination via `offset` + `limit` (capped at 500). Returns rows with `job_id, entity_id, entity_class, sub_class, tag, pid_number, sheet_number, fields, updated_at`.
+- `GET /api/v1/admin/entities/aggregates` — single-call dashboard payload: `total_rows`, `by_class` (per-entity-class counts), `top_valve_sub_classes` (top-10), `top_jobs_by_valve_count` (top-10).
+- Both `require_super_admin`.
+- Reads pipeline-emitted state — entity_overrides NOT applied. For user-visible state, use the deliverables API.
+
+Frontend bonus: expanded `VALVE_SUB_CLASS_LABELS` in `studio/buildElements.ts` to cover the CSV-side codes the backfill surfaced (VB=Block, VF=Flow, VD=Drain, PV=Pressure, SB=Sample/Bleed). Without this map ~205 ball-valve-equivalents were rendering as "Valve (VB)" placeholders.
+
+**Result (live on dev as super_admin):**
+
+| Endpoint | Sample output |
+|---|---|
+| `/aggregates` | `total_rows=1304, by_class={valve:679, instrument:625}` |
+| `?tag_contains=32047` | 2 hits: job 38 `61-BV-32047` + job 43 `61-BV-32047` (duplicate-tag audit) |
+| `?entity_class=valve&sub_class=BV` | 154 total ball valves across all jobs |
+
+**Notes:**
+
+- `top_valve_sub_classes` revealed **VCS** (10) as a new sub_class not yet in the frontend label map — add when seen often enough to matter.
+- The duplicate `61-BV-32047` in jobs 38 + 43 is real (same `pid_number` and `sub_class`) — either the same physical valve re-extracted across drawing revisions, or a legitimate duplicate. Cross-job audit endpoint is the right tool to chase this.
+- Endpoint serving order: dev took ~75 seconds to flip the response Content-Type from `text/html` (SPA catch-all) → `application/json` after push, because the FastAPI router only re-registers on container restart. Worth checking via Content-Type when polling deploy state, not just status code.
+
+---
+
 ## [2026-06-10] #34 — Dynamic PropertiesPanel + DB-backed canonical_entities index
 
 **Type:** feature | architecture
