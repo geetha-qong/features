@@ -812,9 +812,32 @@ def admin_canonical_entity_aggregates(
         .all()
     )
 
+    # Cross-job duplicate-tag audit: any tag appearing in ≥2 distinct jobs is
+    # an audit signal — either re-extraction (same drawing, two runs) or a
+    # legitimate same-tag-on-two-drawings case. Top-15 by job count. Capped
+    # to keep payload bounded; full search via /entities?tag_contains=<tag>.
+    from sqlalchemy import distinct
+    dup_tags = (
+        db.query(
+            Row.tag,
+            func.count(distinct(Row.job_id)).label("job_count"),
+            func.count(Row.id).label("row_count"),
+        )
+        .filter(Row.tag.isnot(None), Row.tag != "")
+        .group_by(Row.tag)
+        .having(func.count(distinct(Row.job_id)) >= 2)
+        .order_by(func.count(distinct(Row.job_id)).desc(), func.count(Row.id).desc())
+        .limit(15)
+        .all()
+    )
+
     return {
         "total_rows": total,
         "by_class": by_class,
         "top_valve_sub_classes": [{"sub_class": s, "count": n} for s, n in top_sub],
         "top_jobs_by_valve_count": [{"job_id": j, "count": n} for j, n in top_jobs],
+        "duplicate_tags_across_jobs": [
+            {"tag": t, "job_count": jc, "row_count": rc}
+            for t, jc, rc in dup_tags
+        ],
     }

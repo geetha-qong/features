@@ -132,4 +132,8 @@ export interface EntityAggregates {
   by_class: Record<string, number>;
   top_valve_sub_classes: Array<{ sub_class: string; count: number }>;
   top_jobs_by_valve_count: Array<{ job_id: number; count: number }>;
+  // Tags appearing in ≥2 distinct jobs — audit signal for re-extractions
+  // (same drawing, two runs) or legitimate same-tag-on-two-drawings cases.
+  // Optional because older deploys don't include it (FEATURES #37+).
+  duplicate_tags_across_jobs?: Array<{ tag: string; job_count: number; row_count: number }>;
 }

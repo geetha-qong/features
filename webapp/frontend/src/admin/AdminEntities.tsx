@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Boxes, GitPullRequest, Radio, Search } from "lucide-react";
+import { AlertTriangle, Boxes, GitPullRequest, Radio, Search } from "lucide-react";
 import * as api from "./api";
 import type {
   CanonicalEntityRowResp,
@@ -159,6 +159,41 @@ export default function AdminEntities() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Cross-job duplicate-tag audit (FEATURES #37). Hidden until the
+          field lands in the aggregates payload — survives an old deploy. */}
+      {aggs?.duplicate_tags_across_jobs && aggs.duplicate_tags_across_jobs.length > 0 && (
+        <div style={{ marginTop: 32 }}>
+          <h3 style={{ marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+            <AlertTriangle size={15} strokeWidth={1.6} style={{ color: "var(--warn)" }} />
+            Duplicate tags across jobs
+          </h3>
+          <p className="sub" style={{ marginTop: 0, marginBottom: 12, fontSize: 12 }}>
+            Same tag appearing in ≥2 different jobs — likely re-extraction
+            (same drawing twice) or legitimate same-tag-on-two-drawings. Click
+            a row to inspect.
+          </p>
+          <div className="projects-list">
+            <div className="list-head" style={{ gridTemplateColumns: "2fr 1fr 1fr" }}>
+              <div>Tag</div>
+              <div>Job count</div>
+              <div>Total rows</div>
+            </div>
+            {aggs.duplicate_tags_across_jobs.map((d) => (
+              <div
+                key={d.tag}
+                className="list-row"
+                style={{ gridTemplateColumns: "2fr 1fr 1fr", cursor: "pointer" }}
+                onClick={() => { setTagContains(d.tag); setEntityClass(""); setSubClass(""); setJobId(""); }}
+              >
+                <div className="name mono">{d.tag}</div>
+                <div className="mono">{d.job_count}</div>
+                <div className="mono">{d.row_count}</div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       <h3 style={{ marginTop: 32, marginBottom: 12 }}>Search</h3>
