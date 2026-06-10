@@ -159,6 +159,20 @@ export default function Studio({ project, userName, onBack }: Props) {
   const activeTileFilename =
     realSheets && realSheets[activeSheet]?.filename ? realSheets[activeSheet].filename : null;
 
+  // FEATURES #38 Phase 2: full-page render takes precedence over per-tile mode.
+  // Derive the page index from the active tile filename ("tile_p0_r1_c2.png" → 0).
+  // The page-full image URL is deterministic; no extra fetch needed.
+  const activePageIndex = useMemo(() => {
+    if (!activeTileFilename) return 0;
+    const m = activeTileFilename.match(/tile_p(\d+)_/);
+    return m ? parseInt(m[1], 10) : 0;
+  }, [activeTileFilename]);
+  // Best-effort: assume page-full exists; PidCanvas falls back to tile mode if
+  // the <img> 404s (browser shows broken image — surfaced via onError in v2).
+  const activePageFullUrl = realSheets && realSheets.length > 0
+    ? `/jobs/${project.id}/page/${activePageIndex}/full`
+    : null;
+
   // Lock body scroll while studio is mounted (full-bleed surface)
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -302,6 +316,8 @@ export default function Studio({ project, userName, onBack }: Props) {
             pan={pan}
             setPan={setPan}
             dark={dark}
+            pageFullUrl={activePageFullUrl}
+            pageIndex={activePageIndex}
             tileImageUrl={activeTileUrl}
             tileFilename={activeTileFilename}
             detections={detResp?.detections}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DetectionItem } from "./api";
 
 interface PidElement {
@@ -36,35 +36,152 @@ const EDGES: PidEdge[] = [
   { from: [400, 230], to: [520, 230], kind: "warn-dashed" },
 ];
 
+// ── User-annotation + edge types shared with Phase 3+4 overlays ────────────────
+// Kept minimal here; Phase 3/4 add api.ts modules with the full shapes. The
+// canvas only needs the rendering-relevant fields.
+
+export interface UserAnnotationLite {
+  entity_id: string;
+  status: "model_found" | "user_added" | "user_confirmed" | "user_rejected";
+  source: "model" | "user";
+  entity_class: string;
+  sub_class: string | null;
+  bbox: [number, number, number, number]; // page-pixel coords (POST already translates)
+  sheet_number: number;
+  placeholder_tag?: string | null;
+  tag?: string | null;
+}
+
+export type LineType = "process_pipe" | "instrument" | "signal" | "interlock";
+
+export interface EdgeLite {
+  edge_id: string;
+  source: "opencv" | "llm_fallback" | "user";
+  status: "model_found" | "user_added" | "user_confirmed" | "user_rejected";
+  line_type: LineType;
+  relation_type?: string | null;
+  source_entity_id: string;
+  target_entity_id: string;
+  polyline: Array<[number, number]>;
+  sheet_number: number;
+  group_id?: string | null;
+}
+
+export type CanvasMode = "select" | "mark-symbol" | "draw-edge";
+
+// ── Theme tokens — keep colors in sync with design/tokens.css ──────────────────
+// Status colors for annotation bboxes.
+const STATUS_STROKE = {
+  model_found: "#3B82F6",     // --info — calm
+  user_added: "#FF4DA8",      // --qong-pink — user signal
+  user_confirmed: "#10B981",  // --ok — validated
+  user_rejected: "#EF4444",   // --error
+} as const;
+
+// Per-line-type stroke style (matches the spec's theme mapping table).
+const LINE_STYLE: Record<LineType, { color: string; dash: string; width: number }> = {
+  process_pipe: { color: "#22D3EE", dash: "0",      width: 2.4 },  // --scan-cyan solid
+  instrument:   { color: "#FF4DA8", dash: "8 4",    width: 2.0 },  // --qong-pink dashed
+  signal:       { color: "#C73FBE", dash: "14 6",   width: 2.0 },  // --qong-purple long-dash
+  interlock:    { color: "#F59E0B", dash: "4 4 1 4", width: 2.0 }, // --warn dash-dot
+};
+
+// ── Tile geometry — mirrors pdf_to_tiles.py defaults ─────────────────────────
+// MUST match pdf_to_tiles.pdf_to_tiles defaults (3x3 grid, 20% overlap). If
+// you ever change those defaults, change BOTH ends in the same PR.
+const GRID_ROWS = 3;
+const GRID_COLS = 3;
+const OVERLAP_PCT = 0.20;
+
+interface TileBox { x0: number; y0: number; x1: number; y1: number; }
+
+/**
+ * Compute per-tile (x0, y0, x1, y1) offset into the full-page image, given the
+ * full-page image's natural dimensions. Mirrors the math in
+ * `pdf_to_tiles.pdf_to_tiles`. Keyed by tile filename like "tile_p0_r1_c2.png".
+ */
+export function computeTileOffsets(
+  natural: { w: number; h: number },
+  pageIndex: number,
+): Map<string, TileBox> {
+  const W = natural.w;
+  const H = natural.h;
+  const tileW = Math.ceil(W / GRID_COLS);
+  const tileH = Math.ceil(H / GRID_ROWS);
+  const overlapX = Math.floor(tileW * OVERLAP_PCT);
+  const overlapY = Math.floor(tileH * OVERLAP_PCT);
+  const out = new Map<string, TileBox>();
+  for (let r = 0; r < GRID_ROWS; r++) {
+    for (let c = 0; c < GRID_COLS; c++) {
+      const x0 = Math.max(0, c * tileW - overlapX);
+      const y0 = Math.max(0, r * tileH - overlapY);
+      const x1 = Math.min(W, (c + 1) * tileW + overlapX);
+      const y1 = Math.min(H, (r + 1) * tileH + overlapY);
+      out.set(`tile_p${pageIndex}_r${r}_c${c}.png`, { x0, y0, x1, y1 });
+    }
+  }
+  return out;
+}
+
+/**
+ * Translate a tile-local bbox into page-pixel coords using the tile's offset.
+ * Returns null if the tile is unknown.
+ */
+function tileBboxToPage(
+  bbox: number[],
+  tileFilename: string,
+  offsets: Map<string, TileBox>,
+): [number, number, number, number] | null {
+  const off = offsets.get(tileFilename);
+  if (!off) return null;
+  const [x1, y1, x2, y2] = bbox;
+  return [x1 + off.x0, y1 + off.y0, x2 + off.x0, y2 + off.y0];
+}
+
 interface Props {
   selectedId: string;
-  /** Selecting a detection emits both the entity_id (drives drawer fetch) and
-   *  the entity_class hint (drives the drawer's initial deliverable_type so a
-   *  clicked valve doesn't open the Instrument Index by default). For prototype
-   *  SVG clicks there's no entity_class — second arg is undefined. */
   onSelect: (id: string, entityClass?: string) => void;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   pan: { x: number; y: number };
   setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   dark: boolean;
-  /**
-   * Real PDF tile image for the active sheet. When provided, it's drawn as the
-   * canvas background and prototype SVG elements are hidden. Detections (if
-   * any) are overlaid as rectangles in the same coordinate space.
-   */
+  /** Full-page render of the active sheet (FEATURES #38). When provided, the
+   *  canvas renders the whole page and shows ALL detections (no per-tile
+   *  filter), translating tile-local bboxes into page-pixel coords. This is
+   *  the new default surface; tileImageUrl is kept as a fallback for jobs
+   *  that don't have a full-page render yet (legacy / brand-new uploads). */
+  pageFullUrl?: string | null;
+  /** Page index of the active sheet (0-based). Needed to compute tile-filename
+   *  → page-offset mapping correctly for multi-page PDFs. */
+  pageIndex?: number;
+  /** Legacy: single tile image. Used when pageFullUrl is absent. */
   tileImageUrl?: string | null;
-  /** Filename of the active tile (e.g. "tile_p0_r0_c1.png"). Used to filter
-   *  `detections` to only the bboxes that belong to the visible tile — without
-   *  this filter, detections from other tiles get drawn on whichever tile is
-   *  showing, producing the "random markings" bug. */
   tileFilename?: string | null;
-  /** Backend-supplied valve / instrument detections to overlay on the tile. */
   detections?: DetectionItem[];
-  /** Number of structured valve rows in the DB — shown in the canvas footer. */
   valveCount?: number;
-  /** valve_count stored on the Job row (may be > rows if data not yet seeded). */
   valveCountTotal?: number;
+  /** Canvas interaction mode. Phase 3+4 wiring lives in subcomponents; for
+   *  now this only affects cursor + bbox click affordance. */
+  mode?: CanvasMode;
+  /** User-placed marks to overlay (Phase 3). Bboxes here are already in
+   *  page-pixel coords. */
+  userAnnotations?: UserAnnotationLite[];
+  /** Edges to overlay (Phase 4). Polylines in page-pixel coords. */
+  edges?: EdgeLite[];
+  /** Mark drop callback (Phase 3). Bbox is in page-pixel coords. */
+  onDropMark?: (bbox: [number, number, number, number], sub_class: string, entity_class: string) => void;
+  /** Edge-drawn callback (Phase 4). Polyline in page-pixel coords. */
+  onEdgeDrawn?: (
+    source_entity_id: string,
+    target_entity_id: string,
+    polyline: Array<[number, number]>,
+    line_type: LineType,
+  ) => void;
+  /** Selected line type for draw-edge mode (Phase 4). */
+  activeLineType?: LineType;
+  /** Selected entity class + sub_class for mark-symbol mode (Phase 3). */
+  activeMarkClass?: { entity_class: string; sub_class: string } | null;
 }
 
 export default function PidCanvas({
@@ -75,11 +192,20 @@ export default function PidCanvas({
   pan,
   setPan,
   dark,
+  pageFullUrl,
+  pageIndex = 0,
   tileImageUrl,
   tileFilename,
   detections,
   valveCount,
   valveCountTotal,
+  mode = "select",
+  userAnnotations,
+  edges,
+  onDropMark,
+  onEdgeDrawn,
+  activeLineType = "process_pipe",
+  activeMarkClass,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const innerRef = useRef<HTMLDivElement | null>(null);
@@ -96,6 +222,7 @@ export default function PidCanvas({
 
   function onMouseDown(e: React.MouseEvent<HTMLDivElement>) {
     if ((e.target as HTMLElement).closest("g[data-elid]")) return;
+    if ((e.target as HTMLElement).closest("[data-canvas-interactive]")) return;
     if (e.button !== 0) return;
     e.preventDefault();
     pannedRef.current = false;
@@ -138,9 +265,11 @@ export default function PidCanvas({
     if (!pannedRef.current) cb();
   };
 
-  // When a real tile is available, show it + detection overlay. Prototype SVG
-  // elements (V-101, FT-101, …) are hidden so customers see their real data.
-  const useReal = !!tileImageUrl;
+  // Mode selection: page-full > tile > prototype SVG. Phase 2 made page-full
+  // the new default; tile mode lingers for legacy data.
+  const useFullPage = !!pageFullUrl;
+  const useTile = !useFullPage && !!tileImageUrl;
+  const useProto = !useFullPage && !useTile;
 
   return (
     <div ref={wrapRef} className="canvas-wrap" onMouseDown={onMouseDown}>
@@ -149,7 +278,24 @@ export default function PidCanvas({
         className={`canvas-inner ${animated ? "animated" : ""}`}
         style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
       >
-        {useReal && (
+        {useFullPage && (
+          <PageWithOverlays
+            pageFullUrl={pageFullUrl!}
+            pageIndex={pageIndex}
+            detections={detections ?? []}
+            userAnnotations={userAnnotations ?? []}
+            edges={edges ?? []}
+            onSelect={onSelect}
+            selectedId={selectedId}
+            mode={mode}
+            onDropMark={onDropMark}
+            onEdgeDrawn={onEdgeDrawn}
+            activeLineType={activeLineType}
+            activeMarkClass={activeMarkClass}
+            dark={dark}
+          />
+        )}
+        {useTile && (
           <TileWithOverlay
             tileImageUrl={tileImageUrl!}
             tileFilename={tileFilename ?? null}
@@ -158,234 +304,114 @@ export default function PidCanvas({
             selectedId={selectedId}
           />
         )}
-        {!useReal && (
+        {useProto && (
           <svg viewBox="0 0 700 360" className="pid-svg">
-          <defs>
-            <pattern id="canvas-grid" width="20" height="20" patternUnits="userSpaceOnUse">
-              <path d="M 20 0 L 0 0 0 20" fill="none" stroke={gridStroke} strokeOpacity={gridOp} strokeWidth="0.6" />
-            </pattern>
-          </defs>
-          <rect x="0" y="0" width="700" height="360" fill="url(#canvas-grid)" />
+            <defs>
+              <pattern id="canvas-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                <path d="M 20 0 L 0 0 0 20" fill="none" stroke={gridStroke} strokeOpacity={gridOp} strokeWidth="0.6" />
+              </pattern>
+            </defs>
+            <rect x="0" y="0" width="700" height="360" fill="url(#canvas-grid)" />
 
-          {EDGES.map((e, i) => {
-            const stroke = e.kind === "ok" ? "#22D3EE" : "#F59E0B";
-            const dash = e.kind.includes("dashed") ? "6 4" : "0";
-            return (
-              <g key={i}>
-                <line
-                  x1={e.from[0]}
-                  y1={e.from[1]}
-                  x2={e.to[0]}
-                  y2={e.to[1]}
-                  stroke={stroke}
-                  strokeWidth="1.8"
-                  strokeDasharray={dash}
-                />
-                {e.kind === "ok" && (
-                  <polygon
-                    points={`${e.to[0]},${e.to[1]} ${e.to[0] - 6},${e.to[1] - 4} ${e.to[0] - 6},${e.to[1] + 4}`}
-                    fill={stroke}
-                  />
-                )}
-              </g>
-            );
-          })}
-
-          {ELEMENTS.map((el) => {
-            const sel = selectedId === el.id;
-            const stroke = el.warn ? "#F59E0B" : sel ? "#FF4DA8" : elStroke;
-            const ringStroke = sel ? "#FF4DA8" : "transparent";
-
-            if (el.type === "instrument" || el.type === "valve") {
-              const r = el.r ?? 20;
+            {EDGES.map((e, i) => {
+              const stroke = e.kind === "ok" ? "#22D3EE" : "#F59E0B";
+              const dash = e.kind.includes("dashed") ? "6 4" : "0";
               return (
-                <g
-                  key={el.id}
-                  data-elid={el.id}
-                  onMouseUp={clickGuard(() => onSelect(el.id))}
-                  style={{ cursor: "pointer" }}
-                >
-                  {sel && (
-                    <circle
-                      cx={el.x}
-                      cy={el.y}
-                      r={r + 6}
-                      fill="none"
-                      stroke={ringStroke}
-                      strokeWidth="1.3"
-                      strokeDasharray="3 3"
-                    />
-                  )}
-                  <circle cx={el.x} cy={el.y} r={r} fill={elFill} stroke={stroke} strokeWidth="1.8" />
-                  <line x1={el.x - r * 0.85} y1={el.y} x2={el.x + r * 0.85} y2={el.y} stroke={stroke} strokeWidth="0.8" />
-                  <text
-                    x={el.x}
-                    y={el.y - 2}
-                    textAnchor="middle"
-                    fontSize="9"
-                    fontFamily="JetBrains Mono, monospace"
-                    fontWeight="700"
-                    fill={el.warn ? "#F59E0B" : elText}
-                  >
-                    {el.label}
-                  </text>
-                  <text
-                    x={el.x}
-                    y={el.y + 9}
-                    textAnchor="middle"
-                    fontSize="9"
-                    fontFamily="JetBrains Mono, monospace"
-                    fontWeight="500"
-                    fill={el.warn ? "#F59E0B" : subText}
-                  >
-                    {el.sub}
-                  </text>
-                </g>
-              );
-            }
-
-            if (el.type === "pump") {
-              const r = el.r ?? 24;
-              return (
-                <g
-                  key={el.id}
-                  data-elid={el.id}
-                  onMouseUp={clickGuard(() => onSelect(el.id))}
-                  style={{ cursor: "pointer" }}
-                >
-                  {sel && (
-                    <circle
-                      cx={el.x}
-                      cy={el.y}
-                      r={r + 5}
-                      fill="none"
-                      stroke={ringStroke}
-                      strokeWidth="1.3"
-                      strokeDasharray="3 3"
-                    />
-                  )}
-                  <circle cx={el.x} cy={el.y} r={r} fill={elFill} stroke={stroke} strokeWidth="1.8" />
-                  <polygon
-                    points={`${el.x - r * 0.7},${el.y - r * 0.7} ${el.x + r * 0.7},${el.y} ${el.x - r * 0.7},${el.y + r * 0.7}`}
-                    fill="none"
+                <g key={i}>
+                  <line
+                    x1={e.from[0]}
+                    y1={e.from[1]}
+                    x2={e.to[0]}
+                    y2={e.to[1]}
                     stroke={stroke}
-                    strokeWidth="1.3"
+                    strokeWidth="1.8"
+                    strokeDasharray={dash}
                   />
-                  <text
-                    x={el.x}
-                    y={el.y + r + 12}
-                    textAnchor="middle"
-                    fontSize="9"
-                    fontFamily="JetBrains Mono, monospace"
-                    fontWeight="700"
-                    fill={subText}
-                  >
-                    {el.label}
-                  </text>
+                  {e.kind === "ok" && (
+                    <polygon
+                      points={`${e.to[0]},${e.to[1]} ${e.to[0] - 6},${e.to[1] - 4} ${e.to[0] - 6},${e.to[1] + 4}`}
+                      fill={stroke}
+                    />
+                  )}
                 </g>
               );
-            }
+            })}
 
-            // block-valve, exchanger (rectangular)
-            const w = el.w ?? 60;
-            const h = el.h ?? 32;
-            return (
-              <g
-                key={el.id}
-                data-elid={el.id}
-                onMouseUp={clickGuard(() => onSelect(el.id))}
-                style={{ cursor: "pointer" }}
-              >
-                {sel && (
-                  <rect
-                    x={el.x - w / 2 - 4}
-                    y={el.y - h / 2 - 4}
-                    width={w + 8}
-                    height={h + 8}
-                    fill="none"
-                    stroke={ringStroke}
-                    strokeWidth="1.3"
-                    strokeDasharray="3 3"
-                    rx="4"
-                  />
-                )}
-                <rect
-                  x={el.x - w / 2}
-                  y={el.y - h / 2}
-                  width={w}
-                  height={h}
-                  fill={elFill}
-                  stroke={stroke}
-                  strokeWidth="1.8"
-                  rx="2"
-                />
-                {el.type === "exchanger" && (
-                  <>
-                    <line
-                      x1={el.x - w / 2 + 6}
-                      y1={el.y - h / 2 + 6}
-                      x2={el.x + w / 2 - 6}
-                      y2={el.y - h / 2 + 6}
-                      stroke={stroke}
-                      strokeWidth="0.8"
-                    />
-                    <line
-                      x1={el.x - w / 2 + 6}
-                      y1={el.y + h / 2 - 6}
-                      x2={el.x + w / 2 - 6}
-                      y2={el.y + h / 2 - 6}
-                      stroke={stroke}
-                      strokeWidth="0.8"
-                    />
-                  </>
-                )}
-                <text
-                  x={el.x}
-                  y={el.y + 3}
-                  textAnchor="middle"
-                  fontSize="9"
-                  fontFamily="JetBrains Mono, monospace"
-                  fontWeight="700"
-                  fill={elText}
-                >
-                  {el.label}
-                </text>
-              </g>
-            );
-          })}
+            {ELEMENTS.map((el) => {
+              const sel = selectedId === el.id;
+              const stroke = el.warn ? "#F59E0B" : sel ? "#FF4DA8" : elStroke;
+              const ringStroke = sel ? "#FF4DA8" : "transparent";
 
-          <text
-            x={295}
-            y={218}
-            fontSize="7"
-            fontFamily="JetBrains Mono, monospace"
-            fill="#F59E0B"
-            letterSpacing="0.1em"
-          >
-            direction unsure
-          </text>
+              if (el.type === "instrument" || el.type === "valve") {
+                const r = el.r ?? 20;
+                return (
+                  <g
+                    key={el.id}
+                    data-elid={el.id}
+                    onMouseUp={clickGuard(() => onSelect(el.id))}
+                    style={{ cursor: "pointer" }}
+                  >
+                    {sel && (
+                      <circle cx={el.x} cy={el.y} r={r + 6} fill="none" stroke={ringStroke} strokeWidth="1.3" strokeDasharray="3 3" />
+                    )}
+                    <circle cx={el.x} cy={el.y} r={r} fill={elFill} stroke={stroke} strokeWidth="1.8" />
+                    <line x1={el.x - r * 0.85} y1={el.y} x2={el.x + r * 0.85} y2={el.y} stroke={stroke} strokeWidth="0.8" />
+                    <text x={el.x} y={el.y - 2} textAnchor="middle" fontSize="9" fontFamily="JetBrains Mono, monospace" fontWeight="700" fill={el.warn ? "#F59E0B" : elText}>{el.label}</text>
+                    <text x={el.x} y={el.y + 9} textAnchor="middle" fontSize="9" fontFamily="JetBrains Mono, monospace" fontWeight="500" fill={el.warn ? "#F59E0B" : subText}>{el.sub}</text>
+                  </g>
+                );
+              }
 
-          <g transform="translate(180, 320)" fontFamily="Outfit, sans-serif" fontSize="9" fill={legendText}>
-            <circle cx="0" cy="0" r="3" fill="#22D3EE" />
-            <text x="8" y="3">
-              process line
+              if (el.type === "pump") {
+                const r = el.r ?? 24;
+                return (
+                  <g key={el.id} data-elid={el.id} onMouseUp={clickGuard(() => onSelect(el.id))} style={{ cursor: "pointer" }}>
+                    {sel && (
+                      <circle cx={el.x} cy={el.y} r={r + 5} fill="none" stroke={ringStroke} strokeWidth="1.3" strokeDasharray="3 3" />
+                    )}
+                    <circle cx={el.x} cy={el.y} r={r} fill={elFill} stroke={stroke} strokeWidth="1.8" />
+                    <polygon points={`${el.x - r * 0.7},${el.y - r * 0.7} ${el.x + r * 0.7},${el.y} ${el.x - r * 0.7},${el.y + r * 0.7}`} fill="none" stroke={stroke} strokeWidth="1.3" />
+                    <text x={el.x} y={el.y + r + 12} textAnchor="middle" fontSize="9" fontFamily="JetBrains Mono, monospace" fontWeight="700" fill={subText}>{el.label}</text>
+                  </g>
+                );
+              }
+
+              const w = el.w ?? 60;
+              const h = el.h ?? 32;
+              return (
+                <g key={el.id} data-elid={el.id} onMouseUp={clickGuard(() => onSelect(el.id))} style={{ cursor: "pointer" }}>
+                  {sel && (
+                    <rect x={el.x - w / 2 - 4} y={el.y - h / 2 - 4} width={w + 8} height={h + 8} fill="none" stroke={ringStroke} strokeWidth="1.3" strokeDasharray="3 3" rx="4" />
+                  )}
+                  <rect x={el.x - w / 2} y={el.y - h / 2} width={w} height={h} fill={elFill} stroke={stroke} strokeWidth="1.8" rx="2" />
+                  {el.type === "exchanger" && (
+                    <>
+                      <line x1={el.x - w / 2 + 6} y1={el.y - h / 2 + 6} x2={el.x + w / 2 - 6} y2={el.y - h / 2 + 6} stroke={stroke} strokeWidth="0.8" />
+                      <line x1={el.x - w / 2 + 6} y1={el.y + h / 2 - 6} x2={el.x + w / 2 - 6} y2={el.y + h / 2 - 6} stroke={stroke} strokeWidth="0.8" />
+                    </>
+                  )}
+                  <text x={el.x} y={el.y + 3} textAnchor="middle" fontSize="9" fontFamily="JetBrains Mono, monospace" fontWeight="700" fill={elText}>{el.label}</text>
+                </g>
+              );
+            })}
+
+            <text x={295} y={218} fontSize="7" fontFamily="JetBrains Mono, monospace" fill="#F59E0B" letterSpacing="0.1em">
+              direction unsure
             </text>
-            <circle cx="78" cy="0" r="3" fill="#F59E0B" />
-            <text x="86" y="3">
-              low confidence
-            </text>
-            <circle cx="172" cy="0" r="3" fill="#FF4DA8" />
-            <text x="180" y="3">
-              selected
-            </text>
-            <circle cx="232" cy="0" r="3" fill="#EF4444" />
-            <text x="240" y="3">
-              orphan node
-            </text>
-          </g>
-        </svg>
+
+            <g transform="translate(180, 320)" fontFamily="Outfit, sans-serif" fontSize="9" fill={legendText}>
+              <circle cx="0" cy="0" r="3" fill="#22D3EE" />
+              <text x="8" y="3">process line</text>
+              <circle cx="78" cy="0" r="3" fill="#F59E0B" />
+              <text x="86" y="3">low confidence</text>
+              <circle cx="172" cy="0" r="3" fill="#FF4DA8" />
+              <text x="180" y="3">selected</text>
+              <circle cx="232" cy="0" r="3" fill="#EF4444" />
+              <text x="240" y="3">orphan node</text>
+            </g>
+          </svg>
         )}
-        {useReal && (
+        {(useFullPage || useTile) && (
           <div
             style={{
               marginTop: 12,
@@ -408,23 +434,407 @@ export default function PidCanvas({
   );
 }
 
-/**
- * Renders the active tile image with detection rectangles overlaid in the
- * tile's own pixel coordinate system.
- *
- * Previously this was two separate components — the SVG and the <img> had no
- * shared coordinate frame, and the SVG's `viewBox` was the bbox extent of
- * detections rather than the tile's full pixel space. That made bboxes from
- * other tiles land on whichever tile was showing ("random markings").
- *
- * Fix:
- *  1. Filter `detections` to only the rows whose `tile` filename matches the
- *     active tile — bboxes from other tiles never reach this overlay.
- *  2. Capture the image's `naturalWidth`/`naturalHeight` via onLoad.
- *  3. Position the SVG absolutely over the <img>, identical bounds, with
- *     `viewBox="0 0 naturalWidth naturalHeight"`. Bbox pixel coords then map
- *     exactly to image pixels.
- */
+// ────────────────────────────────────────────────────────────────────────────
+// PageWithOverlays — full-page render with translated bboxes + edges +
+// drag-drop hit area. Foundation for Phase 3 (mark-symbol) and Phase 4
+// (draw-edge). Phase 2 ships layers 1 (bg image) + 2 (translated detections).
+// ────────────────────────────────────────────────────────────────────────────
+
+function PageWithOverlays({
+  pageFullUrl,
+  pageIndex,
+  detections,
+  userAnnotations,
+  edges,
+  onSelect,
+  selectedId,
+  mode,
+  onDropMark,
+  onEdgeDrawn,
+  activeLineType,
+  activeMarkClass,
+  dark,
+}: {
+  pageFullUrl: string;
+  pageIndex: number;
+  detections: DetectionItem[];
+  userAnnotations: UserAnnotationLite[];
+  edges: EdgeLite[];
+  onSelect: (id: string, entityClass?: string) => void;
+  selectedId: string;
+  mode: CanvasMode;
+  onDropMark?: (bbox: [number, number, number, number], sub_class: string, entity_class: string) => void;
+  onEdgeDrawn?: (
+    source_entity_id: string,
+    target_entity_id: string,
+    polyline: Array<[number, number]>,
+    line_type: LineType,
+  ) => void;
+  activeLineType: LineType;
+  activeMarkClass: { entity_class: string; sub_class: string } | null | undefined;
+  dark: boolean;
+}) {
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // Phase 4: in-flight edge draw state. First click captures source point;
+  // second click captures target + flushes via onEdgeDrawn.
+  const [edgeDraft, setEdgeDraft] = useState<{
+    sourcePoint: [number, number] | null;
+    sourceEntityId: string | null;
+    cursorPoint: [number, number] | null;
+  }>({ sourcePoint: null, sourceEntityId: null, cursorPoint: null });
+
+  const offsets = useMemo(() => {
+    if (!natural) return new Map<string, TileBox>();
+    return computeTileOffsets(natural, pageIndex);
+  }, [natural, pageIndex]);
+
+  // Translate detections to page-pixel coords. Drop those whose tile filename
+  // doesn't match any computed offset (would indicate a multi-page mismatch).
+  const pageDetections = useMemo(() => {
+    if (!natural) return [];
+    return detections
+      .filter((d) => Array.isArray(d.bbox) && d.bbox.length === 4 && d.tile)
+      .map((d) => {
+        const pb = tileBboxToPage(d.bbox as number[], d.tile as string, offsets);
+        return pb ? { ...d, pageBbox: pb } : null;
+      })
+      .filter((d): d is NonNullable<typeof d> => d !== null);
+  }, [detections, offsets, natural]);
+
+  // Map screen click → page-pixel coords (inverse of SVG viewBox transform).
+  function clientToPagePixel(clientX: number, clientY: number): [number, number] | null {
+    const svg = svgRef.current;
+    if (!svg || !natural) return null;
+    const rect = svg.getBoundingClientRect();
+    const x = ((clientX - rect.left) / rect.width) * natural.w;
+    const y = ((clientY - rect.top) / rect.height) * natural.h;
+    return [x, y];
+  }
+
+  // Mark-symbol mode: click drops a 40x24 page-pixel bbox centered on cursor.
+  // For Phase 2, this is a stub that runs the callback if wired. Phase 3 will
+  // refine the affordance (drag from palette, snap, etc.).
+  function onCanvasClickForMark(e: React.MouseEvent<SVGSVGElement>) {
+    if (mode !== "mark-symbol" || !activeMarkClass || !onDropMark) return;
+    const pt = clientToPagePixel(e.clientX, e.clientY);
+    if (!pt) return;
+    const [cx, cy] = pt;
+    const w = 40, h = 24;
+    onDropMark(
+      [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2],
+      activeMarkClass.sub_class,
+      activeMarkClass.entity_class,
+    );
+  }
+
+  // Draw-edge mode: 2-click flow. Track cursor between clicks for live preview.
+  function onCanvasClickForEdge(e: React.MouseEvent<SVGSVGElement>) {
+    if (mode !== "draw-edge") return;
+    const pt = clientToPagePixel(e.clientX, e.clientY);
+    if (!pt) return;
+    // Snap to nearest entity center if within 24 px.
+    const allPoints: Array<{ id: string; cx: number; cy: number }> = [];
+    pageDetections.forEach((d) => {
+      if (!d.entity_id) return;
+      const [x1, y1, x2, y2] = d.pageBbox;
+      allPoints.push({ id: d.entity_id as string, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2 });
+    });
+    userAnnotations.forEach((a) => {
+      const [x1, y1, x2, y2] = a.bbox;
+      allPoints.push({ id: a.entity_id, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2 });
+    });
+    let snapId: string | null = null;
+    let snapPoint = pt;
+    let bestDist = Infinity;
+    for (const p of allPoints) {
+      const dx = pt[0] - p.cx;
+      const dy = pt[1] - p.cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < bestDist && dist < 28) {
+        bestDist = dist;
+        snapId = p.id;
+        snapPoint = [p.cx, p.cy];
+      }
+    }
+    if (!snapId) return; // edges only between entities
+
+    if (!edgeDraft.sourcePoint) {
+      setEdgeDraft({ sourcePoint: snapPoint, sourceEntityId: snapId, cursorPoint: snapPoint });
+    } else if (edgeDraft.sourceEntityId !== snapId) {
+      // Commit
+      onEdgeDrawn?.(
+        edgeDraft.sourceEntityId!,
+        snapId,
+        [edgeDraft.sourcePoint, snapPoint],
+        activeLineType,
+      );
+      setEdgeDraft({ sourcePoint: null, sourceEntityId: null, cursorPoint: null });
+    }
+  }
+
+  function onCanvasMouseMove(e: React.MouseEvent<SVGSVGElement>) {
+    if (mode !== "draw-edge" || !edgeDraft.sourcePoint) return;
+    const pt = clientToPagePixel(e.clientX, e.clientY);
+    if (pt) setEdgeDraft((d) => ({ ...d, cursorPoint: pt }));
+  }
+
+  // Escape cancels in-flight edge.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setEdgeDraft({ sourcePoint: null, sourceEntityId: null, cursorPoint: null });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const cursor = mode === "mark-symbol" ? "crosshair" : mode === "draw-edge" ? "crosshair" : "default";
+
+  return (
+    <div
+      data-canvas-interactive={mode !== "select" || undefined}
+      style={{
+        position: "relative",
+        display: "inline-block",
+        maxWidth: "min(100%, 1600px)",
+        maxHeight: "78vh",
+        margin: "0 auto",
+      }}
+    >
+      <img
+        ref={imgRef}
+        src={pageFullUrl}
+        alt="P&ID page"
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          setNatural({ w: img.naturalWidth, h: img.naturalHeight });
+        }}
+        style={{
+          display: "block",
+          maxWidth: "min(100%, 1600px)",
+          maxHeight: "78vh",
+          objectFit: "contain",
+          borderRadius: 4,
+          boxShadow: dark
+            ? "0 2px 14px rgba(0,0,0,0.45)"
+            : "0 2px 12px rgba(20,22,42,0.18)",
+          userSelect: "none",
+          pointerEvents: "none",
+          imageRendering: "auto",
+          background: dark ? "#0E1024" : "#fff",
+        }}
+        draggable={false}
+      />
+      {natural && (
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${natural.w} ${natural.h}`}
+          preserveAspectRatio="none"
+          onClick={(e) => {
+            if (mode === "mark-symbol") onCanvasClickForMark(e);
+            else if (mode === "draw-edge") onCanvasClickForEdge(e);
+          }}
+          onMouseMove={onCanvasMouseMove}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            cursor,
+          }}
+        >
+          {/* Layer 1: model detections (translated to page-pixel coords) */}
+          {pageDetections.map((d, i) => {
+            const [x1, y1, x2, y2] = d.pageBbox;
+            const clickable = typeof d.entity_id === "string" && d.entity_id.length > 0;
+            const isSelected = clickable && d.entity_id === selectedId;
+            const sw = Math.max(1, natural.w / 500);
+            const stroke = isSelected ? STATUS_STROKE.user_added : STATUS_STROKE.model_found;
+            return (
+              <g key={`det-${i}`}>
+                <rect
+                  x={x1}
+                  y={y1}
+                  width={x2 - x1}
+                  height={y2 - y1}
+                  fill={isSelected ? "rgba(255,77,168,0.15)" : "none"}
+                  stroke={stroke}
+                  strokeWidth={isSelected ? sw * 2 : sw}
+                  strokeDasharray={isSelected ? undefined : `${sw * 2} ${sw * 2}`}
+                  style={{
+                    pointerEvents: clickable && mode === "select" ? "auto" : "none",
+                    cursor: clickable && mode === "select" ? "pointer" : cursor,
+                  }}
+                  onClick={
+                    clickable && mode === "select"
+                      ? (ev) => {
+                          ev.stopPropagation();
+                          onSelect(d.entity_id as string, d.entity_class);
+                        }
+                      : undefined
+                  }
+                >
+                  {clickable && <title>{d.label} — click to edit</title>}
+                </rect>
+                {d.label && (
+                  <text
+                    x={x1}
+                    y={y1 - sw * 2}
+                    fontSize={Math.max(8, natural.w / 120)}
+                    fontFamily="JetBrains Mono, monospace"
+                    fontWeight="700"
+                    fill={stroke}
+                    style={{ pointerEvents: "none" }}
+                  >
+                    {d.label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
+          {/* Layer 2: user annotations (Phase 3) */}
+          {userAnnotations.map((a, i) => {
+            const [x1, y1, x2, y2] = a.bbox;
+            const sw = Math.max(1, natural.w / 500);
+            const stroke = STATUS_STROKE[a.status];
+            const isSelected = a.entity_id === selectedId;
+            return (
+              <g key={`ann-${i}`}>
+                <rect
+                  x={x1}
+                  y={y1}
+                  width={x2 - x1}
+                  height={y2 - y1}
+                  fill={isSelected ? "rgba(255,77,168,0.18)" : "none"}
+                  stroke={stroke}
+                  strokeWidth={a.source === "user" ? sw * 1.8 : sw}
+                  strokeDasharray={a.status === "user_rejected" ? `${sw * 2} ${sw}` : undefined}
+                  style={{
+                    pointerEvents: mode === "select" ? "auto" : "none",
+                    cursor: mode === "select" ? "pointer" : cursor,
+                  }}
+                  onClick={
+                    mode === "select"
+                      ? (ev) => {
+                          ev.stopPropagation();
+                          onSelect(a.entity_id, a.entity_class);
+                        }
+                      : undefined
+                  }
+                >
+                  <title>
+                    {(a.tag ?? a.placeholder_tag ?? a.entity_id) + " — " + a.status}
+                  </title>
+                </rect>
+                <text
+                  x={x1}
+                  y={y1 - sw * 2}
+                  fontSize={Math.max(8, natural.w / 120)}
+                  fontFamily="JetBrains Mono, monospace"
+                  fontWeight="700"
+                  fill={stroke}
+                  style={{ pointerEvents: "none" }}
+                >
+                  {a.tag ?? a.placeholder_tag ?? a.sub_class ?? "?"}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Layer 3: edges (Phase 4) */}
+          {edges.map((e, i) => {
+            const style = LINE_STYLE[e.line_type];
+            const sw = Math.max(1.2, (natural.w / 800) * style.width);
+            const points = e.polyline.map((p) => p.join(",")).join(" ");
+            return (
+              <g key={`edge-${i}`}>
+                <polyline
+                  points={points}
+                  fill="none"
+                  stroke={style.color}
+                  strokeWidth={sw}
+                  strokeDasharray={style.dash === "0" ? undefined : style.dash}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ pointerEvents: "none" }}
+                />
+                {/* Arrowhead at terminus for process_pipe and signal lines */}
+                {(e.line_type === "process_pipe" || e.line_type === "signal") && e.polyline.length >= 2 && (
+                  <Arrowhead
+                    from={e.polyline[e.polyline.length - 2]}
+                    to={e.polyline[e.polyline.length - 1]}
+                    color={style.color}
+                    size={sw * 4}
+                  />
+                )}
+              </g>
+            );
+          })}
+
+          {/* Layer 4: in-flight edge preview (Phase 4) */}
+          {edgeDraft.sourcePoint && edgeDraft.cursorPoint && (
+            <g style={{ pointerEvents: "none" }}>
+              <line
+                x1={edgeDraft.sourcePoint[0]}
+                y1={edgeDraft.sourcePoint[1]}
+                x2={edgeDraft.cursorPoint[0]}
+                y2={edgeDraft.cursorPoint[1]}
+                stroke={LINE_STYLE[activeLineType].color}
+                strokeWidth={Math.max(1.2, (natural.w / 800) * 2)}
+                strokeDasharray={LINE_STYLE[activeLineType].dash === "0" ? "6 6" : LINE_STYLE[activeLineType].dash}
+                opacity={0.7}
+              />
+              <circle
+                cx={edgeDraft.sourcePoint[0]}
+                cy={edgeDraft.sourcePoint[1]}
+                r={Math.max(3, natural.w / 250)}
+                fill={LINE_STYLE[activeLineType].color}
+              />
+            </g>
+          )}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+function Arrowhead({
+  from,
+  to,
+  color,
+  size,
+}: {
+  from: [number, number];
+  to: [number, number];
+  color: string;
+  size: number;
+}) {
+  const dx = to[0] - from[0];
+  const dy = to[1] - from[1];
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const back = size;
+  const side = size * 0.55;
+  const baseX = to[0] - ux * back;
+  const baseY = to[1] - uy * back;
+  const leftX = baseX + uy * side;
+  const leftY = baseY - ux * side;
+  const rightX = baseX - uy * side;
+  const rightY = baseY + ux * side;
+  return (
+    <polygon
+      points={`${to[0]},${to[1]} ${leftX},${leftY} ${rightX},${rightY}`}
+      fill={color}
+    />
+  );
+}
+
 function TileWithOverlay({
   tileImageUrl,
   tileFilename,
@@ -440,9 +850,6 @@ function TileWithOverlay({
 }) {
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
 
-  // Only show bboxes whose `tile` field matches the visible tile filename.
-  // Without the filename we can't filter safely → render no overlays rather
-  // than misplaced ones.
   const tileDets = tileFilename
     ? detections.filter(
         (d) => Array.isArray(d.bbox) && d.bbox.length === 4 && d.tile === tileFilename,
@@ -475,11 +882,6 @@ function TileWithOverlay({
           boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
           userSelect: "none",
           pointerEvents: "none",
-          // `auto` lets the browser bicubic-downscale tiles when the viewport
-          // shows them below 1:1 — `pixelated` (prior value) used nearest-
-          // neighbor, which left thin engineering linework looking chunky at
-          // small zoom. Paired with a higher source-pixel-density tile (see
-          // `pdf_to_tiles.py:zoom`) so zoom-in stays sharp too.
           imageRendering: "auto",
         }}
         draggable={false}
@@ -493,16 +895,12 @@ function TileWithOverlay({
             inset: 0,
             width: "100%",
             height: "100%",
-            // pointerEvents handled per-rect — only entity-linked detections capture clicks
           }}
         >
           {tileDets.map((d, i) => {
             const [x1, y1, x2, y2] = d.bbox!;
             const clickable = typeof d.entity_id === "string" && d.entity_id.length > 0;
             const isSelected = clickable && d.entity_id === selectedId;
-            // Stroke widths in *image* pixels — the SVG viewBox is the image's
-            // natural size, so dividing by 400 gives a stroke that scales with
-            // image size (constant pixel weight on screen across zooms).
             const sw = Math.max(1, natural.w / 400);
             return (
               <g key={i}>
