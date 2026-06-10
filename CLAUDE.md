@@ -25,8 +25,8 @@ Evolving into a **human-in-the-loop digital twin platform** (multi-page graph + 
 
 Headline metric long-term: graph isomorphism (`networkx.is_isomorphic`) — measures topological correctness of the extracted graph vs human ground truth. Short-term (existing product): ≥90% recall on valve identification.
 
-**Current status:** Production webapp live at https://dev.qongsystems.com. v1-9 YOLO ONNX deployed today (2026-05-26).
-**Next phase:** Digital Twin MVP — Sprint 1 starts today on branch `feature/digital-twin` (not yet created; SCRUM-54).
+**Current status:** Production webapp live at https://dev.qongsystems.com. v1-10 YOLO ONNX (23 classes incl. flow direction) deployed 2026-06-05 — FEATURES #30. Spec A (D1, D1.5, D2, D3-4, D5) functionally complete and verified. `canonical_entities` DB index live (FEATURES #34) with 1,304 rows across 49 jobs, cross-job query surface at `/admin/entities` (FEATURES #36).
+**Next phase:** Graph-extraction v0 (digital twin) — design + implementation plan at `docs/superpowers/{specs,plans}/2026-06-0{5,6}-graph-extraction-*.md`. Branch `dt/main` is the long-running track; mid-cycle merges into `dev` for team visibility have been done (2026-06-10) — see Experimental track section below.
 
 ## Detail Index (read on demand)
 
@@ -116,6 +116,18 @@ If someone changes this by mistake, revert it immediately. The offline detector 
 
 **Exception:** YOLO inference is permitted in the webapp for bbox-surfacing only (canvas overlay via `Job.gpu_detections`). The CSV/deliverable pipeline still uses `extractor.py` (OpenRouter API). Do not import `detector.py` into `pipeline.py`. The new `webapp/inference.py` is the supported path for in-process inference (FEATURES #28).
 
+## Canonical entity storage — file-first, DB as read-index (FEATURES #34)
+
+**Source of truth for canonical entities is the on-disk `canonical.json`** in each job's output directory. Deliverable generators read it + merge `entity_overrides` at request time. This contract is intentional (no schema migrations on canonical evolution; easy debug).
+
+**The `canonical_entities` DB table is a denormalised read-index** for cross-job queries (admin dashboards, audits, duplicate-tag detection, "all valves of size 8 across customer X's jobs"). Never edit through this table — `entity_overrides` is still the canonical edit store. Mutate via:
+
+- **Online dual-write:** `pipeline_runner.py` calls `webapp.deliverables.canonical_db_index.sync_canonical_to_db(canonical, db)` after every `write_canonical_for_job`. Non-fatal — DB sync failure logs but doesn't roll back job "done" state.
+- **Backfill (idempotent):** `python -m webapp.scripts.index_canonical_to_db [--from-db|--dry-run|--job-id N]` populates from on-disk canonical.json for legacy jobs. Safe to re-run.
+- **Legacy canonical.json backfill:** `python -m webapp.scripts.backfill_canonical [--from-db]` re-emits canonical.json from CSVs for jobs predating the 2026-05-28 emitter — pair with the index script when a brand-new env is seeded from old data.
+
+Cross-job query surface: `/api/v1/admin/entities` (filter+paginate) and `/api/v1/admin/entities/aggregates` (totals + top-N sub_classes + top-N jobs + duplicate tags). Both `require_super_admin`. UI at `/admin/entities`.
+
 ## Environment
 
 - Python 3.12 server (Ubuntu 24.04), Python 3.9 local dev
@@ -139,6 +151,9 @@ If someone changes this by mistake, revert it immediately. The offline detector 
 - **`may26-ec2-ssm-role` has SSM + KMS perms but NOT S3 by default.** New buckets need a bucket policy granting `s3:GetObject` + `s3:ListBucket` to `arn:aws:iam::449901518037:role/may26-ec2-ssm-role`. Identity policy is shared with other workloads; prefer bucket policy.
 - **`pg_dumpall` includes `ALTER ROLE … WITH PASSWORD`** that overwrites the target's role password to the source value. After restoring into a fresh env with different SSM-generated creds, run `ALTER ROLE <user> WITH PASSWORD '<.env value>'` to re-sync, or webapp can't auth.
 - **`qongsystems.com` Cloudflare zone is "Full (Strict)" SSL mode.** Any new origin MUST present a valid TLS cert on 443 or CF returns 521. Copy the CF Origin Cert (`*.qongsystems.com` SAN) + key from QA via SSM; cert lives at `/etc/ssl/qong-{env}/origin.{crt,key}` on each host.
+- **`call<T>` in `webapp/frontend/src/studio/api.ts` throws `HttpError` (not plain `Error`) for any non-2xx** since FEATURES #33. So `if (e instanceof HttpError && e.status === 404)` branches work for GETs too — don't add new GET callers that catch the old plain `Error("HTTP NNN")` shape. `HttpError extends Error` so `err.message` consumers stay compatible.
+- **Polling a deploy: check Content-Type, not just HTTP status.** The SPA catch-all at `/` returns 200 even when the new API route isn't yet registered — the `text/html` response wins over a JSON 404. Use `application/json` (or another distinguishing signal) when waiting for a freshly-pushed route to land. Cost ~75s of confusion once (2026-06-10).
+- **Bbox click reliability on PidCanvas at default zoom:** detection rects are ~10×6 px on screen at 100% zoom, even when `pointer-events: auto` + onClick are wired correctly. Playwright itself fails to land the click reliably — had to dispatch `MouseEvent` via DOM during E2E verification. UX implication: consider an invisible padded hit-rect overlay or auto-zoom into the active tile if user friction surfaces.
 - **Duplicate-route shadow:** if you're editing a route in `webapp/main.py` and changes don't take effect, **grep `webapp/routers/*.py` for the same path first.** Router-includes register before `@app.get()` decorators in main, so a duplicate router-side route wins and main.py's version is silently shadowed. Cost ≥3 commits to find this once (FEATURES #24 tile-CORS bug — patches landed on the wrong handler). Drop a comment in main.py pointing at the canonical location instead of leaving a parallel definition.
 - **`FileResponse(..., headers=…)` silently drops custom headers for `image/*` media types.** Starlette quirk — `set_stat_headers` runs after `init_headers` and our custom headers don't land on the wire. Set headers post-construction via `resp.headers[k] = v` (which goes through `MutableHeaders` and updates `raw_headers` properly). `JSONResponse(..., headers=…)` is unaffected.
 - **`Vary: Origin` on CORS responses or CF caches the wrong thing.** Without it, the first non-CORS request locks a CORS-less response in CF cache for the whole TTL; subsequent LS requests inherit it. Always pair `Access-Control-Allow-Origin` with `Vary: Origin` on cacheable responses.
