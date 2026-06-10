@@ -41,7 +41,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -413,10 +413,14 @@ def patch_annotation(
 @router.delete(
     "/{job_id}/annotations/{entity_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    # NOTE: don't add a `responses={204: …}` entry — newer FastAPI asserts
-    # `is_body_allowed_for_status_code(204) == False` at route registration
-    # time when a declared response exists for a body-forbidden status.
-    # The 204 status is documented by `status_code=` alone.
+    # CRITICAL FastAPI quirk for 204:
+    # - DO NOT set a `-> None` return annotation. FastAPI derives a
+    #   response_field from it and trips
+    #   `assert is_body_allowed_for_status_code(204)` at registration time.
+    # - DO NOT add `responses={204: ...}` for the same reason.
+    # - Return a `Response(status_code=204)` from the function body explicitly.
+    # Set `response_class=Response` so FastAPI sticks with a no-body response.
+    response_class=Response,
     responses={
         404: {"description": "Job or annotation not found / not owned by caller"},
     },
@@ -426,7 +430,7 @@ def delete_annotation(
     entity_id: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
-) -> None:
+):
     job = _load_job_or_404(job_id, db, current_user)
     row = (
         db.query(UserAnnotation)
@@ -443,4 +447,4 @@ def delete_annotation(
         )
     db.delete(row)
     db.commit()
-    return None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
