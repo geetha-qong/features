@@ -14,6 +14,10 @@ from webapp.routers import api_v1_admin as api_v1_admin_router
 from webapp.routers import exports as exports_router
 from webapp.routers import entities as entities_router
 from webapp.routers import webhooks as webhooks_router
+# Studio marking + graph annotation surface (FEATURES #38)
+from webapp.routers import annotations as annotations_router
+from webapp.routers import edges as edges_router
+from webapp.routers import shortcuts as shortcuts_router
 import webapp.deliverables  # noqa: F401 — populates generator registry
 from webapp.config import JOB_OUTPUT_DIR, get_job_dir
 from webapp.watchdog import start_watchdog
@@ -118,6 +122,12 @@ app.include_router(api_v1_admin_router.router)
 app.include_router(exports_router.router)
 app.include_router(entities_router.router)
 app.include_router(webhooks_router.router)
+# Studio marking + graph annotation. Must be registered BEFORE the SPA catch-all
+# mount below — otherwise unauthenticated GETs return text/html (the SPA shell)
+# instead of the expected JSON 401, breaking deploy-polling and curl-driven QA.
+app.include_router(annotations_router.router)
+app.include_router(edges_router.router)
+app.include_router(shortcuts_router.router)
 
 
 @app.get("/healthz")

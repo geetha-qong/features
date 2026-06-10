@@ -6,7 +6,7 @@ silently ignores `timezone=True` (column behaves like TEXT) which is fine
 for local dev — only Postgres needs to enforce the TZ contract.
 """
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, Float, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, Float, ForeignKey, Index, JSON, UniqueConstraint
 from webapp.database import Base
 
 
@@ -29,6 +29,7 @@ class User(Base):
     tier = Column(String, default="trial")               # 'trial'|'starter'|'pro'|'enterprise'
     organization = Column(String, nullable=True)
     timezone = Column(String, nullable=True)             # IANA TZ name; NULL = use browser-detected (Intl.DateTimeFormat fallback)
+    shortcuts = Column(JSON, nullable=True)              # Studio keymap: { "v": {"action":"select-class","entity_class":"valve","sub_class":"BV"}, ... }
 
 
 class Job(Base):
@@ -320,4 +321,114 @@ class CanonicalEntityRow(Base):
 
     __table_args__ = (
         UniqueConstraint("job_id", "entity_id", name="uq_canonical_entities_je"),
+    )
+
+
+class UserAnnotation(Base):
+    """Workflow-state row for every symbol-level annotation event on a job.
+
+    Companion to (NOT replacement for) `model_corrections`:
+      - `model_corrections` captures bbox-level training signal (add / delete /
+        reclassify) consumed by the YOLO export script.
+      - `user_annotations` captures the higher-level workflow state — status
+        lifecycle, placeholder tag → user-filled tag, fields, source attribution.
+
+    When the user marks a previously-undetected entity, a row is inserted here
+    AND in `model_corrections` (linked via `linked_correction_id`). When the
+    user merely confirms an existing model detection, only a `user_annotations`
+    row is created (no training-relevant correction).
+
+    Status lifecycle:
+      - `model_found`     → row implicitly exists per detection rendered (not always materialized)
+      - `user_added`      → user drew/dropped a new bbox the model missed
+      - `user_confirmed`  → user clicked an existing model detection, no class change
+      - `user_rejected`   → user marked a model detection as wrong (false-positive)
+
+    Source-of-truth note: the on-disk `canonical.json` is unchanged by this
+    table. User-added marks become deliverable rows only after a separate
+    "promote pending marks" workflow (Phase 6). Reads that need user state
+    join through this table; reads that need pipeline state still go to
+    `canonical_entities`.
+
+    Unique on (job_id, entity_id) so each entity has at most one workflow row
+    per job. Re-marking same entity_id = UPDATE, not duplicate INSERT.
+    """
+    __tablename__ = "user_annotations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
+    entity_id = Column(String, nullable=False, index=True)        # UUID string — same id space as canonical_entities
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    source = Column(String, nullable=False)                       # 'model' | 'user'
+    status = Column(String, nullable=False)                       # 'model_found'|'user_added'|'user_confirmed'|'user_rejected'
+    entity_class = Column(String, nullable=False, index=True)     # 'valve'|'instrument'|'equipment'
+    sub_class = Column(String, nullable=True)                     # 'BV'|'FT'|'CV'|...
+    bbox = Column(JSON, nullable=False)                           # [x1,y1,x2,y2] page-pixel coords
+    sheet_number = Column(Integer, nullable=False, default=1)
+    placeholder_tag = Column(String, nullable=True)               # auto-assigned 'USER-VB-0042'
+    tag = Column(String, nullable=True)                           # user-filled later
+    fields_json = Column(JSON, nullable=True)                     # size, vendor, etc.
+    linked_detection_index = Column(Integer, nullable=True)       # index in Job.gpu_detections; -1 for fresh user marks
+    linked_correction_id = Column(Integer, ForeignKey("model_corrections.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "entity_id", name="uq_user_annotations_je"),
+        Index("ix_user_annotations_status", "status"),
+        Index("ix_user_annotations_source", "source"),
+    )
+
+
+class GraphCorrection(Base):
+    """User-added or user-edited edges on a job's process graph.
+
+    Companion to `canonical_graph.json` (file source of truth — produced by the
+    graph-extraction pipeline; see `docs/superpowers/specs/2026-06-05-graph-extraction-design.md`).
+    This DB table holds the user-edit layer:
+      - Edges added by users (`source='user'`).
+      - User confirmations of automatically-found edges (`status='user_confirmed'`).
+      - User rejections of false-positive edges (`status='user_rejected'`).
+
+    Extends the graph-extraction spec by supporting non-pipe line types:
+      - `process_pipe`  — solid line (default; what graph-extraction v0 ships)
+      - `instrument`    — instrument line (dashed)
+      - `signal`        — DCS/control signal (long-dashed with marker)
+      - `interlock`     — interlock line (dash-dot or labeled chain)
+
+    `group_id` groups related edges into one logical relationship:
+      - Control loops (FIC-101 → FT-101 + FIC-101 → FV-101) share a group_id.
+      - Interlocks spanning N edges share a group_id.
+      - Plain pipes leave it NULL.
+
+    `metadata_json` holds line-type-specific extras (signal: 4-20mA, fail-safe
+    direction; process pipe: pipe spec; instrument: tag of carried signal).
+    Schemaless on purpose — different line types need different attributes.
+    """
+    __tablename__ = "graph_corrections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
+    edge_id = Column(String, nullable=False, index=True)          # UUID string
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    source = Column(String, nullable=False)                       # 'opencv'|'llm_fallback'|'user'
+    status = Column(String, nullable=False)                       # 'model_found'|'user_added'|'user_confirmed'|'user_rejected'
+    line_type = Column(String, nullable=False, index=True)        # 'process_pipe'|'instrument'|'signal'|'interlock'
+    relation_type = Column(String, nullable=True)                 # 'carries'|'measures'|'controls'|'interlocks_with'|'loops_to'
+    source_entity_id = Column(String, nullable=False)             # FK-ish — joins to user_annotations.entity_id
+    target_entity_id = Column(String, nullable=False)
+    target_sheet_number = Column(Integer, nullable=True)          # set when target is on a different sheet (page-connector)
+    polyline = Column(JSON, nullable=False)                       # [[x,y],[x,y],...] page-pixel
+    sheet_number = Column(Integer, nullable=False, default=1)
+    group_id = Column(String, nullable=True, index=True)          # all edges in a loop/interlock share this
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    # NOTE: `line_type` + `group_id` indexes come from `index=True` on the columns
+    # themselves. Don't add explicit Index() entries here for those columns —
+    # SQLAlchemy auto-names them `ix_graph_corrections_<col>` and you'd hit a
+    # duplicate-name DDL error on Base.metadata.create_all.
+    __table_args__ = (
+        UniqueConstraint("job_id", "edge_id", name="uq_graph_corrections_je"),
     )

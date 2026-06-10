@@ -69,6 +69,9 @@ def run_migrations():
         ("users", "organization", "TEXT"),
         ("users", "timezone", "TEXT"),
         ("jobs", "original_filename", "TEXT"),
+        # Studio per-user shortcuts (FEATURES #38). Postgres JSONB; SQLite stores as TEXT.
+        # Schemaless on purpose — frontend validates structure before PATCH.
+        ("users", "shortcuts", "JSONB" if not _IS_SQLITE else "TEXT"),
     ]
     for table, column, col_type in new_columns:
         try:

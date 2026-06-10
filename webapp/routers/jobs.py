@@ -305,6 +305,48 @@ async def serve_tile(
     return resp
 
 
+@router.options("/jobs/{job_id}/page/{page_index}/full", include_in_schema=False)
+async def serve_page_full_preflight(job_id: int, page_index: int):  # noqa: ARG001
+    """CORS preflight for the full-page render endpoint.
+
+    Mirrors `serve_tile_preflight` — the Qong Studio canvas may load this
+    image cross-origin (same browser as the tile endpoint), so we ship the
+    same CORS allowance.
+    """
+    return JSONResponse({}, headers=_TILE_CORS_HEADERS)
+
+
+@router.get("/jobs/{job_id}/page/{page_index}/full")
+async def serve_page_full(
+    job_id: int,
+    page_index: int,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Serve the full-page render `page_{page_index}_full.png`.
+
+    Auth via `get_current_user`; foreign jobs return 404 (not 403) to avoid
+    revealing job existence (same IDOR pattern as entities.py / the other
+    job endpoints in this file). The PNG is written by `pdf_to_tiles.py`
+    at `<job_dir>/tmp/page_{page_idx}_full.png` (see pdf_to_tiles.py:44).
+
+    CORS headers mirror `serve_tile` so Qong Studio's canvas can use the
+    image cross-origin. Headers are set post-construction because
+    Starlette's `FileResponse(headers=…)` silently drops custom keys for
+    `image/*` media types.
+    """
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job or not _can_access_job(job, current_user):
+        raise HTTPException(status_code=404, detail="Job not found")
+    full_path = get_job_dir(job) / "tmp" / f"page_{page_index}_full.png"
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail="page render not found")
+    resp = FileResponse(str(full_path), media_type="image/png")
+    for k, v in _TILE_CORS_HEADERS.items():
+        resp.headers[k] = v
+    return resp
+
+
 @router.get("/jobs/{job_id}/download-inst-datasheets")
 async def download_inst_datasheets(
     job_id: int,
