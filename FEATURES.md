@@ -24,6 +24,102 @@
 
 ---
 
+## [2026-06-10] #34 — Dynamic PropertiesPanel + DB-backed canonical_entities index
+
+**Type:** feature | architecture
+**Stage:** webapp | webapp/frontend
+**Status:** shipped (deployed to dev.qongsystems.com 2026-06-10)
+
+**Why:** Two stacked moves toward production-grade studio output.
+
+1. **Frontend dynamism (Phase A):** The Studio right panel ("Selected Element"
+   + "Elements on Sheet") was rendering hard-coded prototype tags
+   (`PV-203` / `V-101` / `FT-101` / `P-101` / `E-104`) regardless of real
+   data, because `Studio.tsx` fell through to `DEMO_ELEMENT_DATA` whenever
+   `selectedId` wasn't in the prototype dictionary — which was *always* once
+   a real bbox was clicked. Effect: clicking a real bbox highlighted the
+   rect but never updated the panel; users reported "the click does
+   nothing" even though D1.5 entity matching was working correctly behind
+   the scenes.
+
+2. **Cross-job queryability (Phase B):** Until today, "find all valves of
+   size 8 across customer X's jobs" required parsing N `canonical.json`
+   files. Production dashboards / customer summaries / audit queries need
+   one SQL `WHERE` clause, not a Python loop.
+
+**What:**
+
+**Phase A — PropertiesPanel real-data wiring:**
+- `webapp/frontend/src/studio/buildElements.ts` (new) — derives a
+  `Record<entity_id, CanvasElement>` for the active tile, joining live
+  detections with canonical entities. Includes a `sub_class → human label`
+  table mirroring `api_v1.py:_yolo_class_to_canonical` so "valve_bv"
+  surfaces as "Ball Valve". Detections without `entity_id` (direction
+  arrows, page connectors) are excluded — non-editable.
+- `Studio.tsx` — fetches `valve_list` + `instrument_index` entities at
+  mount, builds an `entityIndex` Map keyed by UUID, memoises a per-tile
+  `realElements` derivation. `panelElements` is real when present,
+  `DEMO_ELEMENT_DATA` otherwise. When real data first lands, `selectedId`
+  auto-jumps from `"PV-203"` to the first real entity_id on the tile.
+- `PropertiesPanel.tsx` — switched to `Object.entries(elements)` so row
+  click + isSel checks use the dictionary key (entity_id), not `el.tag`.
+  `onSelect` contract now propagates `entityClass` so the drawer opens
+  to the right deliverable.
+
+**Phase B — `canonical_entities` DB table:**
+- `webapp/models.py` — `CanonicalEntityRow` ORM. Mirrors `CanonicalEntity`
+  1-for-1 plus `canonical_schema_version` for cross-version filtering.
+  Unique on `(job_id, entity_id)`; indexed on `entity_class` + `tag` for
+  the common "find all valves named X" query. Created automatically on
+  startup via `Base.metadata.create_all(engine)`.
+- `webapp/deliverables/canonical_db_index.py` — `sync_canonical_to_db()`
+  per-job idempotent upsert + stale-row delete (re-emit truth wins).
+  Lives in its own module to keep `pipeline_emitter.py`'s "pure function
+  — no DB, no network" contract intact.
+- `webapp/pipeline_runner.py` — dual-writes after canonical.json emit.
+  Non-fatal: DB sync failure logs but doesn't roll back job "done" state.
+- `webapp/scripts/index_canonical_to_db.py` — backfill CLI for legacy
+  canonical files. Same idempotent path; safe to re-run.
+
+**Source of truth remains the on-disk `canonical.json`.** The DB table is
+a denormalised read-index — never the edit target. User edits still live
+in `entity_overrides` and merge at request time via the deliverables API.
+Deliverable generators are unchanged.
+
+**Result:**
+
+| Metric | Value |
+|---|---|
+| Legacy GCP-era paths migrated (jobs table) | 36 |
+| Canonical.json files backfilled total | 49 |
+| canonical_entities rows indexed | **1,304** (679 valves + 625 instruments) |
+| Backfill errors | 0 |
+| Cross-job query verified | `SELECT … WHERE tag LIKE '%32047%'` → job 38 + job 43 |
+| Top-5 jobs by valve count (instant) | 6 (51), 3 (50), 5 (49), 14 (46), 19 (41) |
+| Frontend tests | 21/21 pass |
+
+**Notes:**
+
+- **Surprise sub_class diversity:** the DB shows VB (205), BV (154), VF
+  (90), DB (69), BF (68), VD (17), GL (14), CK (14), PV (13), SB (10) as
+  the most common valve sub_classes. Only BV/BF/GT/CK/DB/GL/CV/NCBV/
+  PNEUCTRL/RELIEF_SAFETY/3WAY_RELIEF are in the
+  `VALVE_SUB_CLASS_LABELS` map (FEATURES #31 mirror) — the others
+  (VB, VF, VD, PV, SB) come from CSV-side customer conventions, not the
+  YOLO vocabulary. Currently render as "Valve (VB)" etc. — fine for now;
+  expand the map as customer feedback rolls in.
+- **Duplicate tag observation:** `61-BV-32047` exists in both job 38 and
+  job 43. Worth an audit pass — might be the same physical valve
+  re-extracted, or a legitimate duplicate across drawings. Cross-job
+  audit queries like this are exactly the use case the DB index unlocks.
+- **The `Job.output_csv_path` migration (`/www/wwwroot/qong_poc/` →
+  `/app/job_outputs/`)** was a one-time SQL UPDATE on 36 jobs that had
+  survived the AWS migration (FEATURES #21) with stale GCP paths. Memory
+  rule "no autonomous job mutation" still stands — this was an
+  explicit user authorisation ("update all the jobs").
+
+---
+
 ## [2026-06-10] #33 — Backfill canonical.json for legacy jobs + drawer 404→notFound routing fix
 
 **Type:** bugfix
