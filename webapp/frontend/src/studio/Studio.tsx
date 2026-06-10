@@ -166,6 +166,21 @@ export default function Studio({ project, userName, onBack }: Props) {
   ];
 
   function onOpenDatasheet() {
+    // If the user hasn't picked a real bbox yet, selectedId is still the
+    // prototype default ("PV-203" etc.). Auto-select the first detection
+    // that the D1.5 matcher attached an entity_id to, so the drawer opens
+    // on real data instead of erroring out on a prototype tag. Falls
+    // through to the prototype if there are no real detections (e.g.
+    // brand-new upload still processing) — drawer's "pick an entity"
+    // empty state then takes over.
+    if (DEMO_ELEMENT_DATA[selectedId]) {
+      const firstReal = detResp?.detections?.find(
+        (d) => d.entity_id && d.entity_class,
+      );
+      if (firstReal?.entity_id) {
+        handleSelect(firstReal.entity_id, firstReal.entity_class);
+      }
+    }
     setDatasheetOpen(true);
   }
 

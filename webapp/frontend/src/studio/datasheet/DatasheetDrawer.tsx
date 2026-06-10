@@ -141,7 +141,16 @@ export default function DatasheetDrawer({
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [unlocked, setUnlocked] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
+  // Two distinct empty states, formerly conflated under `notFound`:
+  //   * notFound       → API returned 200 + a real entity list, but the current
+  //                       `entityId` isn't in it (wrong deliverable type, click
+  //                       on a non-canonical detection, or the prototype-tag
+  //                       default before any real selection).
+  //   * legacyJobNoCanonical → API returned 404 (`canonical.json` missing).
+  //                       The whole job has no editable entities.
+  // Different copy for each so users aren't told a job is legacy when it isn't.
   const [notFound, setNotFound] = useState(false);
+  const [legacyJobNoCanonical, setLegacyJobNoCanonical] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ kind: "ok" | "error"; msg: string } | null>(null);
@@ -157,6 +166,7 @@ export default function DatasheetDrawer({
     const myReq = ++reqIdRef.current;
     setLoading(true);
     setNotFound(false);
+    setLegacyJobNoCanonical(false);
     setFetchError(null);
     try {
       const r = await getEntities(jobId, deliverableType);
@@ -179,11 +189,12 @@ export default function DatasheetDrawer({
     } catch (e) {
       if (myReq !== reqIdRef.current) return;
       const msg = e instanceof Error ? e.message : "Failed to load entity";
-      // 404 from the list endpoint = job/canonical missing, treated as
-      // "not found" UX. Other errors keep the drawer mounted so the user
-      // can retry without losing context.
+      // 404 from the list endpoint = job has no canonical.json (legacy job
+      // pre-2026-05-28). Distinct from "entity not in canonical" so the UX
+      // can tell the user to re-run the job, not to pick a different bbox.
+      // Other errors keep the drawer mounted so the user can retry.
       if (e instanceof HttpError && e.status === 404) {
-        setNotFound(true);
+        setLegacyJobNoCanonical(true);
       } else {
         setFetchError(msg);
       }
@@ -412,7 +423,7 @@ export default function DatasheetDrawer({
             </div>
           )}
 
-          {isDeliverableSupported && !loading && !fetchError && notFound && (
+          {isDeliverableSupported && !loading && !fetchError && legacyJobNoCanonical && (
             <div className="ds-empty-state" style={{ padding: 32, textAlign: "center" }}>
               <p style={{ fontSize: 14, color: "var(--fg-2)" }}>
                 <strong>No editable entities for this job.</strong>
@@ -421,9 +432,24 @@ export default function DatasheetDrawer({
                 Most likely this is a legacy job processed before the
                 editable-entities feature shipped (2026-05-28). Re-run the job
                 from the dashboard to regenerate <code>canonical.json</code>,
-                or open a newer job. Other possibility: this detection's
-                entity belongs to a different deliverable type than the
-                current selection.
+                or open a newer job.
+              </p>
+              <button className="btn btn-secondary btn-sm" onClick={onClose} style={{ marginTop: 16 }}>
+                Close
+              </button>
+            </div>
+          )}
+
+          {isDeliverableSupported && !loading && !fetchError && notFound && !legacyJobNoCanonical && (
+            <div className="ds-empty-state" style={{ padding: 32, textAlign: "center" }}>
+              <p style={{ fontSize: 14, color: "var(--fg-2)" }}>
+                <strong>Pick an entity to view its fields.</strong>
+              </p>
+              <p style={{ fontSize: 12, color: "var(--fg-3)", marginTop: 8 }}>
+                <code>{entityId}</code> isn&rsquo;t in the {deliverableType?.replace(/_/g, " ")} for this
+                job. Click a highlighted bounding box on the canvas, or switch
+                the deliverable type above if you&rsquo;re looking for a
+                different class of entity (valve / instrument / equipment).
               </p>
               <button className="btn btn-secondary btn-sm" onClick={onClose} style={{ marginTop: 16 }}>
                 Close
