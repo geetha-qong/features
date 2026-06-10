@@ -105,3 +105,31 @@ export interface CustomerTemplateOverridePayload {
   column_order: number | null;
   hidden: boolean;
 }
+
+// Cross-job entity index (FEATURES #34/#35).
+export interface CanonicalEntityRowResp {
+  job_id: number;
+  entity_id: string;
+  entity_class: string;            // 'valve' | 'instrument' | 'equipment'
+  sub_class: string | null;
+  tag: string | null;
+  pid_number: string;
+  sheet_number: number;
+  fields: Record<string, unknown>;
+  updated_at: string | null;       // ISO8601 UTC
+}
+
+export interface EntitySearchResp {
+  total: number;
+  returned: number;
+  offset: number;
+  limit: number;
+  rows: CanonicalEntityRowResp[];
+}
+
+export interface EntityAggregates {
+  total_rows: number;
+  by_class: Record<string, number>;
+  top_valve_sub_classes: Array<{ sub_class: string; count: number }>;
+  top_jobs_by_valve_count: Array<{ job_id: number; count: number }>;
+}

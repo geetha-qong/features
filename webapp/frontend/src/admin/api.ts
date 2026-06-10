@@ -11,6 +11,8 @@ import type {
   CustomerTemplateOverridePayload,
   CustomerTemplateResponse,
   DashboardKpis,
+  EntityAggregates,
+  EntitySearchResp,
   FeedbackItem,
   FeedbackStatus,
   LabelStudioResponse,
@@ -144,5 +146,28 @@ export const resetCustomerTemplate = (slug: string) =>
     "DELETE",
     `/api/v1/admin/customer-templates/${encodeURIComponent(slug)}/overrides`,
   );
+
+// Entities (FEATURES #35 — cross-job canonical_entities index)
+export interface EntitySearchFilters {
+  entity_class?: string;
+  sub_class?: string;
+  tag_contains?: string;
+  job_id?: number;
+  limit?: number;
+  offset?: number;
+}
+export const getEntityAggregates = () =>
+  call<EntityAggregates>("GET", "/api/v1/admin/entities/aggregates");
+export const searchEntities = (f: EntitySearchFilters = {}) => {
+  const qs = new URLSearchParams();
+  if (f.entity_class) qs.set("entity_class", f.entity_class);
+  if (f.sub_class) qs.set("sub_class", f.sub_class);
+  if (f.tag_contains) qs.set("tag_contains", f.tag_contains);
+  if (f.job_id !== undefined) qs.set("job_id", String(f.job_id));
+  if (f.limit !== undefined) qs.set("limit", String(f.limit));
+  if (f.offset !== undefined) qs.set("offset", String(f.offset));
+  const q = qs.toString();
+  return call<EntitySearchResp>("GET", `/api/v1/admin/entities${q ? "?" + q : ""}`);
+};
 
 export { HttpError };

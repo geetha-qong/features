@@ -3,6 +3,7 @@ import {
   Activity,
   Columns3,
   CreditCard,
+  Database,
   GitBranch,
   Inbox,
   LayoutDashboard,
@@ -19,6 +20,7 @@ const NAV: Array<{ to: string; label: string; icon: typeof Users }> = [
   { to: "/admin/plans", label: "Plans", icon: Tags },
   { to: "/admin/custom-columns", label: "Custom Columns", icon: Columns3 },
   { to: "/admin/label-studio", label: "Label Studio", icon: GitBranch },
+  { to: "/admin/entities", label: "Entity Index", icon: Database },
 ];
 
 export default function AdminLayout() {
