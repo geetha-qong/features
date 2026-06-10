@@ -24,6 +24,40 @@
 
 ---
 
+## [2026-06-10] #37 — Cross-job duplicate-tag audit surface
+
+**Type:** feature
+**Stage:** webapp | webapp/frontend
+**Status:** shipped (deployed to dev.qongsystems.com 2026-06-10)
+
+**Why:** FEATURES #34 unblocked cross-job queries; FEATURES #36 made them clickable. But a user still had to know what tag to search for. Promoting "tags appearing in ≥2 jobs" to a top-level audit list turns the "what's duplicated across our corpus?" question from "you'd need to write SQL" into one glance at the page.
+
+**What:**
+- `/api/v1/admin/entities/aggregates` extended with `duplicate_tags_across_jobs`: top-15 tags by `(job_count desc, row_count desc)` where `COUNT(DISTINCT job_id) ≥ 2`. SQL `GROUP BY tag HAVING COUNT(DISTINCT job_id) >= 2`.
+- `AdminEntities.tsx`: new section between the top-N grid and the search filter — title with `AlertTriangle` icon, table of tag · job_count · total_rows. Clicking a row fills the tag search box and resets other filters, dropping the user straight into the table view for that tag.
+- `types.ts`: field marked optional so older deploys (without the field) don't break the UI.
+
+**Result (Playwright-verified live on dev):**
+
+15 duplicate tags surfaced automatically — the 32047 audit from FEATURES #35 is now one of many:
+
+| Tag | Job count | Total rows |
+|---|---|---|
+| 62-BF-151014 | 3 | 3 |
+| 62-BF-151031 | 3 | 3 |
+| 62-DB-151042 | 3 | 3 |
+| 61-BV-149128, 149131, 32047, 149130, 32049, 32050, 32052, 32053, 32054, 32055, 32048 | 2 each | 2 each |
+| 61-CK-149165 | 2 | 2 |
+
+**Three tags appearing in 3 jobs each** is a strong "same drawing re-extracted three times" signal — worth chasing operationally (wasted compute, deliverable consistency).
+
+**Notes:**
+- Capped at 15 server-side to keep payload bounded; full inspection via `?tag_contains=<tag>` (the click handler already wires this).
+- Sorted by `job_count desc, row_count desc` because the spread-across-many-jobs case is the strongest audit signal.
+- Screenshot: `themes/screenshots/admin-entities-duplicates.png`.
+
+---
+
 ## [2026-06-10] #36 — Admin Entity Index UI (visual surface for cross-job queries)
 
 **Type:** feature
