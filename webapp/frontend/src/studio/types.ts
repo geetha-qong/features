@@ -13,6 +13,11 @@ export interface CanvasElement {
   type: string;
   confidence: number;
   lines: string[];
+  // Canonical entity_class ("valve" | "instrument" | "equipment"), present
+  // when this element was built from real backend data. Drives the
+  // DatasheetDrawer's initial deliverable type when a row is clicked.
+  // Optional so the prototype DEMO_ELEMENT_DATA continues to compile.
+  entityClass?: string;
 }
 
 export interface SessionEvent {

@@ -17,7 +17,11 @@ import type { CanvasElement, SessionEvent } from "./types";
 interface Props {
   elements: Record<string, CanvasElement>;
   selectedId: string;
-  onSelect: (tag: string) => void;
+  // `id` is the dictionary key in `elements` — either a prototype tag
+  // ("PV-203") for the demo fallback or a real entity_id UUID for live
+  // backend data. `entityClass` propagates from CanvasElement.entityClass
+  // when present so the drawer picks the right deliverable type.
+  onSelect: (id: string, entityClass?: string) => void;
   sessionEvents: SessionEvent[];
   hasDatasheet: boolean;
   onOpenDatasheet: () => void;
@@ -47,7 +51,10 @@ export default function PropertiesPanel({
 }: Props) {
   const sel = elements[selectedId] || Object.values(elements)[0];
   const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
-  const detected = Object.values(elements);
+  // [key, element] pairs — key is the dictionary key (entity_id UUID for
+  // real data, prototype tag for demo fallback). Used for row click + isSel
+  // so prototype + real selection behave the same way.
+  const detected = Object.entries(elements);
 
   return (
     <aside className="props-col">
@@ -101,15 +108,15 @@ export default function PropertiesPanel({
           <span className="props-sub">{detected.length} detected</span>
         </div>
         <div className="elements-list">
-          {detected.map((el) => {
-            const isSel = el.tag === selectedId;
+          {detected.map(([key, el]) => {
+            const isSel = key === selectedId;
             const color = confColor(el.confidence);
             return (
               <div
-                key={el.tag}
+                key={key}
                 className={`element-row ${isSel ? "selected" : ""}`}
-                onClick={() => onSelect(el.tag)}
-                data-comment-anchor={`element-row-${el.tag}`}
+                onClick={() => onSelect(key, el.entityClass)}
+                data-comment-anchor={`element-row-${key}`}
               >
                 <div className="el-ic">{iconFor(el.type)}</div>
                 <div className="el-text">

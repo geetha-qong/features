@@ -9,7 +9,15 @@ import SheetRail from "./SheetRail";
 import StudioFoot from "./StudioFoot";
 import StudioTopBar from "./StudioTopBar";
 import { buildSheets } from "./buildSheets";
-import { getJobDetections, getJobSheets, type JobDetectionsResp, type JobSheetsResp } from "./api";
+import {
+  getEntities,
+  getJobDetections,
+  getJobSheets,
+  type EntitiesResponse,
+  type JobDetectionsResp,
+  type JobSheetsResp,
+} from "./api";
+import { buildElementsForTile, buildEntityIndex } from "./buildElements";
 import type { CanvasElement, ProjectLike, SessionEvent } from "./types";
 
 /**
@@ -98,6 +106,13 @@ export default function Studio({ project, userName, onBack }: Props) {
   // uploads still being processed).
   const [sheetsResp, setSheetsResp] = useState<JobSheetsResp | null>(null);
   const [detResp, setDetResp] = useState<JobDetectionsResp | null>(null);
+  // Canonical entities by deliverable type. Fetched once per job — feeds the
+  // dynamic right-panel rows so clicking a real bbox surfaces the matched
+  // tag / sub_class / confidence instead of the DEMO_ELEMENT_DATA stand-in.
+  // Two calls (one per deliverable type) — equipment_list is added when
+  // equipment detections start landing in canonical, currently always empty.
+  const [valveEntitiesResp, setValveEntitiesResp] = useState<EntitiesResponse | null>(null);
+  const [instEntitiesResp, setInstEntitiesResp] = useState<EntitiesResponse | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +129,22 @@ export default function Studio({ project, userName, onBack }: Props) {
       })
       .catch(() => {
         if (!cancelled) setDetResp(null);
+      });
+    // Best-effort entity fetches — 404 just means the job has no canonical
+    // (legacy, brand new) and the panel will fall through to prototype.
+    getEntities(project.id, "valve_list")
+      .then((r) => {
+        if (!cancelled) setValveEntitiesResp(r);
+      })
+      .catch(() => {
+        if (!cancelled) setValveEntitiesResp(null);
+      });
+    getEntities(project.id, "instrument_index")
+      .then((r) => {
+        if (!cancelled) setInstEntitiesResp(r);
+      })
+      .catch(() => {
+        if (!cancelled) setInstEntitiesResp(null);
       });
     return () => {
       cancelled = true;
@@ -156,8 +187,37 @@ export default function Studio({ project, userName, onBack }: Props) {
         }
       : sheets[0]);
   const totalIssues = sheets.reduce((s, x) => s + (x.issues || 0), 0);
-  const sel = DEMO_ELEMENT_DATA[selectedId] || DEMO_ELEMENT_DATA["PV-203"];
-  const hasDatasheet = DATASHEET_TYPES.has(sel.type);
+
+  // ── Dynamic element panel data (Phase A of "make it more dynamic") ─────
+  // entityIndex: every canonical entity for this job, keyed by entity_id.
+  // realElements: rows for the active tile only, built from live detections
+  //               that have an entity_id (i.e. matched by the D1.5 matcher).
+  // panelElements: real when present, prototype fallback otherwise — keeps
+  //               the studio renderable on brand-new uploads / legacy jobs.
+  const entityIndex = useMemo(
+    () => buildEntityIndex([valveEntitiesResp, instEntitiesResp]),
+    [valveEntitiesResp, instEntitiesResp],
+  );
+  const realElements = useMemo(
+    () => buildElementsForTile(detResp?.detections, entityIndex, activeTileFilename),
+    [detResp, entityIndex, activeTileFilename],
+  );
+  const hasRealElements = Object.keys(realElements).length > 0;
+  const panelElements = hasRealElements ? realElements : DEMO_ELEMENT_DATA;
+
+  // When real data first lands and the user hasn't picked anything yet,
+  // jump selectedId to the first matched detection on the active tile so
+  // the right panel shows live data immediately (instead of PV-203 demo).
+  useEffect(() => {
+    if (!hasRealElements) return;
+    if (!DEMO_ELEMENT_DATA[selectedId]) return; // user already picked something real
+    const [firstId, firstEl] = Object.entries(realElements)[0];
+    setSelectedId(firstId);
+    setSelectedClass(firstEl.entityClass);
+  }, [hasRealElements, realElements, selectedId]);
+
+  const sel = panelElements[selectedId] || Object.values(panelElements)[0];
+  const hasDatasheet = DATASHEET_TYPES.has(sel.type) || sel.entityClass === "valve" || sel.entityClass === "instrument";
 
   const sessionEvents: SessionEvent[] = [
     { who: userName, when: "just now", what: "selected PV-203" },
@@ -275,9 +335,9 @@ export default function Studio({ project, userName, onBack }: Props) {
         </section>
 
         <PropertiesPanel
-          elements={DEMO_ELEMENT_DATA}
+          elements={panelElements}
           selectedId={selectedId}
-          onSelect={(id) => handleSelect(id, undefined)}
+          onSelect={handleSelect}
           sessionEvents={sessionEvents}
           hasDatasheet={hasDatasheet}
           onOpenDatasheet={onOpenDatasheet}
