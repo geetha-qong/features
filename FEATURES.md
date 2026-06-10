@@ -161,6 +161,111 @@ Detections with a canonical-class peer (valve, instrument, equipment) now get a 
 - **Under-represented classes** (`connector_in` 55 instances, `connector_out` 73, `valve_3way_relief` 114, `inst_local_panel` 113) — per-class mAP likely weaker; surface in eval and either annotate more in LS or use class weights on next retrain.
 - **GPU spot quota = 0** in account 449901518037 for "All G and VT Spot Instance Requests". Worth filing a quota increase ahead of v1-11 to halve retrain cost (~$0.49/hr spot vs $1.21/hr on-demand). 24-48h approval.
 - **Training script lessons logged** (commit `89be82c` on `dt/main`): (1) Ultralytics resolves `path:` in data.yaml against its own settings dir not the yaml file location — always use absolute paths; (2) `cmd 2>&1 | tail -N` masks `cmd`'s non-zero exit without `set -o pipefail`; (3) `torch.onnx.export` needs `onnxscript` (not just `onnx`) on PyTorch 2.7+ — add to bootstrap pip install.
+---
+
+## [2026-06-05] #30-DT — [DT] Experimental track scaffolded + v1-10 YOLO retrain kicked off (23 classes incl. direction arrows)
+
+> **Numbering note (added at merge):** Both `dev` and `dt/main` independently allocated `#30` on 2026-06-05 — `dev`'s entry above documents the *shipped deployment*, this one (originally `#30` on `dt/main`) documents the *scaffold + training kickoff* that preceded it. Renumbered to `#30-DT` during the `dt/main → dev` merge on 2026-06-10 so both histories survive intact. See also FEATURES #30.
+
+**Type:** infra, model-swap, decision
+**Stage:** training | infra
+**Status:** in-flight (training EC2 launched, ~3h remaining at write time)
+
+**Why:** Team interns ramping up on the production codebase at their own pace,
+while the lead races ahead with Claude Code to ship graph-extraction v0 and a
+new direction-aware YOLO model. Separating the work onto `dt/*` branches +
+`experiments/digital_twin/` folder keeps `dev` clean for the team and lets the
+lead iterate without merge pressure. Same repo (shared data, shared memory)
+but separate working surface. Handover via one PR `dt/main → dev` when v0
+lands.
+
+User had also added 6 new direction labels in LS over the past week
+(arrow_up/down/left/right + connector_in/out) that need to land in the
+production model so we can build a flow-direction-aware MultiDiGraph in
+graph-extraction v0 (design doc:
+`docs/superpowers/specs/2026-06-05-graph-extraction-design.md`).
+
+**What:**
+
+1. **Experimental track:**
+   - New branch `dt/main` off `dev` (commit `d77164b`).
+   - Folder `experiments/digital_twin/` with `pyproject.toml`,
+     `notebooks/`, `backend/`, `data/` (gitignored), `docs/`, `scripts/`.
+   - CLAUDE.md gets a new `## Experimental track` section.
+   - `deploy-dev.yml` only fires on `branches: [dev]` so `dt/*` pushes are
+     silent — zero deploy noise.
+
+2. **LS schema hygiene (script `scripts/fix_ls_typos.py`):**
+   - Renamed `valve_3way_releif` → `valve_3way_relief` (3 annotation results in
+     1 annotation, project 19).
+   - Renamed `valve_pnuectrl` → `valve_pneuctrl` (14 annotations in project 25
+     + 28 project label_configs). Idempotent verification pass at end.
+
+3. **v1-10 dataset (script `scripts/export_ls_dataset.py`):**
+   - 23-class schema (9 valves + 8 instruments + 6 direction).
+   - 605 train + 62 val images, 24,428 bbox annotations exported in YOLO
+     format with global class IDs across all 33 dev-LS projects.
+   - Handles both `/data/upload/` LS-served images and
+     `https://dev.qongsystems.com/jobs/N/tiles/...` webapp-served images.
+   - Auto-refreshes the LS JWT access token on 401.
+   - Output (gitignored): `experiments/digital_twin/data/dataset_v1-10/`,
+     258 MB. Also uploaded to
+     `s3://qong-pid-archive-2026-06-02/training/v1-10/dataset_v1-10.tar`.
+
+4. **Training infrastructure:**
+   - Bucket policy on `qong-pid-archive-2026-06-02` extended with a
+     `PutObject` grant scoped to `training/*` prefix for the existing
+     `may26-ec2-ssm-role` (read-only before).
+   - GPU spot quota = 0 in this account; **falling back to on-demand**
+     (~$1.21/hr g5.2xlarge vs planned ~$0.49/hr g5.xlarge spot).
+   - Capacity churn pushed instance from g5.xlarge → g5.2xlarge and from
+     ap-south-1a → 1b. Same A10G GPU, larger CPU/RAM. Net effect: slightly
+     higher cost, marginally better dataloader headroom.
+   - Instance `i-0ec47e4aaa9ad364b` launched on-demand with
+     `--instance-initiated-shutdown-behavior=terminate`. Bootstrap user-data
+     installs ultralytics 8.3.40 + onnx; main training script
+     (`scripts/ec2_train_v1-10.sh`) is fetched from S3 and run detached via
+     `nohup`. Auto-terminates on completion.
+
+5. **Training run plan (yolov8s, 100 epochs, imgsz=640, batch=32, A10G):**
+   - 1-epoch yolov8n smoke first as fail-fast.
+   - Patience=20, save_period=10.
+   - Background log uploader pushes `training.log` + `results.csv` +
+     `results.png` to S3 every 5 min.
+   - ONNX export with opset=12, simplified.
+   - All artefacts → `s3://qong-pid-archive-.../training/v1-10/`.
+   - Hard timeout 8h on the yolo command bounds worst-case cost ≈ $10.
+
+**Result (target):**
+- v1-10 mAP50 ≥ 0.40 (matching v1-9 baseline) on the 17 existing valve/
+  instrument classes, plus ≥0.30 on the 4 strong arrow classes
+  (350-470 instances each).
+- `connector_in` (55 instances) and `connector_out` (73) likely to be
+  weaker — flagged for v1-11 with more annotation work.
+- Single ONNX model (no two-pass inference) — drop-in replacement for
+  v1-9 in `webapp/inference.py` after CLASS_NAMES update.
+
+**Result (actual):** TBD. See `experiments/digital_twin/docs/v1-10-training-handoff.md`
+for status-check commands and post-training promotion flow.
+
+**Notes:**
+- **`Pump/Dwg Pump`** class name has slash + space + caps. YOLO tolerates it
+  in `data.yaml` as a string, but if it ever needs to flow through filesystem
+  paths we'd have to normalise.
+- **Class imbalance**: 6365 inst_field vs 55 connector_in (~115×). First
+  training pass uses default ultralytics class weights; if minority classes
+  underperform we'll switch to inverse-frequency weights in v1-11.
+- **GPU spot quota** is 0 in account 449901518037 ("All G and VT Spot
+  Instance Requests"). Worth filing a quota increase ahead of v1-11 to halve
+  retrain cost. Takes 24-48h to approve.
+- **Auto-terminate semantics**: instance was launched with
+  `--instance-initiated-shutdown-behavior=terminate`, so the training
+  script's final `sudo shutdown -h now` causes the EC2 to terminate (not
+  stop). Belt + braces.
+- The full Spec A goal had v1-10 only adding direction arrows. We expanded
+  to a unified 23-class single-model retrain because LS already has 24K
+  valve/instrument annotations and a single model is cleaner than two-pass.
+  Lead authorised the scope expansion mid-session.
 
 ---
 
