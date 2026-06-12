@@ -4,10 +4,17 @@ import {
   Boxes,
   Check,
   CircleDot,
+  ClipboardList,
+  Download,
+  FileSpreadsheet,
   FileText,
+  GitMerge,
   GitPullRequest,
+  Grid3x3,
+  ListChecks,
   LogIn,
   LogOut,
+  PanelRightClose,
   Pencil,
   Radio,
   Settings2,
@@ -25,6 +32,8 @@ interface Props {
   sessionEvents: SessionEvent[];
   hasDatasheet: boolean;
   onOpenDatasheet: () => void;
+  onCollapse: () => void;
+  onExportDeliverable?: (type: string) => void;
 }
 
 function iconFor(type: string) {
@@ -41,6 +50,15 @@ function confColor(conf: number): string {
   return "var(--error)";
 }
 
+const DELIVERABLES = [
+  { type: "instrument_index", name: "Instrument Index", sub: "tags",      Icon: ListChecks },
+  { type: "datasheet",        name: "Datasheets",       sub: "sheets",    Icon: FileText },
+  { type: "io_list",          name: "I/O List",         sub: "points",    Icon: FileSpreadsheet },
+  { type: "valve_list",       name: "Valve List",       sub: "valves",    Icon: GitMerge },
+  { type: "control_narrative",name: "Control Narrative",sub: "draft",     Icon: ClipboardList },
+  { type: "cause_effect",     name: "Cause & Effect",   sub: "matrix",    Icon: Grid3x3 },
+];
+
 export default function PropertiesPanel({
   elements,
   selectedId,
@@ -48,18 +66,28 @@ export default function PropertiesPanel({
   sessionEvents,
   hasDatasheet,
   onOpenDatasheet,
+  onCollapse,
+  onExportDeliverable,
 }: Props) {
   const sel = elements[selectedId] || Object.values(elements)[0];
   const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
-  // [key, element] pairs — key is the dictionary key (entity_id UUID for
-  // real data, prototype tag for demo fallback). Used for row click + isSel
-  // so prototype + real selection behave the same way.
   const detected = Object.entries(elements);
 
   return (
     <aside className="props-col">
       <div className="props-section">
-        <div className="props-head">Selected Element</div>
+        <div className="props-head">
+          <span>Selected Element</span>
+          <button
+            type="button"
+            className="props-collapse"
+            onClick={onCollapse}
+            title="Hide details panel"
+            aria-label="Hide details panel"
+          >
+            <PanelRightClose size={15} strokeWidth={1.6} />
+          </button>
+        </div>
         <div className="prop-card">
           <div className="prop-head">
             <span className="prop-tag">{sel.tag}</span>
@@ -134,6 +162,28 @@ export default function PropertiesPanel({
       </div>
 
       <div className="props-section">
+        <div className="props-head">Export Deliverables</div>
+        <div className="export-list">
+          {DELIVERABLES.map((d) => (
+            <button
+              key={d.type}
+              type="button"
+              className="export-row"
+              onClick={() => onExportDeliverable?.(d.type)}
+              title={`Export ${d.name}`}
+            >
+              <span className="ex-ic"><d.Icon size={15} strokeWidth={1.6} /></span>
+              <span className="ex-text">
+                <span className="ex-name">{d.name}</span>
+                <span className="ex-sub">{d.sub}</span>
+              </span>
+              <Download size={14} strokeWidth={1.6} className="ex-dl" />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="props-section">
         <div className="props-head">This Session</div>
         <div className="session-list">
           {sessionEvents.map((s, i) => (
@@ -152,4 +202,3 @@ export default function PropertiesPanel({
     </aside>
   );
 }
-

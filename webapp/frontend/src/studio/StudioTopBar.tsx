@@ -13,15 +13,23 @@ import {
 } from "lucide-react";
 import qongMark from "../design/assets/qong-mark.png";
 import SettingsMenu from "../components/SettingsMenu";
+import SheetPicker from "./SheetPicker";
 import type { Sheet } from "./types";
+import type { RealSheet } from "./api";
 
 interface Props {
   jobId: number;
   projectName: string;
   currentSheet: Sheet;
+  sheets: Sheet[];
   sheetCount: number;
+  activeSheet: number;
+  onActivateSheet: (idx: number) => void;
+  projectId: number;
+  dark: boolean;
+  realSheets?: RealSheet[];
+  appliedBySheet: Record<number, number>;
   userName: string;
-  totalIssues: number;
   onBack: () => void;
   onSave: () => void;
   onBulkReview: () => void;
@@ -61,9 +69,15 @@ export default function StudioTopBar({
   jobId,
   projectName,
   currentSheet,
-  sheetCount,
+  sheets,
+  sheetCount: _sheetCount,
+  activeSheet,
+  onActivateSheet,
+  projectId,
+  dark,
+  realSheets,
+  appliedBySheet,
   userName,
-  totalIssues,
   onBack,
   onSave,
   onBulkReview,
@@ -105,19 +119,21 @@ export default function StudioTopBar({
           <FileText size={11} strokeWidth={1.6} />
           <span className="strong">{currentSheet.name}</span>
           <span className="sep">·</span>
-          <span>
-            Sheet {currentSheet.id}/{sheetCount}
-          </span>
+          <SheetPicker
+            sheets={sheets}
+            activeSheet={activeSheet}
+            onActivate={onActivateSheet}
+            projectId={projectId}
+            dark={dark}
+            realSheets={realSheets}
+            appliedBySheet={appliedBySheet}
+          />
           <span className="sep">|</span>
           <span>Reviewer:</span>
           <span className="strong">{reviewerSlug}</span>
         </div>
       </div>
       <div style={{ flex: 1 }}></div>
-      <button className={`issue-badge ${totalIssues > 0 ? "active" : ""}`}>
-        <span className="num">{totalIssues}</span>
-        <span>issues</span>
-      </button>
       <button className="btn btn-secondary btn-sm" onClick={onBulkReview} title="Open Bulk Review workbench">
         <LayoutGrid size={13} strokeWidth={1.6} /> Bulk Review
       </button>

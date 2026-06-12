@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { Maximize, Minus, Plus } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, CheckCheck, Maximize, Minus, PanelRightOpen, Plus } from "lucide-react";
 import { useTheme } from "../theme/ThemeContext";
 import BulkReviewScreen from "./bulk-review/BulkReviewScreen";
 import DatasheetDrawer from "./datasheet/DatasheetDrawer";
 import PidCanvas from "./PidCanvas";
 import PropertiesPanel from "./PropertiesPanel";
-import SheetRail from "./SheetRail";
 import StudioFoot from "./StudioFoot";
 import StudioTopBar from "./StudioTopBar";
 import { buildSheets } from "./buildSheets";
@@ -345,6 +344,40 @@ export default function Studio({ project, userName, onBack }: Props) {
     { who: userName, when: "5m ago", what: "linked P-101 → V-101" },
   ];
 
+  // ── Redesign Jun 2026 — Apply / Properties strip / toast ───────────────
+  // `appliedBySheet` is UI-only state: the design treats "Apply" as a
+  // reviewer's intent ("I'm done with this sheet") rather than a backend
+  // mutation. Annotations are already persisted on creation, so Apply just
+  // updates a per-sheet count badge (shown in the SheetPicker dropdown) and
+  // flips the toolbar button to its "Applied" confirmation state.
+  const [appliedBySheet, setAppliedBySheet] = useState<Record<number, number>>({});
+  const [propsOpen, setPropsOpen] = useState(true);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<number | null>(null);
+  const showToast = (msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2600);
+  };
+  useEffect(
+    () => () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    },
+    [],
+  );
+
+  const applyCount = sheetAnnotations.length;
+  const currentApplied = appliedBySheet[current.id] ?? 0;
+  // Re-arm the Apply button whenever the user adds/removes marks after applying.
+  const applied = currentApplied > 0 && currentApplied === applyCount;
+  function handleApply() {
+    if (!applyCount) return;
+    setAppliedBySheet((s) => ({ ...s, [current.id]: applyCount }));
+    showToast(
+      `Applied ${applyCount} mark${applyCount === 1 ? "" : "s"} to ${current.name.replace(".pdf", "")}`,
+    );
+  }
+
   function onOpenDatasheet() {
     // If the user hasn't picked a real bbox yet, selectedId is still the
     // prototype default ("PV-203" etc.). Auto-select the first detection
@@ -395,24 +428,21 @@ export default function Studio({ project, userName, onBack }: Props) {
         jobId={project.id}
         projectName={project.name}
         currentSheet={current}
+        sheets={sheets}
         sheetCount={sheets.length}
+        activeSheet={activeSheet}
+        onActivateSheet={setActiveSheet}
+        projectId={project.id}
+        dark={dark}
+        realSheets={realSheets}
+        appliedBySheet={appliedBySheet}
         userName={userName}
-        totalIssues={totalIssues}
         onBack={onBack}
         onSave={onBack}
         onBulkReview={onBulkReview}
       />
 
-      <div className="studio-body">
-        <SheetRail
-          sheets={sheets}
-          activeSheet={activeSheet}
-          onActivate={setActiveSheet}
-          projectId={project.id}
-          dark={dark}
-          realSheets={realSheets}
-        />
-
+      <div className={`studio-body studio-body--draw ${propsOpen ? "with-props" : "with-strip"}`}>
         <PalettePanel
           activeMarkClass={activeMarkClass}
           onChange={(next) => {
@@ -424,7 +454,7 @@ export default function Studio({ project, userName, onBack }: Props) {
         />
 
         <section className="canvas-col">
-          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", flexWrap: "wrap" }}>
+          <div className="canvas-toolbar">
             <ModeToolbar mode={canvasMode} setMode={setCanvasMode} dark={dark} />
             {canvasMode === "draw-edge" && (
               <LineTypeToolbar
@@ -433,6 +463,26 @@ export default function Studio({ project, userName, onBack }: Props) {
                 dark={dark}
               />
             )}
+            <div className="canvas-toolbar-spring" />
+            {totalIssues > 0 && (
+              <span className="canvas-toolbar-issues" title={`${totalIssues} issues across this project`}>
+                <span className="num">{totalIssues}</span> issues
+              </span>
+            )}
+            <button
+              type="button"
+              className={`dx-apply ${applied ? "done" : ""}`}
+              onClick={handleApply}
+              disabled={!applyCount}
+              title={
+                applyCount
+                  ? `Apply ${applyCount} mark${applyCount === 1 ? "" : "s"} to this sheet`
+                  : "Draw at least one box to apply"
+              }
+            >
+              {applied ? <CheckCheck size={16} strokeWidth={2} /> : <Check size={16} strokeWidth={2} />}
+              {applied ? "Applied" : `Apply${applyCount ? ` · ${applyCount}` : ""}`}
+            </button>
           </div>
           <PidCanvas
             selectedId={selectedId}
@@ -481,16 +531,36 @@ export default function Studio({ project, userName, onBack }: Props) {
             </button>
           </div>
           <div className="zoom-readout">{Math.round(zoom * 100)}%</div>
+          {toast && (
+            <div className="studio-toast" role="status">
+              <CheckCheck size={15} strokeWidth={2} /> {toast}
+            </div>
+          )}
         </section>
 
-        <PropertiesPanel
-          elements={panelElements}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-          sessionEvents={sessionEvents}
-          hasDatasheet={hasDatasheet}
-          onOpenDatasheet={onOpenDatasheet}
-        />
+        {propsOpen ? (
+          <PropertiesPanel
+            elements={panelElements}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            sessionEvents={sessionEvents}
+            hasDatasheet={hasDatasheet}
+            onOpenDatasheet={onOpenDatasheet}
+            onCollapse={() => setPropsOpen(false)}
+          />
+        ) : (
+          <button
+            type="button"
+            className="props-strip"
+            onClick={() => setPropsOpen(true)}
+            title="Show details panel"
+            aria-label="Show details panel"
+          >
+            <PanelRightOpen size={17} strokeWidth={1.6} />
+            <span className="props-strip-label">Details</span>
+            {totalIssues > 0 && <span className="props-strip-badge">{totalIssues}</span>}
+          </button>
+        )}
       </div>
 
       <StudioFoot />

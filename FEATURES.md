@@ -24,6 +24,33 @@
 
 ---
 
+## [2026-06-12] #39 — Qong Studio UI redesign: sheet-picker dropdown, category palette sidebar, Apply action, details strip
+
+**Type:** feature | architecture
+**Stage:** webapp/frontend
+**Status:** shipped
+
+**Why:** User-driven redesign — flagged the existing 3-column layout (SheetRail + Canvas + Properties) as cramped, with the sheet rail eating canvas width while sheets are infrequently switched. Design landed via a Claude Design handoff bundle (chats 1–6, final iteration 2026-06-12) with explicit asks: sheets-as-dropdown in the top bar, collapsible-category palette on the left as the main symbol picker, full-width canvas with an explicit "I'm done with this sheet" Apply action, and a right details panel that can collapse to a slim vertical strip so the canvas can run edge-to-edge during heavy marking.
+
+**What:**
+- New `webapp/frontend/src/studio/SheetPicker.tsx` — top-bar pill dropdown that lists every sheet (real tile thumbnails or generated SheetGlyph fallback) with a `applied ✓ N` badge per sheet. Replaces the left rail.
+- Deleted `webapp/frontend/src/studio/SheetRail.tsx`. `StudioTopBar.tsx` now receives `sheets / activeSheet / onActivateSheet / projectId / dark / realSheets / appliedBySheet` and mounts `SheetPicker` inside `.proj-meta`. The "42 issues" badge is gone from the top bar.
+- `annotations/PalettePanel.tsx` restructured into the draw.io-style collapsible category list (Valves, Instruments, Equipment). Rows are glyph + full name + hotkey badge. **Test contract preserved** — `data-testid="palette-item-${cat}-${sub}"`, click-to-arm semantics, and `style.background contains 'var(--qong-pink'` on the active row all still hold; all 6 existing tests pass.
+- `Studio.tsx` body grid switches to `studio-body--draw` variants: `with-props` (248 / canvas / 348) or `with-strip` (248 / canvas / 44). Adds `appliedBySheet` state, `propsOpen` state, and a `showToast` helper.
+- Canvas toolbar inside Studio now hosts a primary **Apply · N** button (right-aligned, pink gradient) — disabled when zero marks, switches to green **Applied** after click. Annotation list resetting Apply count is via the `applied` derived value.
+- `PropertiesPanel.tsx` gains an `onCollapse` prop + Export Deliverables section (Instrument Index, Datasheets, I/O List, Valve List, Control Narrative, Cause & Effect — all wired via optional `onExportDeliverable(type)`). When collapsed, `Studio.tsx` renders a full-height `.props-strip` button (vertical "DETAILS" label + issue badge at bottom).
+- `design/studio.css` — ~430 new lines under a "REDESIGN (Jun 2026)" header. Uses existing semantic tokens (`--bg`, `--surface`, `--fg-*`, `--qong-*`) so light/dark theming works through the existing `[data-theme="dark"]` selectors with no new theme overrides needed.
+
+**Result:**
+- `npx tsc --noEmit` clean. `npx vitest run` → 15 files / 66 tests passing (incl. 6 PalettePanel tests).
+- Canvas gains ~232px horizontal real estate when the details strip is collapsed; ~120px even when details are open vs. the old layout.
+
+**Notes:**
+- Apply is **UI-only state** — `appliedBySheet[sheetId] = applyCount`. Annotations are already persisted on creation via `useAnnotations.create`; "Apply" is a reviewer's intent ("done with this sheet") rather than a new backend mutation. If/when a server-side `sheet_applied_at` lands, the same `handleApply` will fire the POST and the UI doesn't change.
+- Sheet picker uses real tile thumbnails (`RealSheet.url`) when `realSheets` is populated; otherwise the deterministic `SheetGlyph` SVG, same fallback the rail used.
+- The hotkey labels in the palette (1, 2, s, g, …) are **visual hints only** — actual binding stays inside `useShortcutDispatcher` (FEATURES #38). When a user customises shortcuts, the keys in the palette will drift; future work: read bindings from `useShortcuts` and surface the user's actual keys.
+- Design bundle archived at `/tmp/qong_design/qong-app/` (not committed). 6 chat transcripts captured the iteration history if we need to revisit a specific decision.
+
 ## [2026-06-11] #38 — Qong Studio marking + graph annotation system (6-phase end-to-end)
 
 **Type:** feature | architecture
