@@ -2514,12 +2514,15 @@ input, textarea { font-family: inherit; }
    See FEATURES #39.
    ============================================================ */
 
-/* ---- body grid variants ---------------------------------- */
+/* ---- body grid variants ----------------------------------
+   Palette + details deliberately compact so the canvas keeps the maximum
+   horizontal real estate. Engineers spend 95% of their time on the PID,
+   not on chrome. Strip mode adds another ~280px of canvas width. */
 .studio-body--draw.with-props {
-  grid-template-columns: 248px minmax(0, 1fr) 348px;
+  grid-template-columns: 224px minmax(0, 1fr) 320px;
 }
 .studio-body--draw.with-strip {
-  grid-template-columns: 248px minmax(0, 1fr) 44px;
+  grid-template-columns: 224px minmax(0, 1fr) 44px;
 }
 
 /* ---- sheet picker (in StudioTopBar) ---------------------- */
