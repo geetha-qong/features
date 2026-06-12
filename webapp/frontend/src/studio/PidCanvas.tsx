@@ -487,6 +487,14 @@ function PageWithOverlays({
     cursorPoint: [number, number] | null;
   }>({ sourcePoint: null, sourceEntityId: null, cursorPoint: null });
 
+  // FEATURES #41: mark-symbol mode is now drag-to-create instead of
+  // click-drops-a-fixed-bbox. The user surfaces a draggable rectangle that
+  // fits the symbol they're labelling, matching the draw.io prototype.
+  // null when no drag in progress.
+  const [markDraft, setMarkDraft] = useState<{
+    x0: number; y0: number; x1: number; y1: number;
+  } | null>(null);
+
   const offsets = useMemo(() => {
     if (!natural) return new Map<string, TileBox>();
     return computeTileOffsets(natural, pageIndex);
@@ -515,20 +523,46 @@ function PageWithOverlays({
     return [x, y];
   }
 
-  // Mark-symbol mode: click drops a 40x24 page-pixel bbox centered on cursor.
-  // For Phase 2, this is a stub that runs the callback if wired. Phase 3 will
-  // refine the affordance (drag from palette, snap, etc.).
-  function onCanvasClickForMark(e: React.MouseEvent<SVGSVGElement>) {
+  // Mark-symbol mode: **drag-to-create** rectangle, matching the draw.io
+  // prototype (FEATURES #41). Drag distance < 5 page-pixels falls through to
+  // a click-drop with a sensible default size so a quick tap still works.
+  function onCanvasMouseDownForMark(e: React.MouseEvent<SVGSVGElement>) {
     if (mode !== "mark-symbol" || !activeMarkClass || !onDropMark) return;
-    const pt = clientToPagePixel(e.clientX, e.clientY);
-    if (!pt) return;
-    const [cx, cy] = pt;
-    const w = 40, h = 24;
-    onDropMark(
-      [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2],
-      activeMarkClass.sub_class,
-      activeMarkClass.entity_class,
-    );
+    e.preventDefault();
+    e.stopPropagation();
+    const p0 = clientToPagePixel(e.clientX, e.clientY);
+    if (!p0) return;
+    const [x0, y0] = p0;
+    setMarkDraft({ x0, y0, x1: x0, y1: y0 });
+
+    const onMove = (ev: MouseEvent) => {
+      const pt = clientToPagePixel(ev.clientX, ev.clientY);
+      if (!pt) return;
+      setMarkDraft({ x0, y0, x1: pt[0], y1: pt[1] });
+    };
+    const onUp = (ev: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const pt = clientToPagePixel(ev.clientX, ev.clientY);
+      setMarkDraft(null);
+      if (!pt) return;
+      let bx0 = Math.min(x0, pt[0]);
+      let by0 = Math.min(y0, pt[1]);
+      let bx1 = Math.max(x0, pt[0]);
+      let by1 = Math.max(y0, pt[1]);
+      // Quick-tap fallback (no real drag): emit a small but visible box so the
+      // user can still resize it later via the standard select-mode handles.
+      if (bx1 - bx0 < 5 && by1 - by0 < 5) {
+        bx0 = pt[0] - 30; by0 = pt[1] - 20; bx1 = pt[0] + 30; by1 = pt[1] + 20;
+      }
+      onDropMark(
+        [bx0, by0, bx1, by1],
+        activeMarkClass.sub_class,
+        activeMarkClass.entity_class,
+      );
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }
 
   // Draw-edge mode: 2-click flow. Track cursor between clicks for live preview.
@@ -641,9 +675,13 @@ function PageWithOverlays({
           ref={svgRef}
           viewBox={`0 0 ${natural.w} ${natural.h}`}
           preserveAspectRatio="none"
+          onMouseDown={(e) => {
+            if (mode === "mark-symbol") onCanvasMouseDownForMark(e);
+          }}
           onClick={(e) => {
-            if (mode === "mark-symbol") onCanvasClickForMark(e);
-            else if (mode === "draw-edge") onCanvasClickForEdge(e);
+            // draw-edge stays click-based (2-click flow); mark-symbol commits
+            // via the mouseup inside onCanvasMouseDownForMark above.
+            if (mode === "draw-edge") onCanvasClickForEdge(e);
           }}
           onMouseMove={onCanvasMouseMove}
           style={{
@@ -816,6 +854,30 @@ function PageWithOverlays({
               </g>
             );
           })}
+
+          {/* Layer 4a: in-flight mark-symbol drag preview (FEATURES #41).
+              Renders a dashed pink rectangle as the user drags, so they can
+              see the box they're about to create instead of guessing. */}
+          {markDraft && (() => {
+            const dx = markDraft.x1 - markDraft.x0;
+            const dy = markDraft.y1 - markDraft.y0;
+            const x = Math.min(markDraft.x0, markDraft.x1);
+            const y = Math.min(markDraft.y0, markDraft.y1);
+            const w = Math.abs(dx);
+            const h = Math.abs(dy);
+            const sw = Math.max(1.4, natural.w / 500);
+            return (
+              <g style={{ pointerEvents: "none" }}>
+                <rect
+                  x={x} y={y} width={w} height={h}
+                  fill="rgba(255,77,168,0.12)"
+                  stroke="#FF4DA8"
+                  strokeWidth={sw * 1.4}
+                  strokeDasharray={`${sw * 3} ${sw * 2}`}
+                />
+              </g>
+            );
+          })()}
 
           {/* Layer 4: in-flight edge preview (Phase 4) */}
           {edgeDraft.sourcePoint && edgeDraft.cursorPoint && (

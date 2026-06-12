@@ -2527,6 +2527,20 @@ input, textarea { font-family: inherit; }
 
 /* ---- sheet picker (in StudioTopBar) ---------------------- */
 .sheet-picker { position: relative; display: inline-flex; align-items: center; }
+/* Single-page jobs render a quiet, non-interactive "Page 1" pill so
+   reviewers know the count rather than seeing a dropdown that does nothing. */
+.sheet-picker--static {
+  gap: 6px;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-3);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+}
+.sheet-picker--static svg { color: var(--fg-3); opacity: 0.7; }
+.sheet-picker--static .sp-label { letter-spacing: 0.04em; }
 .sheet-picker-btn {
   display: inline-flex; align-items: center; gap: 7px;
   height: 32px; padding: 0 12px;
