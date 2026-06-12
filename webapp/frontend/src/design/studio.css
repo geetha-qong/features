@@ -1300,6 +1300,15 @@ input, textarea { font-family: inherit; }
 }
 .mini-btn:hover { border-color: var(--qong-magenta); color: var(--qong-magenta); }
 .mini-btn.active { background: rgba(16,185,129,0.14); border-color: rgba(16,185,129,0.4); color: var(--ok); }
+/* FEATURES #41 — Delete action on a user-added annotation. Red accent so
+   it reads as the destructive option vs Confirm/Edit alongside it. */
+.mini-btn--danger { color: var(--error); }
+.mini-btn--danger:hover {
+  border-color: var(--error);
+  color: #fff;
+  background: var(--error);
+}
+.mini-btn--danger:hover svg { color: #fff; }
 
 /* Issues */
 .issues-list { display: flex; flex-direction: column; gap: 6px; }

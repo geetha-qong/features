@@ -18,6 +18,7 @@ import {
   Pencil,
   Radio,
   Settings2,
+  Trash2,
 } from "lucide-react";
 import type { CanvasElement, SessionEvent } from "./types";
 
@@ -34,6 +35,12 @@ interface Props {
   onOpenDatasheet: () => void;
   onCollapse: () => void;
   onExportDeliverable?: (type: string) => void;
+  // FEATURES #41: when the selected entity is a user-added annotation, the
+  // parent passes `canDelete=true` and an `onDelete` handler. The panel
+  // shows the Delete button as a secondary mini-btn next to Edit. Model
+  // detections aren't deletable through this surface (different lifecycle).
+  canDelete?: boolean;
+  onDelete?: () => void;
 }
 
 function iconFor(type: string) {
@@ -68,6 +75,8 @@ export default function PropertiesPanel({
   onOpenDatasheet,
   onCollapse,
   onExportDeliverable,
+  canDelete,
+  onDelete,
 }: Props) {
   const sel = elements[selectedId] || Object.values(elements)[0];
   const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
@@ -119,11 +128,21 @@ export default function PropertiesPanel({
             <button className="mini-btn">
               <Pencil size={12} strokeWidth={1.6} /> Edit
             </button>
+            {canDelete && (
+              <button
+                type="button"
+                className="mini-btn mini-btn--danger"
+                onClick={onDelete}
+                title="Delete this annotation (Del / Backspace)"
+              >
+                <Trash2 size={12} strokeWidth={1.6} /> Delete
+              </button>
+            )}
           </div>
           {hasDatasheet && (
             <button className="open-ds-btn" onClick={onOpenDatasheet}>
               <FileText size={13} strokeWidth={1.6} />
-              Open Datasheet
+              Open Document
               <ArrowUpRight size={13} strokeWidth={1.6} />
             </button>
           )}

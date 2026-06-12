@@ -191,7 +191,7 @@ export default function Studio({ project, userName, onBack }: Props) {
   const [activeLineType, setActiveLineType] = useState<LineType>("process_pipe");
   const [pendingEdgeForMetadata, setPendingEdgeForMetadata] = useState<EdgeLite | null>(null);
 
-  const { annotations, create: createAnnotation } = useAnnotations(project.id);
+  const { annotations, create: createAnnotation, remove: removeAnnotation } = useAnnotations(project.id);
   const { edges, create: createEdge, patch: patchEdge } = useEdges(project.id);
   const { shortcuts } = useShortcuts();
 
@@ -224,6 +224,41 @@ export default function Studio({ project, userName, onBack }: Props) {
     });
     // Stay armed for rapid placement; press Esc or click the palette button
     // again to disarm.
+  }
+
+  // Resolve a selectedId → its UserAnnotation row (or null if it's a model
+  // detection / prototype tag). Used to decide whether the Delete affordances
+  // should be active.
+  const selectedAnnotation = useMemo(
+    () => annotations.find((a) => a.entity_id === selectedId) ?? null,
+    [annotations, selectedId],
+  );
+  const canDeleteSelected = selectedAnnotation?.source === "user";
+
+  async function handleDeleteAnnotation(entityId: string | null) {
+    if (!entityId) return;
+    const target = annotations.find((a) => a.entity_id === entityId);
+    if (!target || target.source !== "user") {
+      // Quietly bail if there's nothing user-added to delete. Surfaces the
+      // "model detections aren't deletable here" contract without throwing.
+      return;
+    }
+    const friendly =
+      target.tag ??
+      target.placeholder_tag ??
+      target.sub_class ??
+      "annotation";
+    const ok = window.confirm(`Delete ${friendly}? This can't be undone.`);
+    if (!ok) return;
+    const success = await removeAnnotation(entityId);
+    if (success) {
+      // Clear selection so the panel doesn't show a stale row.
+      setSelectedId("");
+      setSelectedClass(undefined);
+      showToast(`Deleted ${friendly}`);
+    } else {
+      showToast(`Failed to delete ${friendly}`);
+    }
   }
 
   async function onEdgeDrawn(
@@ -264,8 +299,13 @@ export default function Studio({ project, userName, onBack }: Props) {
         setPendingEdgeForMetadata(null);
         break;
       case "delete-selected":
-        // Hook for Phase 3+ — when an annotation is selected, fire delete.
-        // Left as no-op in v1 to avoid accidental data loss.
+        // FEATURES #41: delete the selected entity if (and only if) it's a
+        // user-added annotation. Model detections aren't deletable through
+        // this path — they belong to the canonical entity store, which has
+        // its own reject-confirm lifecycle (status="user_rejected"). For a
+        // user-added mark, fire the same flow the panel's Delete button
+        // uses so the keyboard shortcut and the click stay consistent.
+        void handleDeleteAnnotation(selectedId);
         break;
     }
   }
@@ -593,6 +633,8 @@ export default function Studio({ project, userName, onBack }: Props) {
             onOpenDatasheet={onOpenDatasheet}
             onCollapse={() => setPropsOpen(false)}
             onExportDeliverable={onExportDeliverable}
+            canDelete={canDeleteSelected}
+            onDelete={() => void handleDeleteAnnotation(selectedId)}
           />
         ) : (
           <button
