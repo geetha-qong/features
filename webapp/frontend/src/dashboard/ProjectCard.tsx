@@ -5,7 +5,12 @@ import type { ProjectTile } from "./types";
 export default function ProjectCard({ project, onOpen }: { project: ProjectTile; onOpen: () => void }) {
   const statusLabel = project.status === "ok" ? "Synced" : project.status === "run" ? "Extracting" : project.status === "fail" ? "Failed" : "Draft";
   return (
-    <div className="project-card" onClick={onOpen} data-comment-anchor={`project-${project.id}`}>
+    <div
+      className={`project-card ${project.status === "ok" ? "" : "not-ready"}`}
+      onClick={onOpen}
+      data-comment-anchor={`project-${project.id}`}
+      title={project.status === "ok" ? undefined : "Still extracting — opens when ready"}
+    >
       <div className="project-thumb">
         <span className={`status-pill ${project.status}`}>
           <span className="dot"></span>

@@ -3012,3 +3012,68 @@ input, textarea { font-family: inherit; }
 }
 .export-row .ex-dl { color: var(--fg-3); flex: 0 0 auto; }
 .export-row:hover .ex-dl { color: var(--qong-pink); }
+
+/* ============================================================
+   FEATURES #41 — processing-state UX on the dashboard
+   Tiles that aren't `status === "ok"` get a softer "wait, this
+   isn't ready yet" affordance instead of opening Studio with
+   prototype fallback data. The dashboard toast lives at the
+   bottom so it stays out of the click target area for the cards.
+   ============================================================ */
+.project-card.not-ready,
+.project-row.not-ready {
+  cursor: progress;
+  opacity: 0.74;
+}
+.project-card.not-ready:hover { transform: none; box-shadow: none; }
+.project-card.not-ready::before { opacity: 0; }
+.project-card.not-ready .project-card-body h3 { color: var(--fg-2); }
+
+.dashboard-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px 11px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--qong-purple);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  color: var(--fg-1);
+  max-width: min(560px, 92vw);
+  animation: dashboard-toast-in 220ms var(--ease-out);
+}
+.dashboard-toast svg { color: var(--qong-purple); flex: 0 0 auto; }
+.dashboard-toast-close {
+  width: 22px; height: 22px;
+  display: inline-grid; place-items: center;
+  margin-left: 4px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--fg-3);
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 120ms var(--ease-out);
+}
+.dashboard-toast-close:hover {
+  background: var(--bg-elev);
+  color: var(--fg-1);
+}
+@keyframes dashboard-toast-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.dashboard-toast-pulse {
+  animation: dashboard-pulse 1.4s ease-in-out infinite;
+}
+@keyframes dashboard-pulse {
+  0%, 100% { opacity: 0.65; transform: scale(0.92); }
+  50%      { opacity: 1;    transform: scale(1.04); }
+}

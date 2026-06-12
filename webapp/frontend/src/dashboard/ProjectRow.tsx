@@ -3,7 +3,12 @@ import type { ProjectTile } from "./types";
 
 export default function ProjectRow({ project, onOpen }: { project: ProjectTile; onOpen: () => void }) {
   return (
-    <div className="list-row" onClick={onOpen} data-comment-anchor={`project-${project.id}`}>
+    <div
+      className={`list-row ${project.status === "ok" ? "" : "not-ready"}`}
+      onClick={onOpen}
+      data-comment-anchor={`project-${project.id}`}
+      title={project.status === "ok" ? undefined : "Still extracting — opens when ready"}
+    >
       <div className="name-cell">
         <div className="thumb-mini">
           <FileText size={18} strokeWidth={1.6} />

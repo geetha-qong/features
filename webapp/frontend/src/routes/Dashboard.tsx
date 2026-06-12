@@ -48,6 +48,15 @@ export default function Dashboard() {
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // FEATURES #41: upload no longer auto-navigates to the job detail page.
+  // The user stays on the listing, sees the new card appear with an
+  // "Extracting" pill, and a toast confirms the upload.
+  const [toast, setToast] = useState<string | null>(null);
+  // When the user clicks a job that's still extracting we show an inline
+  // "still processing" toast keyed off the job id so they understand why
+  // nothing happened (rather than dumping them into a Studio that would
+  // render demo data).
+  const [pendingFocusJobId, setPendingFocusJobId] = useState<number | null>(null);
 
   function setLayout(v: Layout) {
     setLayoutState(v);
@@ -77,6 +86,41 @@ export default function Dashboard() {
     };
   }, [reloadKey, tz]);
 
+  // Auto-poll the listing every 4s while ANY job is still processing.
+  // Stops as soon as everything is in a terminal state, so an idle dashboard
+  // makes zero background traffic. Also handles the "I uploaded one job and
+  // closed the tab" case — coming back lands you on a fresh listing.
+  useEffect(() => {
+    const hasRunning = projects.some(
+      (p) => p.status === "run" || p.status === "draft",
+    );
+    if (!hasRunning) return;
+    const id = window.setInterval(() => setReloadKey((k) => k + 1), 4000);
+    return () => window.clearInterval(id);
+  }, [projects]);
+
+  // If we're waiting for a specific job to flip to "ok", jump into it the
+  // moment it does. Lets the user click a not-ready card, see the toast,
+  // and have the app auto-open the studio once processing finishes — no
+  // second click needed.
+  useEffect(() => {
+    if (pendingFocusJobId == null) return;
+    const j = projects.find((p) => p.id === pendingFocusJobId);
+    if (j && j.status === "ok") {
+      setPendingFocusJobId(null);
+      setToast(null);
+      navigate(`/jobs/${j.id}`);
+    }
+  }, [projects, pendingFocusJobId, navigate]);
+
+  // Auto-dismiss toast after a few seconds. Skipped when we're holding it
+  // open as the "waiting for processing" indicator (pendingFocusJobId set).
+  useEffect(() => {
+    if (!toast || pendingFocusJobId != null) return;
+    const t = window.setTimeout(() => setToast(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [toast, pendingFocusJobId]);
+
   const counts = useMemo(
     () => ({
       all: projects.length,
@@ -104,7 +148,24 @@ export default function Dashboard() {
   const isEmpty = !loading && projects.length === 0;
 
   function openProject(p: ProjectTile) {
-    navigate(`/jobs/${p.id}`);
+    // Only ready jobs open the Studio. Anything else (still processing,
+    // failed, or never-uploaded draft) shows a toast and — if extracting —
+    // arms a "jump in when ready" handoff so the user doesn't have to
+    // watch the list manually.
+    if (p.status === "ok") {
+      setPendingFocusJobId(null);
+      navigate(`/jobs/${p.id}`);
+      return;
+    }
+    if (p.status === "fail") {
+      setPendingFocusJobId(null);
+      setToast(`"${p.name}" failed to process. Re-upload to retry.`);
+      return;
+    }
+    // Still extracting / draft — keep them on the listing and arm the
+    // auto-open on completion.
+    setPendingFocusJobId(p.id);
+    setToast(`"${p.name}" is still extracting. We'll open it as soon as it's ready.`);
   }
 
   function onCreate() {
@@ -306,15 +367,41 @@ export default function Dashboard() {
         open={creating}
         onClose={() => setCreating(false)}
         onCreated={(firstJobId) => {
-          // Refresh dashboard data so the new tile shows on return; then
-          // jump straight into the new project's studio (chat1.md design
-          // intent — gives the user clear feedback that the upload worked).
+          // FEATURES #41: do NOT navigate into the studio after upload —
+          // the job is still extracting, and the old behaviour was dumping
+          // users into a page rendered with sample data while the real
+          // pipeline ran in the background. Now we just refresh the listing
+          // (the new tile will appear with an "Extracting" pill) and toast
+          // the user. If they want to open it as soon as it's ready, they
+          // can click the tile — `openProject` arms an auto-open on done.
           setReloadKey((k) => k + 1);
+          setCreating(false);
           if (firstJobId != null) {
-            navigate(`/jobs/${firstJobId}`);
+            setPendingFocusJobId(firstJobId);
+            setToast(
+              "Upload started. We'll open the project as soon as extraction finishes.",
+            );
+          } else {
+            setToast("Upload received. Watch the list for the new tile.");
           }
         }}
       />
+
+      {toast && (
+        <div className="dashboard-toast" role="status">
+          <Activity size={15} strokeWidth={1.8} />
+          <span>{toast}</span>
+          <button
+            type="button"
+            className="dashboard-toast-close"
+            onClick={() => {
+              setToast(null);
+              setPendingFocusJobId(null);
+            }}
+            aria-label="Dismiss"
+          >×</button>
+        </div>
+      )}
     </div>
   );
 }
