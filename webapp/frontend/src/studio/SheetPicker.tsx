@@ -202,7 +202,10 @@ export default function SheetPicker({
                 </span>
                 <span className="smi-meta">
                   <span className="smi-num">PAGE {String(p.pageIndex + 1).padStart(2, "0")}</span>
-                  <span className="smi-name">{p.label.replace(".pdf", "")}</span>
+                  {/* Suppress the tile filename ("Sheet p2_r1_c1") that would
+                      otherwise leak through from RealSheet.label; the page
+                      number above is already the meaningful identity. */}
+                  <span className="smi-name">Page {p.pageIndex + 1}</span>
                 </span>
                 {p.appliedCount ? (
                   <span className="smi-applied" title={`${p.appliedCount} marks applied`}>
