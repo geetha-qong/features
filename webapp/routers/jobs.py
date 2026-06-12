@@ -320,6 +320,7 @@ async def serve_page_full_preflight(job_id: int, page_index: int):  # noqa: ARG0
 async def serve_page_full(
     job_id: int,
     page_index: int,
+    w: int | None = None,
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -330,6 +331,16 @@ async def serve_page_full(
     job endpoints in this file). The PNG is written by `pdf_to_tiles.py`
     at `<job_dir>/tmp/page_{page_idx}_full.png` (see pdf_to_tiles.py:44).
 
+    **High-DPI on demand (FEATURES #41):** the studio canvas measures the
+    user's viewport at mount time and requests `?w=<target_px>`. When the
+    cached 4x render is narrower than the request, we re-render the PDF
+    page at exactly the requested width using PyMuPDF (no upscaling — true
+    pixels straight from the vector source) and cache under
+    `page_{idx}_full_w{w}.png`. Subsequent requests for the same width
+    hit the cache. Bounded to 6000 px to cap render cost. Below or equal
+    the 4x baseline → falls through to the original file unchanged so we
+    don't waste cycles on small displays.
+
     CORS headers mirror `serve_tile` so Qong Studio's canvas can use the
     image cross-origin. Headers are set post-construction because
     Starlette's `FileResponse(headers=…)` silently drops custom keys for
@@ -338,12 +349,57 @@ async def serve_page_full(
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job or not _can_access_job(job, current_user):
         raise HTTPException(status_code=404, detail="Job not found")
-    full_path = get_job_dir(job) / "tmp" / f"page_{page_index}_full.png"
+    tmp_dir = get_job_dir(job) / "tmp"
+    full_path = tmp_dir / f"page_{page_index}_full.png"
     if not full_path.exists():
         raise HTTPException(status_code=404, detail="page render not found")
-    resp = FileResponse(str(full_path), media_type="image/png")
+
+    target = full_path
+    # Hi-DPI on-demand render. Cap at 6000 px (typical 5K display × 1.5
+    # oversample). Only re-render when the request is *larger* than what we
+    # have on disk — a tiny query value is just ignored.
+    if w is not None and 100 < w <= 6000:
+        hi_path = tmp_dir / f"page_{page_index}_full_w{w}.png"
+        if not hi_path.exists():
+            try:
+                import fitz  # PyMuPDF — already a hard dep via pdf_to_tiles.py
+                from PIL import Image
+                # First measure what we already have so we don't waste work
+                # when the cached 4x render is already wider than the ask.
+                with Image.open(str(full_path)) as cached:
+                    cached_w = cached.size[0]
+                if cached_w < w:
+                    pdf_path = get_job_dir(job) / "input.pdf"
+                    if pdf_path.exists():
+                        doc = fitz.open(str(pdf_path))
+                        if 0 <= page_index < len(doc):
+                            page = doc[page_index]
+                            # Choose zoom that hits exactly the requested
+                            # pixel width. PyMuPDF zoom is a scalar against
+                            # the page's native point dimensions.
+                            page_w_pt = page.rect.width or 1
+                            zoom = w / page_w_pt
+                            # Sanity cap — paranoia against a tiny page +
+                            # huge w combining into a multi-GB pixmap.
+                            zoom = min(zoom, 12.0)
+                            mat = fitz.Matrix(zoom, zoom)
+                            pix = page.get_pixmap(matrix=mat)
+                            pix.save(str(hi_path))
+                        doc.close()
+            except Exception:
+                # Any failure (missing input.pdf, OOM, etc.) → silently
+                # fall back to the cached 4x render. Never break the page
+                # over a clarity-bonus path.
+                hi_path = full_path
+        if hi_path.exists():
+            target = hi_path
+
+    resp = FileResponse(str(target), media_type="image/png")
     for k, v in _TILE_CORS_HEADERS.items():
         resp.headers[k] = v
+    # 7-day immutable cache — different `w` values are different URLs so a
+    # browser refresh after a resize naturally invalidates.
+    resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
     return resp
 
 

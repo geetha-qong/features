@@ -179,8 +179,22 @@ export default function Studio({ project, userName, onBack }: Props) {
   }, [activeTileFilename]);
   // Best-effort: assume page-full exists; PidCanvas falls back to tile mode if
   // the <img> 404s (browser shows broken image — surfaced via onError in v2).
+  //
+  // FEATURES #41 — Hi-DPI hint: request a render width that matches the user's
+  // display so the browser doesn't downsample the PDF (which softens fine
+  // engineering linework). Width = viewport_w × devicePixelRatio × 1.25,
+  // rounded to the nearest 500 px to maximise backend cache hits, capped at
+  // 6000. The backend re-renders from input.pdf when this is larger than the
+  // cached 4x baseline and caches per-width.
+  const targetPxWidth = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const dpr = window.devicePixelRatio || 1;
+    const raw = window.innerWidth * dpr * 1.25;
+    const rounded = Math.round(raw / 500) * 500;
+    return Math.max(1500, Math.min(6000, rounded));
+  }, []);
   const activePageFullUrl = realSheets && realSheets.length > 0
-    ? `/jobs/${project.id}/page/${activePageIndex}/full`
+    ? `/jobs/${project.id}/page/${activePageIndex}/full${targetPxWidth ? `?w=${targetPxWidth}` : ""}`
     : null;
 
   // ── FEATURES #38: marking + edge drawing state ──────────────────────────
