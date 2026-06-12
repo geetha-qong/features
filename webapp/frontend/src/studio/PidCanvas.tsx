@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DetectionItem } from "./api";
+import { canvasDisplayLabel, displayNameForModelLabel } from "./labelMap";
 
 interface PidElement {
   id: string;
@@ -647,55 +648,82 @@ function PageWithOverlays({
             cursor,
           }}
         >
-          {/* Layer 1: model detections (translated to page-pixel coords) */}
-          {pageDetections.map((d, i) => {
-            const [x1, y1, x2, y2] = d.pageBbox;
-            const clickable = typeof d.entity_id === "string" && d.entity_id.length > 0;
-            const isSelected = clickable && d.entity_id === selectedId;
-            const sw = Math.max(1, natural.w / 500);
-            const stroke = isSelected ? STATUS_STROKE.user_added : STATUS_STROKE.model_found;
-            return (
-              <g key={`det-${i}`}>
-                <rect
-                  x={x1}
-                  y={y1}
-                  width={x2 - x1}
-                  height={y2 - y1}
-                  fill={isSelected ? "rgba(255,77,168,0.15)" : "none"}
-                  stroke={stroke}
-                  strokeWidth={isSelected ? sw * 2 : sw}
-                  strokeDasharray={isSelected ? undefined : `${sw * 2} ${sw * 2}`}
-                  style={{
-                    pointerEvents: clickable && mode === "select" ? "auto" : "none",
-                    cursor: clickable && mode === "select" ? "pointer" : cursor,
-                  }}
-                  onClick={
-                    clickable && mode === "select"
-                      ? (ev) => {
-                          ev.stopPropagation();
-                          onSelect(d.entity_id as string, d.entity_class);
-                        }
-                      : undefined
+          {/* Layer 1: model detections (translated to page-pixel coords).
+              FEATURES #40 fixes:
+                - Render human names ("Field Instrument"), not raw codes ("inst_field").
+                - Suppress crowded labels: skip rendering if another label is
+                  already within ~labelMinGap page-pixels (post-rendered above).
+              The collision filter runs in a stable iteration order so the
+              survivor is deterministic. */}
+          {(() => {
+            const labelMinGap = Math.max(60, natural.w / 22);
+            const placed: Array<{ x: number; y: number }> = [];
+            return pageDetections.map((d, i) => {
+              const [x1, y1, x2, y2] = d.pageBbox;
+              const clickable = typeof d.entity_id === "string" && d.entity_id.length > 0;
+              const isSelected = clickable && d.entity_id === selectedId;
+              const sw = Math.max(1, natural.w / 500);
+              const stroke = isSelected ? STATUS_STROKE.user_added : STATUS_STROKE.model_found;
+              const human = displayNameForModelLabel(d.label);
+              // Always keep labels for selected; otherwise skip if too close to
+              // any earlier label that survived. Cheap O(n²) — fine because n
+              // is bounded by # bboxes on one P&ID page (~100s at worst).
+              let showLabel = !!human;
+              if (showLabel && !isSelected) {
+                for (const p of placed) {
+                  if (Math.abs(p.x - x1) < labelMinGap && Math.abs(p.y - y1) < labelMinGap) {
+                    showLabel = false;
+                    break;
                   }
-                >
-                  {clickable && <title>{d.label} — click to edit</title>}
-                </rect>
-                {d.label && (
-                  <text
+                }
+              }
+              if (showLabel) placed.push({ x: x1, y: y1 });
+              return (
+                <g key={`det-${i}`}>
+                  <rect
                     x={x1}
-                    y={y1 - sw * 2}
-                    fontSize={Math.max(8, natural.w / 120)}
-                    fontFamily="JetBrains Mono, monospace"
-                    fontWeight="700"
-                    fill={stroke}
-                    style={{ pointerEvents: "none" }}
+                    y={y1}
+                    width={x2 - x1}
+                    height={y2 - y1}
+                    fill={isSelected ? "rgba(255,77,168,0.15)" : "none"}
+                    stroke={stroke}
+                    strokeWidth={isSelected ? sw * 2 : sw}
+                    strokeDasharray={isSelected ? undefined : `${sw * 2} ${sw * 2}`}
+                    style={{
+                      pointerEvents: clickable && mode === "select" ? "auto" : "none",
+                      cursor: clickable && mode === "select" ? "pointer" : cursor,
+                    }}
+                    onClick={
+                      clickable && mode === "select"
+                        ? (ev) => {
+                            ev.stopPropagation();
+                            onSelect(d.entity_id as string, d.entity_class);
+                          }
+                        : undefined
+                    }
                   >
-                    {d.label}
-                  </text>
-                )}
-              </g>
-            );
-          })}
+                    {clickable && <title>{human || d.label} — click to edit</title>}
+                  </rect>
+                  {showLabel && (
+                    <text
+                      x={x1}
+                      y={y1 - sw * 2}
+                      fontSize={Math.max(8, natural.w / 140)}
+                      fontFamily="Outfit, sans-serif"
+                      fontWeight="600"
+                      fill={stroke}
+                      style={{ pointerEvents: "none", paintOrder: "stroke" }}
+                      stroke="#ffffff"
+                      strokeWidth={sw * 0.8}
+                      strokeOpacity={0.85}
+                    >
+                      {human}
+                    </text>
+                  )}
+                </g>
+              );
+            });
+          })()}
 
           {/* Layer 2: user annotations (Phase 3) */}
           {userAnnotations.map((a, i) => {
@@ -734,13 +762,20 @@ function PageWithOverlays({
                 <text
                   x={x1}
                   y={y1 - sw * 2}
-                  fontSize={Math.max(8, natural.w / 120)}
-                  fontFamily="JetBrains Mono, monospace"
-                  fontWeight="700"
+                  fontSize={Math.max(8, natural.w / 140)}
+                  fontFamily="Outfit, sans-serif"
+                  fontWeight="600"
                   fill={stroke}
-                  style={{ pointerEvents: "none" }}
+                  style={{ pointerEvents: "none", paintOrder: "stroke" }}
+                  stroke="#ffffff"
+                  strokeWidth={sw * 0.8}
+                  strokeOpacity={0.85}
                 >
-                  {a.tag ?? a.placeholder_tag ?? a.sub_class ?? "?"}
+                  {canvasDisplayLabel({
+                    tag: a.tag,
+                    placeholder_tag: a.placeholder_tag,
+                    sub_class: a.sub_class,
+                  })}
                 </text>
               </g>
             );

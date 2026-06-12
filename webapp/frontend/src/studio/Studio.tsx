@@ -378,6 +378,51 @@ export default function Studio({ project, userName, onBack }: Props) {
     );
   }
 
+  // Export Deliverables — wired from PropertiesPanel rows. Each row maps to a
+  // deliverable_type/file_format pair on the existing
+  // POST /api/v1/jobs/{id}/export/{deliverable_type}/{file_format} endpoint.
+  // Format is "xlsx" for everything except valve_list which has a CSV variant
+  // we keep around for legacy customers. Errors surface as a toast — the
+  // current panel doesn't have a per-row error slot yet (follow-up).
+  const EXPORT_FORMAT: Record<string, "csv" | "xlsx"> = {
+    valve_list: "csv",
+    instrument_index: "xlsx",
+    equipment_list: "xlsx",
+    datasheet: "xlsx",
+  };
+  async function onExportDeliverable(type: string) {
+    const format = EXPORT_FORMAT[type] || "xlsx";
+    // Soft-block unknown deliverable types — the prototype shipped 6 (Control
+    // Narrative, Cause & Effect, I/O List) that the backend doesn't generate
+    // yet. Surface clearly rather than 404.
+    if (!EXPORT_FORMAT[type]) {
+      showToast(`"${type}" export isn't available yet`);
+      return;
+    }
+    const url = `/api/v1/jobs/${project.id}/export/${type}/${format}`;
+    showToast(`Preparing ${type.replace("_", " ")} (${format.toUpperCase()})…`);
+    try {
+      const res = await fetch(url, { method: "POST", credentials: "include" });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        showToast(`Export failed (HTTP ${res.status}) ${detail.slice(0, 60)}`);
+        return;
+      }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `job-${project.id}-${type}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+      showToast(`${type.replace("_", " ")} downloaded`);
+    } catch (e) {
+      showToast(`Export error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   function onOpenDatasheet() {
     // If the user hasn't picked a real bbox yet, selectedId is still the
     // prototype default ("PV-203" etc.). Auto-select the first detection
@@ -547,6 +592,7 @@ export default function Studio({ project, userName, onBack }: Props) {
             hasDatasheet={hasDatasheet}
             onOpenDatasheet={onOpenDatasheet}
             onCollapse={() => setPropsOpen(false)}
+            onExportDeliverable={onExportDeliverable}
           />
         ) : (
           <button
