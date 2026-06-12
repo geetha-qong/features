@@ -601,8 +601,12 @@ function PageWithOverlays({
       style={{
         position: "relative",
         display: "inline-block",
-        maxWidth: "min(100%, 1600px)",
-        maxHeight: "78vh",
+        // Fill the canvas column rather than capping at 1600px / 78vh: with
+        // the SheetPicker freeing the left rail the canvas column is wider
+        // and the PDF was being unnecessarily downscaled. Engineering tag
+        // text becomes ~40% larger on screen without zooming. FEATURES #40.
+        maxWidth: "100%",
+        maxHeight: "calc(100vh - 160px)",
         margin: "0 auto",
       }}
     >
@@ -616,8 +620,8 @@ function PageWithOverlays({
         }}
         style={{
           display: "block",
-          maxWidth: "min(100%, 1600px)",
-          maxHeight: "78vh",
+          maxWidth: "100%",
+          maxHeight: "calc(100vh - 160px)",
           objectFit: "contain",
           borderRadius: 4,
           boxShadow: dark
@@ -625,7 +629,9 @@ function PageWithOverlays({
             : "0 2px 12px rgba(20,22,42,0.18)",
           userSelect: "none",
           pointerEvents: "none",
-          imageRendering: "auto",
+          // -webkit-optimize-contrast is the strongest text-friendly hint
+          // Chromium honours; Firefox falls back to "auto" which is fine.
+          imageRendering: "-webkit-optimize-contrast",
           background: dark ? "#0E1024" : "#fff",
         }}
         draggable={false}
