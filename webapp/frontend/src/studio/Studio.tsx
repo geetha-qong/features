@@ -180,21 +180,17 @@ export default function Studio({ project, userName, onBack }: Props) {
   // Best-effort: assume page-full exists; PidCanvas falls back to tile mode if
   // the <img> 404s (browser shows broken image — surfaced via onError in v2).
   //
-  // FEATURES #41 — Hi-DPI hint: request a render width that matches the user's
-  // display so the browser doesn't downsample the PDF (which softens fine
-  // engineering linework). Width = viewport_w × devicePixelRatio × 1.25,
-  // rounded to the nearest 500 px to maximise backend cache hits, capped at
-  // 6000. The backend re-renders from input.pdf when this is larger than the
-  // cached 4x baseline and caches per-width.
-  const targetPxWidth = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    const dpr = window.devicePixelRatio || 1;
-    const raw = window.innerWidth * dpr * 1.25;
-    const rounded = Math.round(raw / 500) * 500;
-    return Math.max(1500, Math.min(6000, rounded));
-  }, []);
+  // FEATURES #41 — Hi-DPI render. Earlier we sized the request to the user's
+  // viewport, but that left 2K-non-Retina laptops getting the 4x baseline
+  // (still soft after browser downsample). The simplest fix that works for
+  // everyone: ALWAYS request the same hi-DPI render. The backend caches it
+  // per-job-per-page so we only pay the ~1.5s re-render cost once per page,
+  // and every subsequent user gets a hot file. 5500 px wide gives crisp
+  // text on every display from 1080p to 5K iMac without exploding storage
+  // (~1.2 MB per page-full).
+  const HI_DPI_TARGET_PX = 5500;
   const activePageFullUrl = realSheets && realSheets.length > 0
-    ? `/jobs/${project.id}/page/${activePageIndex}/full${targetPxWidth ? `?w=${targetPxWidth}` : ""}`
+    ? `/jobs/${project.id}/page/${activePageIndex}/full?w=${HI_DPI_TARGET_PX}`
     : null;
 
   // ── FEATURES #38: marking + edge drawing state ──────────────────────────

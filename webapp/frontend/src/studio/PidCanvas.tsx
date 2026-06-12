@@ -663,9 +663,11 @@ function PageWithOverlays({
             : "0 2px 12px rgba(20,22,42,0.18)",
           userSelect: "none",
           pointerEvents: "none",
-          // -webkit-optimize-contrast is the strongest text-friendly hint
-          // Chromium honours; Firefox falls back to "auto" which is fine.
-          imageRendering: "-webkit-optimize-contrast",
+          // `high-quality` is the modern CSS standard (Chromium ≥ 113) —
+          // best downscale kernel available. Firefox falls back to its
+          // default high-quality bicubic. Cast because the TS DOM lib
+          // hasn't picked up the new value yet (it's in the spec).
+          imageRendering: "high-quality" as React.CSSProperties["imageRendering"],
           background: dark ? "#0E1024" : "#fff",
         }}
         draggable={false}
