@@ -28,7 +28,7 @@
 
 **Type:** feature | architecture
 **Stage:** lines | graph | webapp | webapp/frontend
-**Status:** shipped to working tree (not yet committed/deployed)
+**Status:** shipped (commit `b741bdf`, deployed to dev.qongsystems.com 2026-06-13, verified live)
 **Spec:** `docs/superpowers/specs/2026-06-13-graph-db-and-annotation-finishing-design.md`
 **Supersedes track decision in:** `docs/superpowers/specs/2026-06-05-graph-extraction-design.md` §0/§4 (experimental `dt/main` detour) — built directly on `dev` in the handover destination.
 
