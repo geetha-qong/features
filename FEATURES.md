@@ -24,6 +24,37 @@
 
 ---
 
+## [2026-06-13] #41 — KKS valve-tag parsing + All-Data view; readability + cache fixes; empty-deliverable root-cause
+
+**Type:** feature | bugfix | architecture
+**Stage:** symbols | text | webapp | webapp/frontend | infra
+**Status:** shipped (deployed to dev across commits b741bdf…ab5ac16, verified live)
+
+**Why:** User reported deliverables empty across recent jobs, P&ID unreadable on zoom, "no detections", broken Bulk Review download, and wanted cache auto-clear. Investigation (systematic-debugging) traced the empty deliverables to a TWO-stage failure, not a display bug.
+
+**Root cause of empty deliverables (the 70310-20-* / org-3 jobs):**
+1. **Render resolution** — tiles rendered at zoom=4 left tag text ~10-15px; the OpenRouter Vision pass read 0. Fixed: `pdf_to_tiles` zoom 4→6 (grid stays 3×3). Job 50 p0: 0→121 read valves.
+2. **Parser tag-format** — the Vision pass then read 221 KKS plant-codes (`20LCM40 BR401`, `20GHB4461`) but `parse_valve_tag` Formats 1-4 expect Western valve abbreviations, so all 221 were dropped → 0 canonical valves. Fixed by **Format 5 (KKS)** in `parser.py`.
+
+**What:**
+- `parser.py` **TAG_PATTERN_5**: `[unit 2d][system 3L][aggregate][opt component 2L+counter]`. Maps unit→area, component-code (AA/BR/…) or system→Category, system+aggregate+component+counter→serial (unique → dedup won't merge). First-pass mapping; KKS component→valve-type to be refined per client. 7 tests (`tests/unit/test_parser_kks.py`).
+- **All-Data view** (`/jobs/:jobId/data`, `studio/alldata/AllDataView.tsx`): one styled, searchable surface listing every extracted entity (valve/instrument/equipment) + YOLO detection per job, type-filter chips + counts. "All Data" button in Studio top bar. Sibling of Bulk Review.
+- **Readability:** page-full render cap 6000→9000px, `HI_DPI_TARGET_PX` 5500→8000, max zoom 4→6, detection/annotation overlays → `vector-effect: non-scaling-stroke` (boxes visible at any zoom — fixed the "no detections" perception, which was 26 detections rendering as 4px specks at ~11× fit-to-screen downscale).
+- **Cache auto-clear:** SPA `index.html` served `Cache-Control: no-cache, must-revalidate` (browsers revalidate → new asset hashes; verified `cf-cache-status: DYNAMIC`) + a non-fatal Cloudflare edge-purge step in `deploy-dev.yml`/`deploy-qa.yml` (token from SSM `/may26aws/qong-shared/cloudflare-{purge-token,zone-id}`, auto-skips until set).
+- **Bulk Review export** button (was a disabled "coming soon" stub) wired to POST `/export/{type}/{format}`.
+- **Re-run button** added to the failed-job screen (`POST /jobs/{id}/rerun` — note: prefix-less path, returns 303).
+
+**Result (verified on dev):**
+- Job 50 valve list **0 → 94 rows** after KKS parser + 6× render. Instruments 3→7.
+- Job 51 (failed → transient worker-heartbeat crash) reruns to done.
+- All-Data route live (200). Page render verified 8000×5658px true vector pixels.
+
+**Notes:**
+- **KKS category mapping is first-pass** — `type_code` = component code or 3-letter system. Tags with no component show Category = system (e.g. `GHB`), giving slightly redundant display (`20-GHB-GHB4461`). Refine the KKS component→valve-type table per client.
+- **YOLO still under-detects on KKS drawings** (26, mostly arrows) — v1-10 trained on MUK/WS symbology; retrain is the next ML track.
+- **Local docker `web` runs baked-image code, NOT host edits** — root-level `parser.py`/`pdf_to_tiles.py` changes can't be tested via `docker compose exec web` without a rebuild; test with host python3 (stdlib-only) or verify post-deploy.
+- **Deploy quirk:** `up -d` can leave web/cpu-worker in `Created` (hash-prefixed names) → 502 while `/healthz` (nginx) stays 200; recover with `up -d --force-recreate`. Don't push while a job is mid-run on the cpu-worker (recreate kills it → heartbeat fail).
+
 ## [2026-06-13] #40 — Graph extraction v0 in production (line detection → graph → DB) + annotation finishing
 
 **Type:** feature | architecture
