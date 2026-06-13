@@ -641,6 +641,10 @@ input, textarea { font-family: inherit; }
 .status-pill.run .dot { background: var(--scan-cyan); box-shadow: 0 0 6px var(--scan-cyan); animation: pulse 1.6s infinite; }
 .status-pill.draft { background: rgba(148,152,174,0.18); color: var(--fg-2); border: 1px solid var(--border); }
 .status-pill.draft .dot { background: var(--fg-3); }
+.status-pill.fail { background: rgba(239,68,68,0.15); color: var(--error, #ef4444); border: 1px solid rgba(239,68,68,0.3); }
+.status-pill.fail .dot { background: var(--error, #ef4444); }
+/* inline variant — sits in the card body now that the thumbnail is gone (design v4) */
+.status-pill.inline { position: static; align-self: flex-start; top: auto; left: auto; backdrop-filter: none; }
 
 /* ---- Project LIST ---- */
 .projects-list {
