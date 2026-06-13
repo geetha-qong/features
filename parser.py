@@ -47,6 +47,21 @@ TAG_PATTERN_4 = re.compile(
     re.IGNORECASE,
 )
 
+# Format 5: KKS plant coding (Kraftwerks-Kennzeichensystem) — power/process
+# clients (the 70310-20-* drawings). Shape:
+#   [unit 2d][system 3L][aggregate 1-4d]  [optional component 2L + counter 1-4d]
+#   e.g. 20LCM40 BR401, 20GHB446 AA005, 20LCM17AA001, 20GHB4461.
+# The Vision pass reads these tags fine, but Formats 1-4 all expect a Western
+# valve-type abbreviation, so every KKS tag fell through → parse returned None
+# → the valve list came out empty. This pattern accepts them so the data is
+# preserved. Tried LAST (after 1-4) and its shape (2 leading digits + 3 letters,
+# no dashes) doesn't collide with the earlier formats.
+TAG_PATTERN_5 = re.compile(
+    r"^(?P<unit>\d{2})(?P<system>[A-Z]{3})(?P<aggregate>\d{1,4})"
+    r"(?:\s?(?P<component>[A-Z]{2})(?P<counter>\d{1,4}))?$",
+    re.IGNORECASE,
+)
+
 # ── Line number patterns (tried in order, most → least specific) ──────────────
 
 # Format 2 line: 250-WAP-XXXX-AS1LC → fluid=WAP, piping=AS1LC (no size extraction)
@@ -191,6 +206,30 @@ def parse_valve_tag(tag: str) -> Optional[dict]:
             "type_code": m.group("type").upper(),
             "serial": m.group("serial"),
             "format": 4,
+        }
+
+    # Format 5: KKS plant coding — preserve all fields so the valve isn't dropped.
+    m = TAG_PATTERN_5.match(s)
+    if m:
+        system = m.group("system").upper()
+        aggregate = m.group("aggregate")
+        component = (m.group("component") or "").upper()
+        counter = m.group("counter") or ""
+        # serial = everything after the 2-digit unit (system+aggregate+component
+        # +counter, spaces already collapsed). The leading unit is the only part
+        # shared across the whole drawing, so encoding the rest into `serial`
+        # guarantees distinct KKS tags get distinct dedup keys (area+serial) and
+        # don't merge.
+        serial = f"{system}{aggregate}{component}{counter}"
+        return {
+            "area": m.group("unit"),
+            # Category = the KKS component code when present (AA/BR/BS/…), else
+            # the 3-letter system code. FIRST-PASS mapping — the KKS component →
+            # valve-type mapping should be refined per client; this keeps the
+            # data visible rather than dropping it.
+            "type_code": component or system,
+            "serial": serial,
+            "format": 5,
         }
 
     return None

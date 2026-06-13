@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Check, CheckCheck, Maximize, Minus, Network, PanelRightOpen, Plus } from "lucide-react";
 import { useTheme } from "../theme/ThemeContext";
 import BulkReviewScreen from "./bulk-review/BulkReviewScreen";
@@ -82,6 +83,7 @@ const DEMO_ELEMENT_DATA: Record<string, CanvasElement> = {
 const DATASHEET_TYPES = new Set(["Control Valve", "Flow Transmitter", "Block Valve", "Centrifugal Pump"]);
 
 export default function Studio({ project, userName, onBack }: Props) {
+  const navigate = useNavigate();
   const { theme } = useTheme();
   const dark = theme === "dark";
 
@@ -597,6 +599,7 @@ export default function Studio({ project, userName, onBack }: Props) {
         onBack={onBack}
         onSave={onBack}
         onBulkReview={onBulkReview}
+        onAllData={() => navigate(`/jobs/${project.id}/data`)}
       />
 
       <div className={`studio-body studio-body--draw ${propsOpen ? "with-props" : "with-strip"}`}>

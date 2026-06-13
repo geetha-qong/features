@@ -3142,3 +3142,160 @@ input, textarea { font-family: inherit; }
 .graph-stats-chip .sep {
   opacity: 0.5;
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   All Data view — sibling of Bulk Review (.br-*). One searchable surface that
+   lists every extracted artefact for a job: canonical entities + raw YOLO
+   detections. Reuses .bulk-review chrome (.br-top / .br-search / .br-btn /
+   .br-empty); adds .alldata-* for the summary strip, filter chips and unified
+   table.
+   ────────────────────────────────────────────────────────────────────────── */
+.alldata {
+  height: 100vh;
+  display: flex; flex-direction: column;
+}
+
+/* summary strip */
+.alldata-summary {
+  flex: 0 0 auto;
+  display: flex; gap: 10px;
+  padding: 14px 18px 6px;
+  background: var(--bg);
+}
+.alldata-summary-card {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  min-width: 92px;
+}
+.alldata-summary-card strong {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  line-height: 1.1;
+  color: var(--fg-1);
+}
+.alldata-summary-card span {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+/* filter chips */
+.alldata-chips {
+  flex: 0 0 auto;
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 8px 18px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.alldata-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg-2);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background 140ms var(--ease-std), border-color 140ms var(--ease-std);
+}
+.alldata-chip:hover { background: var(--surface-alt); }
+.alldata-chip .cnt {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg-3);
+}
+.alldata-chip.active {
+  background: var(--qong-violet-100);
+  border-color: rgba(199,63,190,0.35);
+  color: var(--qong-purple);
+}
+.alldata-chip.active .cnt {
+  background: var(--qong-purple);
+  color: #fff;
+}
+[data-theme="dark"] .alldata-chip.active {
+  background: rgba(199,63,190,0.20);
+  color: #F5D6FF;
+  border-color: rgba(199,63,190,0.45);
+}
+
+/* unified table */
+.alldata-table-wrap {
+  flex: 1; min-height: 0;
+  overflow: auto;
+  background: var(--bg);
+}
+.alldata-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.alldata-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  text-align: left;
+  padding: 9px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+.alldata-table tbody td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-1);
+  vertical-align: top;
+}
+.alldata-table tbody tr:hover td { background: var(--bg-elev); }
+.alldata-table td.mono { font-family: var(--font-mono); }
+.alldata-table td.tag { font-weight: 600; color: var(--qong-purple); }
+[data-theme="dark"] .alldata-table td.tag { color: #E4BFFF; }
+.alldata-table td.detail { color: var(--fg-2); }
+.alldata-empty-row {
+  text-align: center;
+  color: var(--fg-3);
+  padding: 28px 14px !important;
+  font-style: italic;
+}
+
+/* source badge */
+.alldata-src-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+}
+.alldata-src-badge.entity {
+  background: var(--qong-violet-100);
+  color: var(--qong-purple);
+  border-color: rgba(199,63,190,0.35);
+}
+[data-theme="dark"] .alldata-src-badge.entity {
+  background: rgba(199,63,190,0.18);
+  color: #F5D6FF;
+}
+.alldata-src-badge.detection {
+  background: rgba(34,211,238,0.12);
+  color: var(--scan-cyan, #06b6d4);
+  border-color: rgba(34,211,238,0.35);
+}

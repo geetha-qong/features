@@ -6,6 +6,7 @@ import {
   Download,
   FileText,
   LayoutGrid,
+  Table2,
   LogOut,
   MoreHorizontal,
   Settings,
@@ -33,6 +34,7 @@ interface Props {
   onBack: () => void;
   onSave: () => void;
   onBulkReview: () => void;
+  onAllData: () => void;
 }
 
 /** Available deliverable_type × file_format combos — matches the REGISTRY
@@ -81,6 +83,7 @@ export default function StudioTopBar({
   onBack,
   onSave,
   onBulkReview,
+  onAllData,
 }: Props) {
   const [showMenu, setShowMenu] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -134,6 +137,9 @@ export default function StudioTopBar({
         </div>
       </div>
       <div style={{ flex: 1 }}></div>
+      <button className="btn btn-secondary btn-sm" onClick={onAllData} title="See all extracted data for this job">
+        <Table2 size={13} strokeWidth={1.6} /> All Data
+      </button>
       <button className="btn btn-secondary btn-sm" onClick={onBulkReview} title="Open Bulk Review workbench">
         <LayoutGrid size={13} strokeWidth={1.6} /> Bulk Review
       </button>
