@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DetectionItem } from "./api";
+import type { JobGraph } from "./types";
+import GraphLayer from "./GraphLayer";
 import { canvasDisplayLabel, displayNameForModelLabel } from "./labelMap";
 
 interface PidElement {
@@ -183,6 +185,10 @@ interface Props {
   activeLineType?: LineType;
   /** Selected entity class + sub_class for mark-symbol mode (Phase 3). */
   activeMarkClass?: { entity_class: string; sub_class: string } | null;
+  /** Auto-extracted process graph (Stream 3). Null when none is available. */
+  graph?: JobGraph | null;
+  /** Whether the graph overlay layer is toggled on. */
+  showGraph?: boolean;
 }
 
 export default function PidCanvas({
@@ -207,6 +213,8 @@ export default function PidCanvas({
   onEdgeDrawn,
   activeLineType = "process_pipe",
   activeMarkClass,
+  graph,
+  showGraph,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const innerRef = useRef<HTMLDivElement | null>(null);
@@ -294,6 +302,8 @@ export default function PidCanvas({
             activeLineType={activeLineType}
             activeMarkClass={activeMarkClass}
             dark={dark}
+            graph={graph ?? null}
+            showGraph={!!showGraph}
           />
         )}
         {useTile && (
@@ -455,6 +465,8 @@ function PageWithOverlays({
   activeLineType,
   activeMarkClass,
   dark,
+  graph,
+  showGraph,
 }: {
   pageFullUrl: string;
   pageIndex: number;
@@ -474,6 +486,8 @@ function PageWithOverlays({
   activeLineType: LineType;
   activeMarkClass: { entity_class: string; sub_class: string } | null | undefined;
   dark: boolean;
+  graph: JobGraph | null;
+  showGraph: boolean;
 }) {
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -901,6 +915,18 @@ function PageWithOverlays({
                 fill={LINE_STYLE[activeLineType].color}
               />
             </g>
+          )}
+
+          {/* Layer 5: process-graph overlay (Stream 3). Drawn on top of the
+              detection / annotation / edge layers; coords are already
+              page-pixel so they share the same viewBox with zero translation. */}
+          {graph && (
+            <GraphLayer
+              graph={graph}
+              natural={natural}
+              visible={showGraph}
+              onSelect={onSelect}
+            />
           )}
         </svg>
       )}

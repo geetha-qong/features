@@ -2,6 +2,7 @@
  * Thin fetch helpers for the studio surfaces.
  * Cookie auth; same Vite proxy as the rest of the SPA.
  */
+import type { JobGraph } from "./types";
 
 export interface RealSheet {
   id: number;
@@ -112,6 +113,25 @@ export const getJobDetections = (jobId: number) =>
   call<JobDetectionsResp>(`/api/v1/jobs/${jobId}/detections`);
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Persisted sheet "Apply" state (design 2026-06-13 §1b)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** {sheet_number: applied_at_iso}. JSON object keys arrive as strings; the
+ *  frontend re-keys them to numbers when seeding `appliedBySheet`. */
+export interface AppliedMapResponse {
+  applied: Record<string, string>;
+}
+
+/** Fetch the map of applied sheets for a job so Studio can seed `appliedBySheet`
+ *  on load. */
+export const getAppliedSheets = (jobId: number) =>
+  call<AppliedMapResponse>(`/api/v1/jobs/${jobId}/sheets/applied`);
+
+/** Mark a sheet applied (upsert). Fire-and-forget alongside the optimistic UI. */
+export const applySheet = (jobId: number, sheetNumber: number) =>
+  callJson<unknown>("POST", `/api/v1/jobs/${jobId}/sheets/${sheetNumber}/apply`);
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Editable deliverables (Spec A / FEATURES #26 — entity_overrides API)
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -162,6 +182,24 @@ export const getEntities = (jobId: number, deliverableType: string) =>
   call<EntitiesResponse>(
     `/api/v1/jobs/${jobId}/entities?deliverable_type=${encodeURIComponent(deliverableType)}`,
   );
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Process-graph visualization (Stream 3)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** Fetch the auto-extracted process graph (nodes + pipe edges) for a job's
+ *  active page. Returns `null` when no graph is available — 404
+ *  ({"error":"no_canonical"}, pipeline never ran) and 409
+ *  ({"error":"canonical_required"}, graph not computed for a legacy job) are
+ *  both treated as "no graph" and surface a quiet disabled state rather than
+ *  an uncaught error. Any other status rethrows the HttpError. */
+export const getJobGraph = (jobId: number): Promise<JobGraph | null> =>
+  call<JobGraph>(`/api/v1/jobs/${jobId}/graph`).catch((e) => {
+    if (e instanceof HttpError && (e.status === 404 || e.status === 409)) {
+      return null;
+    }
+    throw e;
+  });
 
 /** PATCH a partial entity update. `fields` is a map of field-path → new value;
  *  the backend captures `prior_value` from the on-disk canonical (audit trail).

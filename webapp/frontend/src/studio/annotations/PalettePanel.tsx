@@ -8,9 +8,35 @@
  * collapsible categories"). Click-to-arm semantics + activeMarkClass shape are
  * unchanged so the rest of Studio + the existing tests keep working.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Activity, Boxes, ChevronDown, Wrench } from "lucide-react";
 import { VALVE_SUB_CLASS_LABELS } from "./valveLabels";
+import { useShortcuts } from "../shortcuts/useShortcuts";
+import type { ShortcutMap } from "../shortcuts/api";
+
+/**
+ * Build a reverse lookup `"<entity_class>:<sub_class>" → key` from the live
+ * keymap. The keymap is keyed by the keyboard key; a `select-class` binding
+ * carries the entity_class/sub_class it arms. We invert that so each palette
+ * row can show the user's ACTUAL bound key (FEATURES #38) instead of the
+ * static design-time hint. If two keys bind the same class, last write wins —
+ * fine for a visual hint.
+ */
+function buildClassKeyIndex(shortcuts: ShortcutMap): Record<string, string> {
+  const idx: Record<string, string> = {};
+  for (const [key, binding] of Object.entries(shortcuts)) {
+    if (binding.action === "select-class" && binding.entity_class && binding.sub_class) {
+      idx[`${binding.entity_class}:${binding.sub_class}`] = key;
+    }
+  }
+  return idx;
+}
+
+/** Display form of a keymap key: single letters/digits upper-cased, named keys
+ *  (Escape, Delete, …) shown verbatim. */
+function formatHotkey(key: string): string {
+  return key.length === 1 ? key.toUpperCase() : key;
+}
 
 interface ActiveMark {
   entity_class: string;
@@ -93,6 +119,13 @@ export default function PalettePanel({
     equipment: true,
   });
 
+  // Live per-user keymap (merged with defaults by the backend). We index it by
+  // class so each row shows the user's ACTUAL bound key, falling back to the
+  // row's static design hint when the action has no binding (e.g. map still
+  // loading, or a sub_class nobody has bound).
+  const { shortcuts } = useShortcuts();
+  const classKeyIndex = useMemo(() => buildClassKeyIndex(shortcuts), [shortcuts]);
+
   return (
     <aside className="palette-side" data-testid="palette-panel">
       <div className="palette-side-head">Symbol Palette</div>
@@ -122,6 +155,10 @@ export default function PalettePanel({
                     const isActive =
                       activeMarkClass?.entity_class === cat.key &&
                       activeMarkClass?.sub_class === item.sub;
+                    // User's actual bound key for this class, else the static
+                    // design-time hint, else nothing.
+                    const boundKey = classKeyIndex[`${cat.key}:${item.sub}`] ?? item.key;
+                    const hotkey = boundKey ? formatHotkey(boundKey) : null;
                     return (
                       <button
                         key={item.sub}
@@ -133,7 +170,7 @@ export default function PalettePanel({
                           if (isActive) onChange(null);
                           else onChange({ entity_class: cat.key, sub_class: item.sub });
                         }}
-                        title={`${item.label} (${item.sub})${item.key ? `  ·  ${item.key.toUpperCase()}` : ""}`}
+                        title={`${item.label} (${item.sub})${hotkey ? `  ·  ${hotkey}` : ""}`}
                         style={
                           {
                             // pink fallback kept so the test that asserts
@@ -149,8 +186,8 @@ export default function PalettePanel({
                           <span className="palette-row-sub">{item.sub}</span>
                         </span>
                         <span className="palette-row-name">{item.label}</span>
-                        {item.key ? (
-                          <kbd className="palette-row-kbd">{item.key.toUpperCase()}</kbd>
+                        {hotkey ? (
+                          <kbd className="palette-row-kbd">{hotkey}</kbd>
                         ) : null}
                       </button>
                     );

@@ -1,6 +1,33 @@
-import { describe, test, expect, vi } from "vitest";
+import { describe, test, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import PalettePanel from "./PalettePanel";
+import { useShortcuts } from "../shortcuts/useShortcuts";
+import type { UseShortcutsResult } from "../shortcuts/useShortcuts";
+import type { ShortcutMap } from "../shortcuts/api";
+
+// Mock the keymap hook so we don't hit the network and can control the
+// per-user bindings the palette renders its hotkey badges from.
+vi.mock("../shortcuts/useShortcuts", () => ({
+  useShortcuts: vi.fn(),
+}));
+
+const mockedUseShortcuts = vi.mocked(useShortcuts);
+
+function mockShortcuts(shortcuts: ShortcutMap) {
+  mockedUseShortcuts.mockReturnValue({
+    shortcuts,
+    update: vi.fn(),
+    replace: vi.fn(),
+    reset: vi.fn(),
+    loading: false,
+    error: null,
+  } as UseShortcutsResult);
+}
+
+beforeEach(() => {
+  // Default: empty keymap → rows fall back to their static design-time hints.
+  mockShortcuts({});
+});
 
 describe("PalettePanel", () => {
   test("renders category headers for valve, instrument, equipment", () => {
@@ -65,5 +92,35 @@ describe("PalettePanel", () => {
     );
     fireEvent.click(screen.getByTestId("palette-item-valve-BV"));
     expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  test("renders the user's customised hotkey for a class", () => {
+    // User rebound the BV-valve select-class action to "v" (backend default
+    // shape), and FT-instrument to "f". The badge must reflect these live
+    // bindings, not the static design-time hints ("2" / "8").
+    mockShortcuts({
+      v: { action: "select-class", entity_class: "valve", sub_class: "BV" },
+      f: { action: "select-class", entity_class: "instrument", sub_class: "FT" },
+    });
+    render(<PalettePanel activeMarkClass={null} onChange={() => {}} dark={false} />);
+
+    const bvKbd = screen
+      .getByTestId("palette-item-valve-BV")
+      .querySelector("kbd.palette-row-kbd");
+    expect(bvKbd?.textContent).toBe("V");
+
+    const ftKbd = screen
+      .getByTestId("palette-item-instrument-FT")
+      .querySelector("kbd.palette-row-kbd");
+    expect(ftKbd?.textContent).toBe("F");
+  });
+
+  test("falls back to the static design hint when no binding exists", () => {
+    // Empty keymap (default from beforeEach) → BV shows its static "2" hint.
+    render(<PalettePanel activeMarkClass={null} onChange={() => {}} dark={false} />);
+    const bvKbd = screen
+      .getByTestId("palette-item-valve-BV")
+      .querySelector("kbd.palette-row-kbd");
+    expect(bvKbd?.textContent).toBe("2");
   });
 });

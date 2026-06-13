@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCheck, Maximize, Minus, PanelRightOpen, Plus } from "lucide-react";
+import { Check, CheckCheck, Maximize, Minus, Network, PanelRightOpen, Plus } from "lucide-react";
 import { useTheme } from "../theme/ThemeContext";
 import BulkReviewScreen from "./bulk-review/BulkReviewScreen";
 import DatasheetDrawer from "./datasheet/DatasheetDrawer";
@@ -9,15 +9,18 @@ import StudioFoot from "./StudioFoot";
 import StudioTopBar from "./StudioTopBar";
 import { buildSheets } from "./buildSheets";
 import {
+  applySheet,
+  getAppliedSheets,
   getEntities,
   getJobDetections,
+  getJobGraph,
   getJobSheets,
   type EntitiesResponse,
   type JobDetectionsResp,
   type JobSheetsResp,
 } from "./api";
 import { buildElementsForTile, buildEntityIndex } from "./buildElements";
-import type { CanvasElement, ProjectLike, SessionEvent } from "./types";
+import type { CanvasElement, JobGraph, ProjectLike, SessionEvent } from "./types";
 // FEATURES #38 — marking + edge drawing wiring
 import type { CanvasMode, LineType, UserAnnotationLite, EdgeLite } from "./PidCanvas";
 import PalettePanel from "./annotations/PalettePanel";
@@ -123,6 +126,10 @@ export default function Studio({ project, userName, onBack }: Props) {
   // equipment detections start landing in canonical, currently always empty.
   const [valveEntitiesResp, setValveEntitiesResp] = useState<EntitiesResponse | null>(null);
   const [instEntitiesResp, setInstEntitiesResp] = useState<EntitiesResponse | null>(null);
+  // Auto-extracted process graph (Stream 3). Null when unavailable (404/409) —
+  // the canvas + chip + toggle quietly disable in that case.
+  const [graph, setGraph] = useState<JobGraph | null>(null);
+  const [showGraph, setShowGraph] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,6 +162,16 @@ export default function Studio({ project, userName, onBack }: Props) {
       })
       .catch(() => {
         if (!cancelled) setInstEntitiesResp(null);
+      });
+    // Process graph — getJobGraph already maps 404/409 → null, so the only
+    // thing reaching .catch is an unexpected error (network/auth); treat that
+    // as "no graph" too rather than blocking the canvas.
+    getJobGraph(project.id)
+      .then((g) => {
+        if (!cancelled) setGraph(g);
+      })
+      .catch(() => {
+        if (!cancelled) setGraph(null);
       });
     return () => {
       cancelled = true;
@@ -401,6 +418,42 @@ export default function Studio({ project, userName, onBack }: Props) {
   // updates a per-sheet count badge (shown in the SheetPicker dropdown) and
   // flips the toolbar button to its "Applied" confirmation state.
   const [appliedBySheet, setAppliedBySheet] = useState<Record<number, number>>({});
+  // Persisted Apply state (design 2026-06-13 §1b). On load we learn WHICH sheets
+  // were applied (and when); the per-sheet mark-count at apply-time isn't
+  // persisted, so we seed the count from the live annotation count for that
+  // sheet. That keeps the picker badge meaningful and the re-arm rule intact
+  // (`currentApplied === applyCount` stays true until the user changes marks).
+  useEffect(() => {
+    let cancelled = false;
+    getAppliedSheets(project.id)
+      .then((r) => {
+        if (cancelled) return;
+        const countBySheet: Record<number, number> = {};
+        for (const a of annotations) {
+          countBySheet[a.sheet_number] = (countBySheet[a.sheet_number] ?? 0) + 1;
+        }
+        const seed: Record<number, number> = {};
+        for (const k of Object.keys(r.applied)) {
+          const n = Number(k);
+          // Positive sentinel (>=1) so the sheet reads as "applied" even when
+          // it currently has zero live marks.
+          seed[n] = countBySheet[n] ?? 1;
+        }
+        // Don't clobber any apply the user did during this session before the
+        // seed landed — existing session state wins.
+        setAppliedBySheet((s) => ({ ...seed, ...s }));
+      })
+      .catch(() => {
+        /* non-fatal — Apply stays session-only if the fetch fails */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Seed once per job. `annotations` may still be loading on first run; we
+    // intentionally don't re-run on every annotation change (that would clobber
+    // user re-arms). Seeding once at mount is sufficient for the reload case.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
   const [propsOpen, setPropsOpen] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -422,7 +475,12 @@ export default function Studio({ project, userName, onBack }: Props) {
   const applied = currentApplied > 0 && currentApplied === applyCount;
   function handleApply() {
     if (!applyCount) return;
+    // Optimistic UI first — the badge flips immediately.
     setAppliedBySheet((s) => ({ ...s, [current.id]: applyCount }));
+    // Persist (design 2026-06-13 §1b). `current.id` is the per-sheet key the
+    // UI already uses; it's sent as sheet_number so reloads re-seed correctly.
+    // Fire-and-forget: a failed write only means the apply is session-only.
+    void applySheet(project.id, current.id).catch(() => {});
     showToast(
       `Applied ${applyCount} mark${applyCount === 1 ? "" : "s"} to ${current.name.replace(".pdf", "")}`,
     );
@@ -559,6 +617,36 @@ export default function Studio({ project, userName, onBack }: Props) {
               />
             )}
             <div className="canvas-toolbar-spring" />
+            {graph && (
+              <span
+                className="graph-stats-chip"
+                title="Auto-extracted process graph for this sheet"
+              >
+                <span className="num">{graph.stats.nodes}</span> nodes
+                <span className="sep">·</span>
+                <span className="num">{graph.stats.edges}</span> edges
+                <span className="sep">·</span>
+                <span className="num">{graph.orphan_lines.length}</span> orphans
+              </span>
+            )}
+            <button
+              type="button"
+              className={`graph-toggle ${showGraph ? "active" : ""}`}
+              onClick={() => setShowGraph((v) => !v)}
+              disabled={!graph}
+              aria-pressed={showGraph}
+              data-active={showGraph}
+              title={
+                graph
+                  ? showGraph
+                    ? "Hide process graph"
+                    : "Show process graph"
+                  : "No process graph available for this job"
+              }
+            >
+              <Network size={15} strokeWidth={1.8} />
+              Graph
+            </button>
             {totalIssues > 0 && (
               <span className="canvas-toolbar-issues" title={`${totalIssues} issues across this project`}>
                 <span className="num">{totalIssues}</span> issues
@@ -601,6 +689,8 @@ export default function Studio({ project, userName, onBack }: Props) {
             onEdgeDrawn={onEdgeDrawn}
             activeLineType={activeLineType}
             activeMarkClass={activeMarkClass}
+            graph={graph}
+            showGraph={showGraph}
           />
           <div className="zoom-ctl">
             <button

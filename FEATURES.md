@@ -24,6 +24,40 @@
 
 ---
 
+## [2026-06-13] #40 — Graph extraction v0 in production (line detection → graph → DB) + annotation finishing
+
+**Type:** feature | architecture
+**Stage:** lines | graph | webapp | webapp/frontend
+**Status:** shipped to working tree (not yet committed/deployed)
+**Spec:** `docs/superpowers/specs/2026-06-13-graph-db-and-annotation-finishing-design.md`
+**Supersedes track decision in:** `docs/superpowers/specs/2026-06-05-graph-extraction-design.md` §0/§4 (experimental `dt/main` detour) — built directly on `dev` in the handover destination.
+
+**Why:** The annotation surface (#38/#39) could capture marks but the digital-twin needed *connectivity* — the process-pipe graph — extracted, stored, and rendered. User asked to finish the Studio/annotation polish, integrate line detection, then "complete full graph and store in DB". Brainstormed 4 decisions: build on `dev` (not experimental track), hybrid CV+LLM line detection, file-first + DB-read-index storage (mirror canonical_entities), and full annotation finishing.
+
+**What (multi-agent: 3 parallel build agents + lead integration):**
+
+*Stream 1 — annotation finishing:*
+- Palette hotkey badges now read the user's live keymap via `useShortcuts()` (`PalettePanel.tsx`), falling back to defaults — was static design-time keys.
+- Persisted "Apply": new `sheet_apply_state` table + `webapp/routers/sheets.py` (`POST/DELETE /api/v1/jobs/{id}/sheets/{n}/apply`, `GET /sheets/applied`); `Studio.tsx` seeds `appliedBySheet` on load. Survives reload.
+
+*Stream 2 — line detection (`webapp/graph/` package, pure/unit-tested):* `loader` (canonical + page image + tile geometry; tile-local→page-pixel translation), `linker` (rapidocr crop-OCR + rapidfuzz fuzzy-match + class-prior fallback), `tracer` (`OpenCVLineTracer`: adaptive-threshold → bbox-mask → skeletonize → connected-components → resolution-scaled min-length + area/span line-likeness filter → RDP), `resolver` (endpoint→nearest-bbox snap), `fallback` (OpenRouter vision when edges<0.3×nodes), `assembler` (networkx.MultiGraph → `canonical_graph.json` spec §3), `pipeline.extract_graph` (DB-free). Deps added: `opencv-python-headless`, `scikit-image`, `networkx`.
+
+*Stream 3 — storage + API + UI + wiring:* `graph_nodes`/`graph_edges` DB read-index + `webapp/graph/graph_db_index.sync_graph_to_db` + backfill `webapp/scripts/index_graph_to_db.py` (mirror canonical_entities exactly). `webapp/routers/graph.py` `GET /api/v1/jobs/{id}/graph` merges file + `graph_corrections` (user edges), 404 `no_canonical` / 409 `canonical_required`. Wired into `pipeline_runner.py` after in-place YOLO inference (`tile_local_detections=True`), non-fatal. `GraphLayer.tsx` SVG overlay in `PidCanvas`/`Studio` (nodes=circles, edges colored by method: opencv green / llm_fallback yellow-dash / user cyan), right-rail Graph toggle + stats chip.
+
+**Result (real job 2, 5500px hi-DPI page):**
+- 31 nodes, **26 linked to canonical (84%** — exceeds spec ≥70% target).
+- 23 edges (CV `opencv` + `llm_fallback` mix); fallback engaged because raw CV was edge-sparse.
+- Orphan lines **3600 → 70** after adding resolution-scaled `min_length` (frac 0.012) + area/span≤3 line-likeness filter + a 150-orphan cap (diagnostic only).
+- Coordinate fix verified: tile-local bbox `[3285,1311]@tile_p0_r0_c1` → page-pixel spanning x 827–5351, y 1311–2876.
+- Tests: backend 240 pass (1 pre-existing env-only failure `test_sheets_empty_when_no_tiles`, confirmed on clean baseline — reads real `job_outputs/` tiles locally); 44 new graph/sheets tests; frontend tsc clean + 73 vitest.
+
+**Notes / gotchas for next session:**
+- **`Job.gpu_detections` bboxes are TILE-LOCAL** (inference.py:255), but the graph model is page-pixel. The glue MUST pass `tile_local_detections=True` to `extract_graph`; loader translates via `compute_tile_offsets`. Forgetting this clusters every node top-left.
+- **OpenCV line tracing underperforms on hi-DPI pages** — most usable edges came from the LLM fallback. This is the predecessor spec's "Week-2 hard-gate" scenario; the designed graceful degradation handled it. Tuning the CV tracer (or declaring LLM-primary for hi-DPI) is a v0.5 follow-up. The `LineTracer` Protocol seam makes a swap cheap.
+- **Rejecting an *auto* edge is not wired** — auto edges live in the file/index, not `graph_corrections`, so there's no per-auto-edge reject key. GET merge is additive. v0.5.
+- New tables created in local Postgres via `create_all`; on deploy they auto-create on startup. Live OpenRouter client is repo-root `extractor.py`, NOT `webapp/extractor.py`.
+- **Browser E2E not yet run** — needs deployed/rebuilt env (new server code + Vite build). Run post-deploy on dev.
+
 ## [2026-06-12] #39 — Qong Studio UI redesign: sheet-picker dropdown, category palette sidebar, Apply action, details strip
 
 **Type:** feature | architecture

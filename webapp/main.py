@@ -18,6 +18,9 @@ from webapp.routers import webhooks as webhooks_router
 from webapp.routers import annotations as annotations_router
 from webapp.routers import edges as edges_router
 from webapp.routers import shortcuts as shortcuts_router
+from webapp.routers import sheets as sheets_router
+# Process-graph read API (graph-extraction, 2026-06-13)
+from webapp.routers import graph as graph_router
 import webapp.deliverables  # noqa: F401 — populates generator registry
 from webapp.config import JOB_OUTPUT_DIR, get_job_dir
 from webapp.watchdog import start_watchdog
@@ -128,6 +131,8 @@ app.include_router(webhooks_router.router)
 app.include_router(annotations_router.router)
 app.include_router(edges_router.router)
 app.include_router(shortcuts_router.router)
+app.include_router(sheets_router.router)
+app.include_router(graph_router.router)
 
 
 @app.get("/healthz")

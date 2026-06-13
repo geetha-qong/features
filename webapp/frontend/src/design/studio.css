@@ -3086,3 +3086,59 @@ input, textarea { font-family: inherit; }
   0%, 100% { opacity: 0.65; transform: scale(0.92); }
   50%      { opacity: 1;    transform: scale(1.04); }
 }
+
+/* ---- process-graph overlay (Stream 3) ------------------------------------ */
+/* Toggle button in the canvas toolbar; mirrors the .dx-apply sizing so it
+   sits flush alongside the Apply control. Active state uses the scan-cyan
+   accent to echo the GraphLayer node/edge color. */
+.graph-toggle {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-2, #6B6F8A);
+  background: var(--bg-elev, transparent);
+  border: 1px solid var(--border, rgba(20,22,42,0.14));
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.graph-toggle:hover:not(:disabled) {
+  border-color: rgba(34,211,238,0.5);
+  color: var(--scan-cyan);
+}
+.graph-toggle.active {
+  background: rgba(34,211,238,0.15);
+  border-color: rgba(34,211,238,0.45);
+  color: var(--scan-cyan);
+}
+.graph-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Stats chip — same pill shape as .canvas-toolbar-issues, scan-cyan themed. */
+.graph-stats-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(34,211,238,0.1);
+  border: 1px solid rgba(34,211,238,0.3);
+  color: var(--scan-cyan);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.graph-stats-chip .num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.graph-stats-chip .sep {
+  opacity: 0.5;
+}

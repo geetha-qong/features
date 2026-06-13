@@ -323,6 +323,38 @@ def run_pipeline_for_job_rq(
         except Exception as _yolo_err:
             print(f"[inplace-yolo] job {job_id}: {_yolo_err}", file=sys.stderr)
 
+        # Graph extraction (2026-06-13 design). Build canonical_graph.json from
+        # the full-page image + canonical entities + YOLO detections, then
+        # dual-write the graph_nodes/graph_edges read-index. Runs AFTER in-place
+        # inference so Job.gpu_detections is populated. gpu_detections bboxes are
+        # TILE-LOCAL (inference.py), so pass tile_local_detections=True to
+        # translate to page-pixel. Non-fatal — a graph failure logs but never
+        # rolls back job "done" (same contract as the canonical-db sync above).
+        try:
+            from webapp.graph.pipeline import extract_graph
+            from webapp.graph.graph_db_index import sync_graph_to_db
+            from webapp.datetime_utils import utc_iso, utcnow
+
+            db.refresh(job)
+            raw_dets = job.gpu_detections
+            detections = json.loads(raw_dets) if isinstance(raw_dets, str) and raw_dets else (raw_dets or [])
+            if detections:
+                graph = extract_graph(
+                    str(job_dir),
+                    detections,
+                    generated_at=utc_iso(utcnow()),
+                    job_id=job_id,
+                    tile_local_detections=True,
+                )
+                n_nodes, n_edges = sync_graph_to_db(graph, db)
+                _stats = graph.get("stats", {})
+                print(f"[graph-extract] job {job_id}: nodes={n_nodes} edges={n_edges} "
+                      f"fallback={_stats.get('fallback_used')}")
+            else:
+                print(f"[graph-extract] job {job_id}: no detections — skipped")
+        except Exception as _g_err:
+            print(f"[graph-extract] job {job_id}: {_g_err}", file=sys.stderr)
+
         _finalize_job_run(run_id, "done")
 
         # Side effects (LS sync, GPU dispatch) use the same session

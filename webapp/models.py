@@ -380,6 +380,38 @@ class UserAnnotation(Base):
     )
 
 
+class SheetApplyState(Base):
+    """Persisted "Apply" state for a Studio sheet (design 2026-06-13, §1b).
+
+    When a reviewer finishes marking a P&ID sheet they click "Apply · N".
+    Previously this was UI-only per-session state (`appliedBySheet` in
+    `Studio.tsx`); this table makes it survive a reload.
+
+    One row per (job_id, sheet_number) — applying again upserts `applied_at` /
+    `applied_by`; "re-arm" (the user added/removed marks and wants to re-apply)
+    deletes the row. The presence of a row is the signal "this sheet is
+    applied"; `applied_at` is surfaced to the frontend (Z-suffixed via
+    `utc_iso`) so the picker can show when.
+
+    Source-of-truth note: the underlying annotations live in
+    `user_annotations`; this table only records the reviewer's "I'm done with
+    this sheet" intent. It is not consumed by deliverable generators.
+    """
+    __tablename__ = "sheet_apply_state"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
+    sheet_number = Column(Integer, nullable=False)
+    applied_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    applied_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "sheet_number", name="uq_sheet_apply_state"),
+    )
+
+
 class GraphCorrection(Base):
     """User-added or user-edited edges on a job's process graph.
 
@@ -431,4 +463,67 @@ class GraphCorrection(Base):
     # duplicate-name DDL error on Base.metadata.create_all.
     __table_args__ = (
         UniqueConstraint("job_id", "edge_id", name="uq_graph_corrections_je"),
+    )
+
+
+class GraphNodeRow(Base):
+    """DB read-index of auto-extracted graph nodes — mirrors the `nodes` array
+    in `canonical_graph.json` (graph-extraction, 2026-06-13 design).
+
+    **Source of truth is the on-disk `canonical_graph.json`.** This table is a
+    denormalised read-cache for cross-job graph queries ("every node of class
+    valve_bf across customer X's jobs", graph-size dashboards) without parsing N
+    JSON files. Populated by `webapp.graph.graph_db_index.sync_graph_to_db()` as
+    a dual-write after the pipeline emits the file, and back-populated for legacy
+    jobs by `webapp/scripts/index_graph_to_db.py`.
+
+    User edits are NOT applied here — `graph_corrections` is the edit store.
+    This row reflects what the extractor emitted. Unique on (job_id, node_id).
+    """
+    __tablename__ = "graph_nodes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
+    node_id = Column(String, nullable=False, index=True)          # 'n_001' (graph-local id)
+    entity_id = Column(String, nullable=True, index=True)         # canonical_entities.entity_id; null when OCR/link failed
+    tag = Column(String, nullable=True, index=True)
+    node_class = Column(String, nullable=True, index=True)        # 'valve_bf', 'instrument', ...
+    bbox = Column(JSON, nullable=True)                            # [x1,y1,x2,y2] page-pixel
+    tile = Column(String, nullable=True)
+    confidence = Column(Float, nullable=True)
+    sheet_number = Column(Integer, nullable=False, default=1)     # denormalised from graph 'page'
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "node_id", name="uq_graph_nodes_jn"),
+    )
+
+
+class GraphEdgeRow(Base):
+    """DB read-index of auto-extracted graph edges — mirrors the `edges` array
+    in `canonical_graph.json`.
+
+    Same contract as `GraphNodeRow`: read-cache only, source of truth is the
+    file, user edits live in `graph_corrections`. `method` ∈ {opencv,
+    llm_fallback} (auto edges); user edges are NOT mirrored here — they already
+    have their own table. Unique on (job_id, edge_id).
+    """
+    __tablename__ = "graph_edges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=False, index=True)
+    edge_id = Column(String, nullable=False, index=True)          # 'e_001'
+    source_node = Column(String, nullable=False)                  # GraphNodeRow.node_id
+    target_node = Column(String, nullable=False)
+    method = Column(String, nullable=False, index=True)           # 'opencv' | 'llm_fallback'
+    confidence = Column(Float, nullable=True)
+    polyline = Column(JSON, nullable=False)                       # [[x,y],...] page-pixel
+    tile = Column(String, nullable=True)
+    sheet_number = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("job_id", "edge_id", name="uq_graph_edges_je"),
     )
