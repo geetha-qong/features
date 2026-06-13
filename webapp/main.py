@@ -204,7 +204,17 @@ async def spa_fallback(full_path: str):
 
     index = _SPA_DIST / "index.html"
     if index.exists():
-        return FileResponse(str(index), media_type="text/html")
+        # index.html must NOT be cached by the browser: it's the bootstrap that
+        # references the content-hashed asset bundles (index-<hash>.js/.css).
+        # If a browser holds a stale index.html it loads the OLD bundle after a
+        # deploy — the "hard-refresh to see changes" problem. no-cache forces a
+        # revalidation on every load so the new asset hashes are always picked
+        # up; the hashed assets themselves stay long-cached (immutable). Set
+        # post-construction (Starlette can drop a `headers=` kwarg depending on
+        # media type — see the FileResponse gotcha in CLAUDE.md).
+        resp = FileResponse(str(index), media_type="text/html")
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
     # Local dev without a build: tell the user to run `npm run build` or use
     # Vite dev server (port 5173). Don't surprise them with a 404.
     return JSONResponse(

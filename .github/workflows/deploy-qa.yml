@@ -130,3 +130,25 @@ jobs:
           done
           echo "Health check failed."
           exit 1
+
+      # Purge the Cloudflare edge cache post-deploy (same zone as dev — qa is a
+      # subdomain of qongsystems.com). Token + zone id from SSM; non-fatal and
+      # auto-skips until set. Mirrors deploy-dev.yml. See webapp/main.py
+      # spa_fallback for the origin no-cache header that handles browser HTML.
+      - name: Purge Cloudflare cache
+        run: |
+          TOKEN=$(aws ssm get-parameter --name /may26aws/qong-shared/cloudflare-purge-token --with-decryption --region "$AWS_REGION" --query Parameter.Value --output text 2>/dev/null || true)
+          ZONE=$(aws ssm get-parameter --name /may26aws/qong-shared/cloudflare-zone-id --region "$AWS_REGION" --query Parameter.Value --output text 2>/dev/null || true)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "None" ] || [ -z "$ZONE" ] || [ "$ZONE" = "None" ]; then
+            echo "::notice::Cloudflare purge skipped — set SSM /may26aws/qong-shared/cloudflare-purge-token + cloudflare-zone-id to enable."
+            exit 0
+          fi
+          RESP=$(curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE/purge_cache" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}')
+          echo "$RESP"
+          if echo "$RESP" | grep -q '"success":true'; then
+            echo "Cloudflare cache purged."
+          else
+            echo "::warning::Cloudflare purge did not report success (see response above)."
+          fi

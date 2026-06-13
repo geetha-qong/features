@@ -109,3 +109,30 @@ jobs:
           done
           echo "Health check failed."
           exit 1
+
+      # Purge the Cloudflare edge cache after a successful deploy so no stale
+      # HTML/assets linger. Belt-and-suspenders with the origin `Cache-Control:
+      # no-cache` on index.html (webapp/main.py spa_fallback) — that handles
+      # browser revalidation; this clears CF's edge. Token + zone id live in SSM
+      # (same convention as the GitHub PAT); this job already has AWS creds, so
+      # no new GitHub secrets are needed. Non-fatal + auto-skips until the SSM
+      # params exist, so it never blocks a deploy that's already healthy.
+      - name: Purge Cloudflare cache
+        run: |
+          TOKEN=$(aws ssm get-parameter --name /may26aws/qong-shared/cloudflare-purge-token --with-decryption --region "$AWS_REGION" --query Parameter.Value --output text 2>/dev/null || true)
+          ZONE=$(aws ssm get-parameter --name /may26aws/qong-shared/cloudflare-zone-id --region "$AWS_REGION" --query Parameter.Value --output text 2>/dev/null || true)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "None" ] || [ -z "$ZONE" ] || [ "$ZONE" = "None" ]; then
+            echo "::notice::Cloudflare purge skipped — set SSM /may26aws/qong-shared/cloudflare-purge-token + cloudflare-zone-id to enable."
+            exit 0
+          fi
+          RESP=$(curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE/purge_cache" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}')
+          echo "$RESP"
+          if echo "$RESP" | grep -q '"success":true'; then
+            echo "Cloudflare cache purged."
+          else
+            # Don't fail the deploy — the app is already live + healthy, and the
+            # origin no-cache header still prevents stale browser HTML.
+            echo "::warning::Cloudflare purge did not report success (see response above)."
+          fi
