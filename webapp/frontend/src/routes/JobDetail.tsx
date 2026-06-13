@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Activity, ArrowLeft } from "lucide-react";
+import { Activity, ArrowLeft, RotateCcw } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import Studio from "../studio/Studio";
 
@@ -34,6 +34,41 @@ export default function JobDetail() {
   const { user } = useAuth();
   const [job, setJob] = useState<JobResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [rerunning, setRerunning] = useState(false);
+  // Bumped after a successful re-run to re-engage the polling effect (the
+  // interval self-clears once a job reaches a terminal state, so we need a
+  // dependency change to restart it).
+  const [rerunNonce, setRerunNonce] = useState(0);
+
+  // Re-enqueue the extraction pipeline (POST /jobs/{id}/rerun). Used by the
+  // failed-state panel. On success we optimistically flip local status to
+  // "pending" so the polling effect re-engages and the page upgrades to the
+  // progress panel → Studio without a manual refresh.
+  async function handleRerun() {
+    if (!jobId) return;
+    setRerunning(true);
+    try {
+      const body = new FormData();
+      body.append("include_control_valves", "off");
+      const res = await fetch(`/api/v1/jobs/${jobId}/rerun`, {
+        method: "POST",
+        credentials: "include",
+        body,
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        setError(`Re-run failed (HTTP ${res.status}) ${detail.slice(0, 80)}`);
+        return;
+      }
+      setError(null);
+      setJob((j) => (j ? { ...j, status: "pending" } : j));
+      setRerunNonce((n) => n + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Re-run error");
+    } finally {
+      setRerunning(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +101,7 @@ export default function JobDetail() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [jobId]);
+  }, [jobId, rerunNonce]);
 
   if (error) {
     return (
@@ -102,16 +137,26 @@ export default function JobDetail() {
         </h1>
         <p style={{ color: "var(--fg-2)", marginTop: 12 }}>
           We couldn't process <strong>{job.original_filename || `Job ${job.job_id}`}</strong>.
-          Try re-uploading the PDF — large or scanned drawings sometimes need a
-          second pass.
+          This is often a transient worker timeout — re-running usually clears it.
         </p>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={() => navigate("/dashboard")}
-          style={{ marginTop: 24, display: "inline-flex", alignItems: "center", gap: 6 }}
-        >
-          <ArrowLeft size={13} strokeWidth={1.6} /> Back to Dashboard
-        </button>
+        <div style={{ marginTop: 24, display: "flex", gap: 10, justifyContent: "center" }}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleRerun}
+            disabled={rerunning}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <RotateCcw size={13} strokeWidth={1.6} />
+            {rerunning ? "Re-running…" : "Re-run extraction"}
+          </button>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate("/dashboard")}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <ArrowLeft size={13} strokeWidth={1.6} /> Back to Dashboard
+          </button>
+        </div>
       </main>
     );
   }

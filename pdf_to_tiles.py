@@ -1,15 +1,19 @@
 """
 Stage 1: Convert P&ID PDF to overlapping PNG tiles.
-Renders the PDF at 4x zoom and splits into a grid with overlap.
+Renders the PDF at 6x zoom and splits into a grid with overlap.
 
-Why 4x (bumped from 3x on 2026-06-08): the studio canvas displays tiles inside
-a viewport that's typically smaller than the rendered tile dimensions, so the
-browser is *downscaling*. Higher source DPI = more pixels for the browser's
-bicubic step to work with, which keeps thin engineering linework crisp at
-zoom-out. Bytes grow ~1.78x; YOLO inference is unaffected (v1-10's `_preprocess`
-letterboxes to 640 regardless of source size); OpenRouter Vision pass benefits
-from sharper small-text rendering. If disk/bandwidth becomes the bottleneck,
-4.0 is the right cap — 5.0+ doubles cost for diminishing visual gain.
+Why 6x (bumped from 4x on 2026-06-13): the earlier 4x cap was chosen for
+*canvas* sharpness, but it starved the *extraction*. On dense, tag-heavy A3
+sheets (e.g. the 70310-20-* drawings), 4x renders each 3x3 tile at only ~1900px,
+leaving tag text ~10-15px tall — too small for the OpenRouter Vision pass to
+read, so it returned 0 entities and the deliverables came out empty. Measured
+on job 50 page 0: zoom 4 → 0 valves; zoom 6 → 121 valves, all 121 tagged. The
+PDFs are vector (no text layer, ~95% vector objects), so higher DPI yields
+genuinely crisp text rather than upscaled blur. Cost: render pixels grow
+(6/4)^2 = 2.25x → bigger tile PNGs + more tokens per Vision call. Accepted —
+recall is the product's core metric. YOLO inference is unaffected (it
+letterboxes to 640). Grid stays 3x3 so the tile-geometry contract shared with
+PidCanvas.computeTileOffsets + webapp/graph/loader.py is untouched.
 """
 import fitz  # PyMuPDF
 from pathlib import Path
@@ -20,7 +24,7 @@ import math
 def pdf_to_tiles(
     pdf_path: str,
     output_dir: str = "tmp",
-    zoom: float = 4.0,
+    zoom: float = 6.0,
     grid_rows: int = 3,
     grid_cols: int = 3,
     overlap_pct: float = 0.20,

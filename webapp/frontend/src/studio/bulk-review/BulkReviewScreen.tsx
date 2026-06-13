@@ -41,6 +41,15 @@ const DELIVERABLE_KEY_TO_TYPE: Record<string, string | undefined> = {
   tags: undefined,
 };
 
+/** Per-deliverable export format — mirrors Studio.tsx:EXPORT_FORMAT so the two
+ *  download surfaces stay consistent. */
+const EXPORT_FORMAT: Record<string, "csv" | "xlsx"> = {
+  valve_list: "csv",
+  instrument_index: "xlsx",
+  equipment_list: "xlsx",
+  datasheet: "xlsx",
+};
+
 interface Props {
   /** Job ID — drives every `/api/v1/jobs/{jobId}/entities` call. */
   jobId: number;
@@ -127,6 +136,41 @@ export default function BulkReviewScreen({
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showDetail, setShowDetail] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportErr, setExportErr] = useState<string | null>(null);
+
+  // Download the active deliverable. Wires the previously-stubbed "Export"
+  // button to the same POST /export endpoint Studio's right-panel uses.
+  const onExport = useCallback(async () => {
+    if (!activeType) return;
+    const format = EXPORT_FORMAT[activeType] || "xlsx";
+    setExporting(true);
+    setExportErr(null);
+    try {
+      const res = await fetch(`/api/v1/jobs/${jobId}/export/${activeType}/${format}`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        setExportErr(`Export failed (HTTP ${res.status}) ${detail.slice(0, 80)}`);
+        return;
+      }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `job-${jobId}-${activeType}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      setExportErr(e instanceof Error ? e.message : "Export error");
+    } finally {
+      setExporting(false);
+    }
+  }, [activeType, jobId]);
 
   // Filter: typed value (immediate) + debounced value (the one we actually
   // filter on). Debounce reduces re-render churn on big tables.
@@ -381,9 +425,20 @@ export default function BulkReviewScreen({
             ? `${totalCount} total`
             : `${shownCount} of ${totalCount}`}
         </span>
-        <button className="br-btn primary" disabled title="Export coming soon">
+        <button
+          className="br-btn primary"
+          disabled={!activeType || exporting || rows.length === 0}
+          onClick={onExport}
+          title={
+            !activeType
+              ? "Select a supported deliverable"
+              : rows.length === 0
+                ? "Nothing to export — no entities for this deliverable"
+                : exportErr || `Download ${EXPORT_FORMAT[activeType] || "xlsx"}`
+          }
+        >
           <Download size={12} strokeWidth={1.6} />
-          <span>Export</span>
+          <span>{exporting ? "Exporting…" : "Export"}</span>
         </button>
         <button
           className={`br-btn icon ${showDetail ? "active" : ""}`}
