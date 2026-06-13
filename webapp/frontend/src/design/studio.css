@@ -3299,3 +3299,59 @@ input, textarea { font-family: inherit; }
   color: var(--scan-cyan, #06b6d4);
   border-color: rgba(34,211,238,0.35);
 }
+
+/* ============================================================
+   P&ID symbol glyphs (design v4)
+   Inline SVG glyphs rendered by studio/PidSymbol.tsx. Shapes carry
+   sym-line / sym-fill / sym-acc classes and inherit `color` from the
+   container, so each surface (palette rows, element rows) drives the
+   glyph colour via its own `color` / `--lc` token.
+   ============================================================ */
+.sym-line { stroke: currentColor; fill: none; }
+.sym-fill { fill: currentColor; stroke: none; }
+.sym-acc  { stroke: currentColor; fill: none; opacity: 0.7; }
+
+/* Palette row glyph box now holds an SVG instead of a text code. The box
+   already sets `color: var(--lc, var(--fg-2))` (above), which the glyph
+   inherits via currentColor. Constrain the SVG to the box with a little
+   inset so strokes don't clip. */
+.palette-row-glyph svg { width: 22px; height: 19px; display: block; }
+
+/* On-stage element rows (PropertiesPanel "Elements on Sheet"): the glyph
+   variant of the icon chip. Inherits the row's text colour. */
+.element-row .el-ic--sym { padding: 4px; }
+.element-row .el-ic--sym svg { width: 18px; height: 16px; display: block; }
+
+/* ============================================================
+   Dashboard project-card leading icon (design v4)
+   The compact card pairs a small tinted P&ID/blueprint badge with the
+   title so the body doesn't read as bare text. Sits beside the name,
+   independent of the thumbnail and the not-ready state.
+   ============================================================ */
+.project-card-title {
+  display: flex; align-items: center; gap: 9px; min-width: 0;
+}
+.project-card-title h3 {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.project-card-badge {
+  flex: 0 0 auto;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  background: var(--qong-violet-100, rgba(199,63,190,0.10));
+  border: 1px solid rgba(199,63,190,0.28);
+  color: var(--qong-magenta, var(--qong-purple));
+}
+.project-card-badge svg { width: 15px; height: 15px; }
+[data-theme="dark"] .project-card-badge {
+  background: rgba(199,63,190,0.16);
+  border-color: rgba(199,63,190,0.40);
+  color: #F5D6FF;
+}
+.project-card.not-ready .project-card-badge {
+  color: var(--fg-3);
+  background: var(--bg-elev);
+  border-color: var(--border);
+}

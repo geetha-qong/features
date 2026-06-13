@@ -73,6 +73,7 @@ export function buildElementsForTile(
       confidence: typeof d.confidence === "number" ? d.confidence : 0,
       lines: [],
       entityClass: ent?.entity_class || d.entity_class,
+      subClass: ent?.sub_class,
     };
   }
   return out;

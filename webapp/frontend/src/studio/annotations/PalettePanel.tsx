@@ -10,6 +10,7 @@
  */
 import { useMemo, useState } from "react";
 import { Activity, Boxes, ChevronDown, Wrench } from "lucide-react";
+import PidSymbol, { subClassToSymKind } from "../PidSymbol";
 import { VALVE_SUB_CLASS_LABELS } from "./valveLabels";
 import { useShortcuts } from "../shortcuts/useShortcuts";
 import type { ShortcutMap } from "../shortcuts/api";
@@ -183,7 +184,7 @@ export default function PalettePanel({
                         }
                       >
                         <span className="palette-row-glyph">
-                          <span className="palette-row-sub">{item.sub}</span>
+                          <PidSymbol kind={subClassToSymKind(cat.key, item.sub)} />
                         </span>
                         <span className="palette-row-name">{item.label}</span>
                         {hotkey ? (

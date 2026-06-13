@@ -1,25 +1,21 @@
 import { useState } from "react";
 import {
   ArrowUpRight,
-  Boxes,
   Check,
-  CircleDot,
   ClipboardList,
   Download,
   FileSpreadsheet,
   FileText,
   GitMerge,
-  GitPullRequest,
   Grid3x3,
   ListChecks,
   LogIn,
   LogOut,
   PanelRightClose,
   Pencil,
-  Radio,
-  Settings2,
   Trash2,
 } from "lucide-react";
+import PidSymbol, { subClassToSymKind } from "./PidSymbol";
 import type { CanvasElement, SessionEvent } from "./types";
 
 interface Props {
@@ -41,14 +37,6 @@ interface Props {
   // detections aren't deletable through this surface (different lifecycle).
   canDelete?: boolean;
   onDelete?: () => void;
-}
-
-function iconFor(type: string) {
-  if (type.includes("Valve")) return <GitPullRequest size={13} strokeWidth={1.6} />;
-  if (type.includes("Transmitter")) return <Radio size={13} strokeWidth={1.6} />;
-  if (type.includes("Pump")) return <Settings2 size={13} strokeWidth={1.6} />;
-  if (type.includes("Exchanger")) return <Boxes size={13} strokeWidth={1.6} />;
-  return <CircleDot size={13} strokeWidth={1.6} />;
 }
 
 function confColor(conf: number): string {
@@ -165,7 +153,9 @@ export default function PropertiesPanel({
                 onClick={() => onSelect(key, el.entityClass)}
                 data-comment-anchor={`element-row-${key}`}
               >
-                <div className="el-ic">{iconFor(el.type)}</div>
+                <div className="el-ic el-ic--sym">
+                  <PidSymbol kind={subClassToSymKind(el.entityClass, el.subClass)} />
+                </div>
                 <div className="el-text">
                   <div className="el-tag">{el.tag}</div>
                   <div className="el-type">{el.type}</div>

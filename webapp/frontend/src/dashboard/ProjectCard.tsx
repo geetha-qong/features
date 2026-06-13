@@ -1,4 +1,4 @@
-import { Clock } from "lucide-react";
+import { Clock, Network } from "lucide-react";
 import PidThumb from "../components/PidThumb";
 import type { ProjectTile } from "./types";
 
@@ -19,7 +19,12 @@ export default function ProjectCard({ project, onOpen }: { project: ProjectTile;
         <PidThumb seed={project.id} />
       </div>
       <div className="project-card-body">
-        <h3>{project.name}</h3>
+        <div className="project-card-title">
+          <span className="project-card-badge" aria-hidden="true">
+            <Network size={15} strokeWidth={1.7} />
+          </span>
+          <h3>{project.name}</h3>
+        </div>
         <p className="client">{project.client}</p>
         <div className="meta-row">
           <span className="date">

@@ -18,6 +18,10 @@ export interface CanvasElement {
   // DatasheetDrawer's initial deliverable type when a row is clicked.
   // Optional so the prototype DEMO_ELEMENT_DATA continues to compile.
   entityClass?: string;
+  // Canonical sub_class code (BV / FT / PUMP / …) when known. Used purely to
+  // pick the P&ID glyph for the on-stage element row; optional so the
+  // prototype data keeps compiling.
+  subClass?: string;
 }
 
 export interface SessionEvent {
