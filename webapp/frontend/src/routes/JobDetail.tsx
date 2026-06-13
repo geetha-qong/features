@@ -50,12 +50,18 @@ export default function JobDetail() {
     try {
       const body = new FormData();
       body.append("include_control_valves", "off");
-      const res = await fetch(`/api/v1/jobs/${jobId}/rerun`, {
+      // NB: the rerun endpoint lives on the prefix-less jobs router at
+      // /jobs/{id}/rerun (NOT under /api/v1) and returns a 303 redirect to
+      // /dashboard on success. redirect:"manual" keeps us from chasing that
+      // redirect; an opaqueredirect (status 0) is the success signal.
+      const res = await fetch(`/jobs/${jobId}/rerun`, {
         method: "POST",
         credentials: "include",
         body,
+        redirect: "manual",
       });
-      if (!res.ok) {
+      const ok = res.ok || res.type === "opaqueredirect" || res.status === 0;
+      if (!ok) {
         const detail = await res.text().catch(() => "");
         setError(`Re-run failed (HTTP ${res.status}) ${detail.slice(0, 80)}`);
         return;
