@@ -747,8 +747,15 @@ function PageWithOverlays({
                     height={y2 - y1}
                     fill={isSelected ? "rgba(255,77,168,0.15)" : "none"}
                     stroke={stroke}
-                    strokeWidth={isSelected ? sw * 2 : sw}
-                    strokeDasharray={isSelected ? undefined : `${sw * 2} ${sw * 2}`}
+                    // non-scaling-stroke keeps the outline a constant SCREEN
+                    // width regardless of zoom. The page is rendered ~7000px
+                    // wide but shown fit-to-screen (~10x downscale), so a
+                    // page-unit stroke shrinks to a sub-pixel smudge and the
+                    // box looks invisible. Constant 1.5px (2.5 selected) keeps
+                    // every detection visible even when zoomed all the way out.
+                    vectorEffect="non-scaling-stroke"
+                    strokeWidth={isSelected ? 2.5 : 1.5}
+                    strokeDasharray={isSelected ? undefined : "4 3"}
                     style={{
                       pointerEvents: clickable && mode === "select" ? "auto" : "none",
                       cursor: clickable && mode === "select" ? "pointer" : cursor,
@@ -800,8 +807,9 @@ function PageWithOverlays({
                   height={y2 - y1}
                   fill={isSelected ? "rgba(255,77,168,0.18)" : "none"}
                   stroke={stroke}
-                  strokeWidth={a.source === "user" ? sw * 1.8 : sw}
-                  strokeDasharray={a.status === "user_rejected" ? `${sw * 2} ${sw}` : undefined}
+                  vectorEffect="non-scaling-stroke"
+                  strokeWidth={a.source === "user" ? 2.5 : 1.5}
+                  strokeDasharray={a.status === "user_rejected" ? "4 3" : undefined}
                   style={{
                     pointerEvents: mode === "select" ? "auto" : "none",
                     cursor: mode === "select" ? "pointer" : cursor,
