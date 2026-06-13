@@ -205,7 +205,11 @@ export default function Studio({ project, userName, onBack }: Props) {
   // and every subsequent user gets a hot file. 5500 px wide gives crisp
   // text on every display from 1080p to 5K iMac without exploding storage
   // (~1.2 MB per page-full).
-  const HI_DPI_TARGET_PX = 5500;
+  // 8000px native render (endpoint caps at 9000). Dense A3 P&IDs have tiny
+  // tags/components; at 5500px the canvas upscaled past native when zoomed in
+  // → blur. Vector source means 8000px is true crisp pixels, and line-art PNGs
+  // compress well so the byte cost stays modest. Paired with max-zoom 6 below.
+  const HI_DPI_TARGET_PX = 8000;
   const activePageFullUrl = realSheets && realSheets.length > 0
     ? `/jobs/${project.id}/page/${activePageIndex}/full?w=${HI_DPI_TARGET_PX}`
     : null;
@@ -694,7 +698,7 @@ export default function Studio({ project, userName, onBack }: Props) {
           />
           <div className="zoom-ctl">
             <button
-              onClick={() => setZoom((z) => Math.min(4, +(z + 0.2).toFixed(2)))}
+              onClick={() => setZoom((z) => Math.min(6, +(z + 0.2).toFixed(2)))}
               title="Zoom in (or scroll up)"
             >
               <Plus size={14} strokeWidth={1.6} />

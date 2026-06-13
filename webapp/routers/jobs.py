@@ -337,7 +337,7 @@ async def serve_page_full(
     page at exactly the requested width using PyMuPDF (no upscaling — true
     pixels straight from the vector source) and cache under
     `page_{idx}_full_w{w}.png`. Subsequent requests for the same width
-    hit the cache. Bounded to 6000 px to cap render cost. Below or equal
+    hit the cache. Bounded to 9000 px to cap render cost. Below or equal
     the 4x baseline → falls through to the original file unchanged so we
     don't waste cycles on small displays.
 
@@ -355,10 +355,13 @@ async def serve_page_full(
         raise HTTPException(status_code=404, detail="page render not found")
 
     target = full_path
-    # Hi-DPI on-demand render. Cap at 6000 px (typical 5K display × 1.5
-    # oversample). Only re-render when the request is *larger* than what we
-    # have on disk — a tiny query value is just ignored.
-    if w is not None and 100 < w <= 6000:
+    # Hi-DPI on-demand render. Cap at 9000 px. Dense A3 P&IDs have tiny tag
+    # text/components; at 5500-6000 px the canvas had to upscale (CSS zoom)
+    # past the native pixels to read them → blur. Since the source is vector
+    # (true pixels straight from PyMuPDF, no upscale), 9000 px keeps the view
+    # crisp even when zoomed in. Line-art PNGs compress well, so the byte cost
+    # is modest. Only re-render when the request exceeds what's on disk.
+    if w is not None and 100 < w <= 9000:
         hi_path = tmp_dir / f"page_{page_index}_full_w{w}.png"
         if not hi_path.exists():
             try:

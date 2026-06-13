@@ -263,7 +263,7 @@ export default function PidCanvas({
       e.preventDefault();
       setAnimated(false);
       const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
-      setZoom((z) => Math.max(0.3, Math.min(4, z * factor)));
+      setZoom((z) => Math.max(0.3, Math.min(6, z * factor)));
       setTimeout(() => setAnimated(true), 200);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
