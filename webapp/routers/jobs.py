@@ -337,9 +337,10 @@ async def serve_page_full(
     page at exactly the requested width using PyMuPDF (no upscaling — true
     pixels straight from the vector source) and cache under
     `page_{idx}_full_w{w}.png`. Subsequent requests for the same width
-    hit the cache. Bounded to 9000 px to cap render cost. Below or equal
-    the 4x baseline → falls through to the original file unchanged so we
-    don't waste cycles on small displays.
+    hit the cache. The studio escalates `?w` as the user zooms in
+    (FEATURES #43), bounded to 12000 px to cap render cost/memory. Below
+    or equal the baseline → falls through to the original file unchanged
+    so we don't waste cycles on small displays.
 
     CORS headers mirror `serve_tile` so Qong Studio's canvas can use the
     image cross-origin. Headers are set post-construction because
@@ -355,13 +356,21 @@ async def serve_page_full(
         raise HTTPException(status_code=404, detail="page render not found")
 
     target = full_path
-    # Hi-DPI on-demand render. Cap at 9000 px. Dense A3 P&IDs have tiny tag
+    # Hi-DPI on-demand render. Cap at 12000 px. Dense A3 P&IDs have tiny tag
     # text/components; at 5500-6000 px the canvas had to upscale (CSS zoom)
     # past the native pixels to read them → blur. Since the source is vector
-    # (true pixels straight from PyMuPDF, no upscale), 9000 px keeps the view
-    # crisp even when zoomed in. Line-art PNGs compress well, so the byte cost
-    # is modest. Only re-render when the request exceeds what's on disk.
-    if w is not None and 100 < w <= 9000:
+    # (true pixels straight from PyMuPDF, no upscale), a higher render keeps the
+    # view crisp when zoomed in. The studio now requests increasing widths as
+    # the user zooms (FEATURES #43, Studio.tsx zoom-aware re-render), clamped to
+    # 12000 px here — landscape A3 at 12000 px is ~100 MP (~400 MB transient
+    # pixmap), the ceiling we're comfortable rendering inside the web process.
+    # Line-art PNGs compress well, so the byte cost is modest. Only re-render
+    # when the request exceeds what's on disk.
+    # NOTE: the fitz render below is synchronous and briefly blocks the event
+    # loop (~2-3 s at 12000 px); acceptable on low-traffic dev. If it becomes a
+    # bottleneck, offload via starlette.concurrency.run_in_threadpool or move to
+    # the cpu-worker. Raising the cap further risks an OOM in the web container.
+    if w is not None and 100 < w <= 12000:
         hi_path = tmp_dir / f"page_{page_index}_full_w{w}.png"
         if not hi_path.exists():
             try:
@@ -383,8 +392,10 @@ async def serve_page_full(
                             page_w_pt = page.rect.width or 1
                             zoom = w / page_w_pt
                             # Sanity cap — paranoia against a tiny page +
-                            # huge w combining into a multi-GB pixmap.
-                            zoom = min(zoom, 12.0)
+                            # huge w combining into a multi-GB pixmap. 16 lets
+                            # landscape A3 (~1190 pt) reach the 12000 px cap
+                            # (zoom ~10) while still bounding narrow pages.
+                            zoom = min(zoom, 16.0)
                             mat = fitz.Matrix(zoom, zoom)
                             pix = page.get_pixmap(matrix=mat)
                             pix.save(str(hi_path))

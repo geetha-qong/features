@@ -33,7 +33,7 @@ COPY . .
 COPY --from=frontend /frontend/dist /app/webapp/frontend/dist
 RUN mkdir -p uploads job_outputs
 
-# ─── YOLO v1-11 ONNX model (production object detection for canvas bbox overlay) ─
+# ─── YOLO v1-11 ONNX model (FEATURES #41, supersedes v1-10 from FEATURES #30) ─
 # Bakes the production object-detection weights into the image so the webapp
 # can run in-process inference for canvas bbox surfacing (Job.gpu_detections)
 # without depending on the Windows GPU worker callback.
@@ -43,12 +43,18 @@ RUN mkdir -p uploads job_outputs
 # webapp/inference.py and the "CRITICAL: Two-Mode Architecture" section of
 # CLAUDE.md.
 #
-# v1-11: retrained model building on v1-10 base (23 classes, same as v1-10)
-#   - Better accuracy + fewer false positives than v1-10
-#   - Same IMGSZ=640 as v1-10 (do not use v1-9's 1280)
-#   - Deployed 2026-06-15
+# v1-11 vs v1-10 (same 23-class layout — drop-in swap, no inference code change):
+#   - Trained from yolov8s on ~32,212 LS-sourced annotations (812 train + 80 val),
+#     ~+32% more annotation than v1-10, concentrated on the weak arrow/connector
+#     and valve_ck/gt/gl classes flagged in FEATURES #30.
+#   - mAP50 = 0.805 vs v1-10 = 0.745 on the SAME (leak-free) v1-11 val split
+#     (+0.060); recall 0.682 -> 0.759; precision flat. Biggest per-class gains:
+#     direction arrows (e.g. arrow_up 0.426 -> 0.673) and valve_ck 0.57 -> 0.76.
+#   - (v1-10's headline 0.834 was on its own easier 62-image val set — not
+#     comparable; the 0.745 above is v1-10 re-scored on the v1-11 val set.)
 #
-# Asset: v1-11.onnx, ~43 MB
+# Asset: v1-11.onnx, 44.7 MB, sha256:
+#   34022c917ae3b5487b6a81d9cc9f12064efdd101ee96540a1c7dd0fec097f4e5
 #
 # Path 1 (preferred — no secret) — Release asset is public:
 #   docker build .
@@ -58,10 +64,40 @@ RUN mkdir -p uploads job_outputs
 #   DOCKER_BUILDKIT=1 docker build --secret id=github_pat,src=/tmp/pat .
 # The RUN below first tries plain curl; on non-200 it retries with the
 # Authorization header read from the secret file (no-op if not mounted).
-# Local build: model copied from ./models/ (extracted from previous image to
-# avoid needing a GitHub PAT). For CI/deploy, restore the RUN --mount block
-# that downloads from the GitHub release asset via API.
-COPY models/v1-11.onnx /app/models/v1-11.onnx
+RUN --mount=type=secret,id=github_pat,required=false \
+    mkdir -p /app/models && \
+    REPO="Qong-Systems/qong_product" && \
+    TAG="model-v1-11" && \
+    ASSET_NAME="v1-11.onnx" && \
+    MODEL_SHA="34022c917ae3b5487b6a81d9cc9f12064efdd101ee96540a1c7dd0fec097f4e5" && \
+    DEST=/app/models/v1-11.onnx && \
+    AUTH_HEADER="" && \
+    if [ -s /run/secrets/github_pat ]; then \
+        TOKEN=$(cat /run/secrets/github_pat) && \
+        AUTH_HEADER="Authorization: Bearer $TOKEN"; \
+    fi && \
+    echo "[model] Looking up asset id via GitHub API..." && \
+    ASSET_JSON=$(curl -sL -H "Accept: application/vnd.github+json" \
+        -H "$AUTH_HEADER" \
+        "https://api.github.com/repos/$REPO/releases/tags/$TAG") && \
+    ASSET_ID=$(echo "$ASSET_JSON" | python3 -c "import json,sys; d=json.loads(sys.stdin.read(), strict=False); a=[x for x in d.get('assets',[]) if x['name']=='$ASSET_NAME']; print(a[0]['id']) if a else sys.exit('no asset (API said: '+str(d.get('message','?'))+')')") && \
+    echo "[model] asset_id=$ASSET_ID — downloading via API endpoint..." && \
+    HTTP=$(curl -sL -w "%{http_code}" \
+        -H "Accept: application/octet-stream" \
+        -H "$AUTH_HEADER" \
+        -o "$DEST" \
+        "https://api.github.com/repos/$REPO/releases/assets/$ASSET_ID") && \
+    if [ "$HTTP" != "200" ]; then \
+        echo "[model] Download failed with HTTP $HTTP. If the release is private, mount a Buildkit secret: DOCKER_BUILDKIT=1 docker build --secret id=github_pat,src=<file> ..." && \
+        rm -f "$DEST" && exit 1; \
+    fi && \
+    ACTUAL_SHA=$(sha256sum "$DEST" | awk '{print $1}') && \
+    if [ "$ACTUAL_SHA" != "$MODEL_SHA" ]; then \
+        echo "[model] sha256 mismatch: expected $MODEL_SHA got $ACTUAL_SHA" && \
+        head -c 500 "$DEST" && \
+        rm -f "$DEST" && exit 1; \
+    fi && \
+    echo "[model] $DEST verified ($(stat -c%s "$DEST") bytes)"
 
 EXPOSE 8000
 CMD ["uvicorn", "webapp.main:app", "--host", "0.0.0.0", "--port", "8000"]

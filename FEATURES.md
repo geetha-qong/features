@@ -24,6 +24,114 @@
 
 ---
 
+## [2026-06-15] #45 — Studio canvas: P&ID symbol glyphs replace detection rectangles (LS-style per-class colors)
+
+**Type:** feature
+**Stage:** webapp/frontend
+**Status:** shipped (deployed to dev)
+
+**Why:** On the canvas, model detections + user-marked symbols rendered as plain
+`<rect>` boxes. The 37 `PidSymbol` glyphs + class→glyph mapping existed but were
+only used in the palette/side-panel. User wanted the real symbol shown on the
+drawing, colored per class like Label Studio. (Auto-detect, manual marking,
+draw-edge connections, and DB persistence already existed — FEATURES #38/#40 —
+so this is purely the canvas rendering.)
+
+**What (frontend-only, no backend/API/DB change):**
+- **`paletteColors.ts`** (new): single source of truth for per-class colors,
+  moved out of `PalettePanel.tsx`. `colorForSubClass(entityClass, sub)` +
+  `colorForKind(kind)` (built by running each palette sub through
+  `subClassToSymKind`). `PalettePanel` refactored to import it (identical render).
+- **`PidSymbol.tsx`**: `labelToSymKind(label)` (YOLO label → glyph kind; aliases
+  `Pump/Dwg Pump`→`pump`; unknown→`valve_gen`) + `PidGlyphAt({kind,x,y,w,h,color})`
+  — a nested positioned `<svg viewBox="0 0 30 26">` that drops into the page SVG,
+  scales with zoom, and colorizes via `currentColor` (glyphs already use it).
+- **`PidCanvas.tsx`** Layer 1 (model) + Layer 2 (user): replaced the visible
+  `<rect>` with glyph + class-colored outline (model = **solid**, manual =
+  **dashed**) + invisible hit-rect (preserves click/select) + pink select box;
+  labels recolored to the class color.
+
+**Result (verified live on dev, Playwright, job 1):** canvas renders **225
+glyphs** in **28 distinct class colors**, **0 legacy blue (#3B82F6) detection
+rects** remain; glyphs crisp + recognizable at 544% zoom (teal ball valves, pink
+butterfly), overlaid at symbol locations. `GET /jobs/1/{edges,graph}` round-trip
+200 (connect/save path intact). Built via 2 parallel subagents (Task 1 color map
+/ Task 2 glyph wrapper, disjoint files) + lead integration (Task 3).
+tsc clean; 96 vitest pass (7 new: paletteColors 4 + glyphMapping 3).
+
+**Notes:**
+- Spec `docs/superpowers/specs/2026-06-15-canvas-symbol-glyphs-design.md`; plan
+  `docs/superpowers/plans/2026-06-15-canvas-symbol-glyphs.md`.
+- **Tiny at fit:** glyphs scale with zoom (sit on the equally-small real
+  symbols); labels stay visible. Follow-up if needed: a minimum on-screen size.
+- Canvas glyph layers aren't jsdom-unit-tested (`natural` dims gate on real img
+  `onLoad`); live Playwright is the acceptance. Pure mappers are unit-tested.
+- **PR #1 (swaraj "Qong studio updated features")** overlaps `PidCanvas`/`Studio`/
+  `buildElements`/`PropertiesPanel` and is now further behind — it must be rebased
+  onto this `dev` before merge (conflicts on the glyph + zoom + v1-11 work).
+
+## [2026-06-15] #44 — Studio canvas: layout-based zoom (the actual deep-zoom pixelation fix; completes #43)
+
+**Type:** bugfix
+**Stage:** webapp/frontend
+**Status:** shipped (deployed to dev)
+
+**Why:** #43 made the canvas request a higher-res render as you zoom — but the page **still looked blurry on dev**. Browser-measured root cause (Playwright on dev, job 1 @ 600%): the hi-DPI source *was* loading (`imgNaturalW=12000`), but the `<img>` was laid out at only **656 CSS px** and zoom was a CSS `transform: scale(6)` on `.canvas-inner` (further pinned by `will-change: transform`). `transform: scale` magnifies the **already-rasterized 656px layer** — it never samples the 12000px source. So #43's higher-res fetch was wasted. The fix had to change the *display*, not just the source.
+
+**What:**
+- **Layout-based zoom** (`PidCanvas.tsx`): zoom now sizes the page box in real CSS pixels instead of transforming it. `.canvas-inner` carries only `translate` (pan); full-page mode drops `scale`. A `ResizeObserver` on the canvas tracks available size; `PageWithOverlays` computes `display = fit(natural, avail) × zoom` (object-fit-contain math) and sets the page container + `<img>` to those exact px. The browser then lays the image out at the zoomed size and samples the full-res source → crisp. Invariant to source resolution (same aspect), so #43's `?w` escalation only sharpens, never reflows. All overlay geometry already derives from `natural.w/h`, so detections/edges/labels stay aligned.
+- Removed `will-change: transform` from `.canvas-inner` (`studio.css`) — the page box can be ~12000px wide; pinning it as one GPU layer would waste large VRAM and isn't needed for translate-pan.
+- Legacy tile/proto modes keep `transform: scale` zoom (only full-page is layout-based).
+
+**Result (verified on dev, Playwright):** at 600% zoom the `<img>` layout width goes 656px → **3936px** (= fit 656 × 6), so a 3936px box samples the 8000–12000px source instead of upscaling a 656px raster. Screenshot confirms **sharp, readable tag text** (line numbers, `MUK-…` codes) where #43 alone was blurry. `tsc` clean; 89 vitest pass.
+
+**Notes:**
+- This + #43 together are the full fix: #44 makes the display sample real pixels; #43 ensures enough source pixels exist at deep zoom. Neither alone is sufficient.
+- Smooth zoom *animation* is gone (width isn't transition-animated like transform was) — acceptable; wheel-zoom was never animated.
+- Pinch/2-finger and the +/- buttons all flow through the same `zoom` state, so they all benefit.
+
+## [2026-06-15] #43 — Studio canvas: on-demand zoom-aware page re-render (fix deep-zoom pixelation)
+
+**Type:** bugfix | feature
+**Stage:** webapp/frontend | webapp
+**Status:** shipped (deployed to dev)
+
+**Why:** Users reported P&ID pages pixelate/blur on deep zoom. Root cause (code-traced, not the #41 symptom): the page is a single fixed-resolution raster (`?w=8000`) and Studio zoom is a CSS `transform: scale()` (PidCanvas) that magnifies the already-painted bitmap rather than sampling the high-res source — so the 8000px detail is wasted and, on Retina/4K (effective px = viewport×zoom×devicePixelRatio), deep zoom upscales past native → blur. #41 only raised the fixed render size; it didn't make zoom request sharper pixels.
+
+**What:**
+- **Frontend (`Studio.tsx`):** zoom-aware render width. New pure helper `targetRenderWidth(viewportW, zoom, dpr)` = `viewportW×zoom×dpr`, rounded UP to a 2000px bucket, clamped to [8000, 12000]. A debounced (280ms) effect watches `zoom`; when the target exceeds the current width it **preloads** the higher-`?w` render via `new Image()` and only swaps the visible `<img>` src on decode (no blank flash — sharpens in place like map tiles). Monotonic-increase (zoom-out keeps the sharper render; it downscales cleanly); resets to baseline on page change. Safe because all overlay geometry derives from the loaded image's `natural.w/h`, so a higher-res render of the same page stays aligned.
+- **Backend (`webapp/routers/jobs.py serve_page_full`):** raised the on-demand cap 9000→12000px and the per-page zoom clamp 12→16 (lets landscape A3 reach 12000px).
+- **Test:** `__tests__/targetRenderWidth.test.ts` (5) — baseline floor, max ceiling, bucket rounding, monotonicity, dpr sensitivity.
+
+**Result:** Deep zoom re-renders true vector pixels at the resolution the display needs (kicks in above ~2.6× zoom on a 1512px dpr=2 laptop), instead of upscaling a fixed 8000px raster. Frontend `tsc` clean; 89 vitest pass (84 + 5 new).
+
+**Notes:**
+- **12000px ceiling is a memory/latency tradeoff in the WEB process** — landscape A3 @ 12000px ≈ 100MP ≈ ~400MB transient pixmap, and the `fitz` render is synchronous (~2-3s, briefly blocks the event loop). Acceptable on low-traffic dev; if it bites, offload via `run_in_threadpool` or the cpu-worker before raising further. At max zoom (6×) on a dpr=2 laptop the target wants ~18000px so it still mildly upscales past 12000 — true crispness at max zoom needs the **tile-pyramid** approach (deferred; bigger change). PDF.js vector rendering remains the no-pixelation-ever end-state.
+- `HI_DPI_MAX_PX` in `Studio.tsx` MUST match the `serve_page_full` cap — change both together.
+
+## [2026-06-15] #42 — v1-11 YOLO ONNX deployed (retrain on +32% annotations; +0.06 mAP50 over v1-10)
+
+**Type:** model-swap | training
+**Stage:** training | infra | webapp
+**Status:** shipped (deployed to dev)
+
+**Why:** Team added a large batch of new Label-Studio annotations since v1-10 (deployed 2026-06-05, FEATURES #30) — concentrated on the weak direction-arrow/connector and valve_ck/gt/gl classes #30 flagged. User asked to retrain on a cloud GPU and verify the model improved.
+
+**What:**
+- **Export:** `experiments/digital_twin/scripts/export_ls_dataset_v1-11.py` (clean copy of the v1-10 exporter → fresh `dataset_v1-11/` dir) pulled ALL dev-LS annotations → 812 train + 80 val tiles, ~32,212 in-schema annotations (+32% vs v1-10's 24,428). 1,139 out-of-schema labels dropped (`valve_needle`, `reducer`, `expander`, `interlock-R`, … — candidates for a v1-12 schema expansion). Same 23-class layout as v1-10.
+- **Train:** `experiments/digital_twin/scripts/ec2_train_v1-11.sh` — replays the v1-10 g5.2xlarge flow (yolov8s, imgsz=640, batch=32, 100 epochs, patience=20) **plus a dual-eval** step: after training it pulls v1-10's `best.pt` from S3 and runs `yolo val` on BOTH models against the SAME v1-11 val split (leak-free — split is `sha1(task_id)%10`, stable across exports).
+- **Promote (clean swap, no class change):** GitHub release `model-v1-11` (asset `v1-11.onnx`); `Dockerfile` TAG/ASSET/SHA/DEST → v1-11; `webapp/inference.py` MODEL_PATH → v1-11.onnx; `models/MODEL_VERSION.txt` registry updated (current: v1-11; also back-recorded v1-10, which #30 never registered).
+
+**Result (same 80-image / 2,295-instance val split, leak-free):**
+- **mAP50 0.745 → 0.805 (+0.060)**; recall 0.682 → 0.759; mAP50-95 0.453 → 0.489; precision flat (0.788 → 0.786).
+- Biggest gains exactly where annotation was added: arrow_up mAP50 0.426→0.673, arrow_right 0.403→0.653, arrow_down 0.407→0.626, valve_ck 0.57→0.76, valve_gt 0.77→0.87, Motor 0.80→0.94.
+- Minor regressions on tiny-instance classes (inst_local_panel 9 inst 0.96→0.80; valve_3way_relief 18 inst 0.63→0.54) — noise, more annotation would stabilize.
+
+**Notes:**
+- **v1-10's headline 0.834 (FEATURES #30) is NOT comparable** — that was on v1-10's own easier 62-image val set. On the current val set v1-10 scores 0.745. The dual-eval is what makes the +0.060 honest. Always re-score the incumbent on the new val split.
+- **Cloud-GPU footgun (cost trap):** the new `Deep Learning Base OSS NVIDIA Driver GPU Ubuntu 22.04` AMI ships **torch 2.12**, and `pip install ultralytics` left torch unpinned → `onnxscript 0.5.7` lacks `_framework_apis.torch_2_11/2_12` → `yolo export` crashed. Because that line ran bare under `set -e`, the script aborted before its `shutdown`, leaving the instance **running idle and billing**. Salvaged via SSM (`pip install -U onnxscript` fixed export; ran eval+export+upload+terminate). **TODO for next training script: pin torch to v1-10's known-good version AND guard every step before the final `shutdown` with `|| { …; shutdown }`.**
+- Artifacts: `s3://qong-pid-archive-2026-06-02/training/v1-11/` (best.onnx/best.pt/val_v1-1{0,1}.txt/runs/). ONNX sha256 `34022c91…f4e5`.
+
 ## [2026-06-13] #41 — KKS valve-tag parsing + All-Data view; readability + cache fixes; empty-deliverable root-cause
 
 **Type:** feature | bugfix | architecture

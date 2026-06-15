@@ -408,3 +408,60 @@ export function subClassToSymKind(entityClass: string | undefined, subClass: str
 
   return "valve_gen";
 }
+
+/**
+ * Kinds glyphBody() knows how to draw — keep in sync with the switch above.
+ * Used by labelToSymKind to decide whether a raw YOLO class label is already
+ * a renderable glyph kind.
+ */
+const KNOWN_KINDS = new Set<string>([
+  "valve_gen", "valve_gt", "valve_bf", "valve_bv", "valve_ncbv", "valve_db", "valve_ck",
+  "valve_gl", "valve_cv", "valve_pneuctrl", "valve_relief_safety", "valve_3way",
+  "valve_3way_relief", "valve_needle", "valve_transfer", "valve_reflex_gt",
+  "inst_field", "inst_field-R", "inst_local_panel", "inst_bpcs", "inst_sis",
+  "DCS", "PLC", "interlock", "interlock-R", "SIS-R", "Motor", "pump", "lamp",
+  "lamp_local_mounted", "arrow_right", "arrow_left", "arrow_up", "arrow_down",
+  "connector_in", "connector_out", "connector_io",
+]);
+
+/** Raw YOLO class labels that don't match a glyph kind name 1:1. */
+const LABEL_ALIASES: Record<string, string> = {
+  "Pump/Dwg Pump": "pump",
+  "Pump": "pump",
+};
+
+/**
+ * Map a raw YOLO class label (as produced by the offline detector /
+ * `Job.gpu_detections`) onto a PidSymbol `kind`.
+ *
+ * Most of the 23 YOLO class names line up 1:1 with glyph kinds; a few need an
+ * alias (e.g. the slash/space "Pump/Dwg Pump"). Unknown or undefined labels
+ * fall back to the generic valve glyph so a detection never renders empty.
+ */
+export function labelToSymKind(label?: string): string {
+  if (!label) return "valve_gen";
+  if (LABEL_ALIASES[label]) return LABEL_ALIASES[label];
+  if (KNOWN_KINDS.has(label)) return label;
+  return "valve_gen";
+}
+
+/**
+ * Positioned, color-aware glyph wrapper. Drops into a page-coordinate SVG and
+ * scales with zoom: a nested `<svg>` with x/y/width/height positions in the
+ * parent SVG's user units, so it lives in page-pixel space. `color` cascades
+ * into the glyph's `currentColor` strokes/fills (`.sym-line`/`.sym-fill`/`.sym-acc`).
+ */
+export function PidGlyphAt({
+  kind, x, y, w, h, color,
+}: { kind: string; x: number; y: number; w: number; h: number; color: string }) {
+  return (
+    <svg
+      x={x} y={y} width={w} height={h}
+      viewBox="0 0 30 26" preserveAspectRatio="xMidYMid meet"
+      style={{ color, overflow: "visible", pointerEvents: "none" }}
+      aria-hidden="true"
+    >
+      <PidSymbol kind={kind} />
+    </svg>
+  );
+}

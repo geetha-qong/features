@@ -3,6 +3,8 @@ import type { DetectionItem } from "./api";
 import type { JobGraph } from "./types";
 import GraphLayer from "./GraphLayer";
 import { canvasDisplayLabel, displayNameForModelLabel } from "./labelMap";
+import { PidGlyphAt, labelToSymKind, subClassToSymKind } from "./PidSymbol";
+import { colorForKind, colorForSubClass } from "./paletteColors";
 
 interface PidElement {
   id: string;
@@ -221,6 +223,22 @@ export default function PidCanvas({
   const [animated, setAnimated] = useState(true);
   const pannedRef = useRef(false);
 
+  // Available canvas size, tracked so PageWithOverlays can size the page at
+  // fit×zoom in real CSS pixels (FEATURES #43 v2 — see note below). Zoom used
+  // to be a CSS transform:scale() which upscaled a fit-sized raster (~656px)
+  // and threw away the hi-DPI source → blur. Sizing the <img> by layout makes
+  // the browser sample the full-res source at the zoomed size → crisp.
+  const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const update = () => setAvail({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const elFill = dark ? "#0E1024" : "#ffffff";
   const elStroke = dark ? "rgba(255,255,255,0.65)" : "rgba(20,22,42,0.55)";
   const elText = dark ? "#ffffff" : "#14162A";
@@ -285,11 +303,16 @@ export default function PidCanvas({
       <div
         ref={innerRef}
         className={`canvas-inner ${animated ? "animated" : ""}`}
-        style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+        // Full-page mode zooms via layout sizing (crisp — FEATURES #43 v2), so
+        // only translate (pan) goes on the transform. Legacy tile/proto modes
+        // still zoom via transform:scale.
+        style={{ transform: `translate(${pan.x}px, ${pan.y}px)${useFullPage ? "" : ` scale(${zoom})`}` }}
       >
         {useFullPage && (
           <PageWithOverlays
             pageFullUrl={pageFullUrl!}
+            zoom={zoom}
+            avail={avail}
             pageIndex={pageIndex}
             detections={detections ?? []}
             userAnnotations={userAnnotations ?? []}
@@ -435,6 +458,8 @@ export default function PidCanvas({
 
 function PageWithOverlays({
   pageFullUrl,
+  zoom,
+  avail,
   pageIndex,
   detections,
   userAnnotations,
@@ -451,6 +476,8 @@ function PageWithOverlays({
   showGraph,
 }: {
   pageFullUrl: string;
+  zoom: number;
+  avail: { w: number; h: number } | null;
   pageIndex: number;
   detections: DetectionItem[];
   userAnnotations: UserAnnotationLite[];
@@ -474,6 +501,18 @@ function PageWithOverlays({
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // FEATURES #43 v2 — layout-based zoom. Fit the page to the available canvas
+  // (object-fit:contain math), then multiply by zoom to get the on-screen size
+  // in REAL CSS pixels. Sizing the page box this way (vs transform:scale) makes
+  // the browser sample the hi-DPI source at the zoomed size → crisp. Invariant
+  // to the source resolution (same aspect), so the Studio `?w` escalation only
+  // sharpens, never reflows. Falls back to CSS object-fit until measured.
+  const display = useMemo(() => {
+    if (!natural || !avail || avail.w <= 0 || avail.h <= 0) return null;
+    const s = Math.min(avail.w / natural.w, avail.h / natural.h);
+    return { w: natural.w * s * zoom, h: natural.h * s * zoom };
+  }, [natural, avail, zoom]);
 
   // Phase 4: in-flight edge draw state. First click captures source point;
   // second click captures target + flushes via onEdgeDrawn.
@@ -633,13 +672,14 @@ function PageWithOverlays({
       style={{
         position: "relative",
         display: "inline-block",
-        // Fill the canvas column rather than capping at 1600px / 78vh: with
-        // the SheetPicker freeing the left rail the canvas column is wider
-        // and the PDF was being unnecessarily downscaled. Engineering tag
-        // text becomes ~40% larger on screen without zooming. FEATURES #40.
-        maxWidth: "100%",
-        maxHeight: "calc(100vh - 160px)",
         margin: "0 auto",
+        // Layout-based zoom (FEATURES #43 v2): once measured, size the page box
+        // to fit×zoom in real CSS px so the browser samples the hi-DPI source
+        // at the zoomed size (crisp). Until measured, fall back to the FEATURES
+        // #40 object-fit fit so the first paint still fills the canvas column.
+        ...(display
+          ? { width: `${display.w}px`, height: `${display.h}px` }
+          : { maxWidth: "100%", maxHeight: "calc(100vh - 160px)" }),
       }}
     >
       <img
@@ -652,9 +692,12 @@ function PageWithOverlays({
         }}
         style={{
           display: "block",
-          maxWidth: "100%",
-          maxHeight: "calc(100vh - 160px)",
-          objectFit: "contain",
+          // When the page box is explicitly sized (display set), fill it so the
+          // <img> lays out at fit×zoom px and the source is sampled at that
+          // size. Else fall back to the object-fit fit for the first paint.
+          ...(display
+            ? { width: "100%", height: "100%" }
+            : { maxWidth: "100%", maxHeight: "calc(100vh - 160px)", objectFit: "contain" as const }),
           borderRadius: 4,
           boxShadow: dark
             ? "0 2px 14px rgba(0,0,0,0.45)"
@@ -710,7 +753,8 @@ function PageWithOverlays({
               const clickable = mode === "select"; // all detections selectable in select mode
               const isSelected = detKey === selectedId;
               const sw = Math.max(1, natural.w / 500);
-              const stroke = isSelected ? STATUS_STROKE.user_added : STATUS_STROKE.model_found;
+              const kind = labelToSymKind(d.label);       // YOLO label -> glyph
+              const klass = colorForKind(kind);            // per-class palette color (LS-style)
               const human = displayNameForModelLabel(d.label);
               // Always keep labels for selected; otherwise skip if too close to
               // any earlier label that survived. Cheap O(n²) — fine because n
@@ -725,24 +769,32 @@ function PageWithOverlays({
                 }
               }
               if (showLabel) placed.push({ x: x1, y: y1 });
+              const w = x2 - x1;
+              const h = y2 - y1;
               return (
                 <g key={`det-${i}`}>
+                  {/* class-colored P&ID glyph (currentColor); scales with zoom */}
+                  <PidGlyphAt kind={kind} x={x1} y={y1} w={w} h={h} color={klass} />
+                  {/* model = SOLID thin outline in the class color */}
                   <rect
                     x={x1}
                     y={y1}
-                    width={x2 - x1}
-                    height={y2 - y1}
-                    fill={isSelected ? "rgba(255,77,168,0.15)" : "none"}
-                    stroke={stroke}
-                    // non-scaling-stroke keeps the outline a constant SCREEN
-                    // width regardless of zoom. The page is rendered ~7000px
-                    // wide but shown fit-to-screen (~10x downscale), so a
-                    // page-unit stroke shrinks to a sub-pixel smudge and the
-                    // box looks invisible. Constant 1.5px (2.5 selected) keeps
-                    // every detection visible even when zoomed all the way out.
+                    width={w}
+                    height={h}
+                    fill="none"
+                    stroke={klass}
                     vectorEffect="non-scaling-stroke"
-                    strokeWidth={isSelected ? 2.5 : 1.5}
-                    strokeDasharray={isSelected ? undefined : "4 3"}
+                    strokeWidth={1}
+                    opacity={0.55}
+                    style={{ pointerEvents: "none" }}
+                  />
+                  {/* invisible hit-target preserves click/select + tooltip */}
+                  <rect
+                    x={x1}
+                    y={y1}
+                    width={w}
+                    height={h}
+                    fill="transparent"
                     style={{
                       pointerEvents: clickable ? "auto" : "none",
                       cursor: clickable ? "pointer" : cursor,
@@ -758,6 +810,20 @@ function PageWithOverlays({
                   >
                     {clickable && <title>{human || d.label || "Detection"} — click to select</title>}
                   </rect>
+                  {/* selection highlight (pink) */}
+                  {isSelected && (
+                    <rect
+                      x={x1}
+                      y={y1}
+                      width={w}
+                      height={h}
+                      fill="rgba(255,77,168,0.12)"
+                      stroke={STATUS_STROKE.user_added}
+                      vectorEffect="non-scaling-stroke"
+                      strokeWidth={2.5}
+                      style={{ pointerEvents: "none" }}
+                    />
+                  )}
                   {showLabel && (
                     <text
                       x={x1}
@@ -765,7 +831,7 @@ function PageWithOverlays({
                       fontSize={Math.max(8, natural.w / 140)}
                       fontFamily="Outfit, sans-serif"
                       fontWeight="600"
-                      fill={stroke}
+                      fill={klass}
                       style={{ pointerEvents: "none", paintOrder: "stroke" }}
                       stroke="#ffffff"
                       strokeWidth={sw * 0.8}
@@ -783,20 +849,36 @@ function PageWithOverlays({
           {userAnnotations.map((a, i) => {
             const [x1, y1, x2, y2] = a.bbox;
             const sw = Math.max(1, natural.w / 500);
-            const stroke = STATUS_STROKE[a.status];
             const isSelected = a.entity_id === selectedId;
+            const kind = subClassToSymKind(a.entity_class ?? undefined, a.sub_class ?? undefined);
+            const klass = colorForSubClass(a.entity_class ?? undefined, a.sub_class ?? undefined);
+            const w = x2 - x1;
+            const h = y2 - y1;
             return (
               <g key={`ann-${i}`}>
+                {/* class-colored glyph; scales with zoom */}
+                <PidGlyphAt kind={kind} x={x1} y={y1} w={w} h={h} color={klass} />
+                {/* manually-added = DASHED outline in the class color */}
                 <rect
                   x={x1}
                   y={y1}
-                  width={x2 - x1}
-                  height={y2 - y1}
-                  fill={isSelected ? "rgba(255,77,168,0.18)" : "none"}
-                  stroke={stroke}
+                  width={w}
+                  height={h}
+                  fill="none"
+                  stroke={klass}
+                  strokeDasharray="4 3"
                   vectorEffect="non-scaling-stroke"
-                  strokeWidth={a.source === "user" ? 2.5 : 1.5}
-                  strokeDasharray={a.status === "user_rejected" ? "4 3" : undefined}
+                  strokeWidth={1.2}
+                  opacity={0.75}
+                  style={{ pointerEvents: "none" }}
+                />
+                {/* invisible hit-target preserves click/select + tooltip */}
+                <rect
+                  x={x1}
+                  y={y1}
+                  width={w}
+                  height={h}
+                  fill="transparent"
                   style={{
                     pointerEvents: mode === "select" ? "auto" : "none",
                     cursor: mode === "select" ? "pointer" : cursor,
@@ -814,13 +896,27 @@ function PageWithOverlays({
                     {(a.tag ?? a.placeholder_tag ?? a.entity_id) + " — " + a.status}
                   </title>
                 </rect>
+                {/* selection highlight (pink) */}
+                {isSelected && (
+                  <rect
+                    x={x1}
+                    y={y1}
+                    width={w}
+                    height={h}
+                    fill="rgba(255,77,168,0.18)"
+                    stroke={STATUS_STROKE.user_added}
+                    vectorEffect="non-scaling-stroke"
+                    strokeWidth={2.5}
+                    style={{ pointerEvents: "none" }}
+                  />
+                )}
                 <text
                   x={x1}
                   y={y1 - sw * 2}
                   fontSize={Math.max(8, natural.w / 140)}
                   fontFamily="Outfit, sans-serif"
                   fontWeight="600"
-                  fill={stroke}
+                  fill={klass}
                   style={{ pointerEvents: "none", paintOrder: "stroke" }}
                   stroke="#ffffff"
                   strokeWidth={sw * 0.8}

@@ -82,6 +82,28 @@ const DEMO_ELEMENT_DATA: Record<string, CanvasElement> = {
 
 const DATASHEET_TYPES = new Set(["Control Valve", "Flow Transmitter", "Block Valve", "Centrifugal Pump"]);
 
+// ── On-demand zoom-aware page-render sizing (FEATURES #43) ──────────────────
+export const HI_DPI_BASELINE_PX = 8000; // initial / minimum render width (fit view)
+export const HI_DPI_MAX_PX = 12000;     // must match the cap in jobs.py:serve_page_full
+export const HI_DPI_BUCKET_PX = 2000;   // round the target up to this step
+
+/**
+ * Pixel width the page should be rendered at for the current zoom, so the
+ * canvas shows true vector pixels instead of upscaling a fixed raster.
+ * target = viewportWidth × zoom × devicePixelRatio, rounded UP to a bucket
+ * (so a wheel-notch doesn't spawn a render per frame) and clamped to
+ * [BASELINE, MAX]. Pure so the bucketing/clamp is unit-testable.
+ */
+export function targetRenderWidth(
+  viewportWidthPx: number,
+  zoom: number,
+  devicePixelRatio: number,
+): number {
+  const raw = viewportWidthPx * zoom * devicePixelRatio;
+  const bucketed = Math.ceil(raw / HI_DPI_BUCKET_PX) * HI_DPI_BUCKET_PX;
+  return Math.max(HI_DPI_BASELINE_PX, Math.min(HI_DPI_MAX_PX, bucketed));
+}
+
 export default function Studio({ project, userName, onBack }: Props) {
   const navigate = useNavigate();
   const { theme } = useTheme();
@@ -207,13 +229,48 @@ export default function Studio({ project, userName, onBack }: Props) {
   // and every subsequent user gets a hot file. 5500 px wide gives crisp
   // text on every display from 1080p to 5K iMac without exploding storage
   // (~1.2 MB per page-full).
-  // 8000px native render (endpoint caps at 9000). Dense A3 P&IDs have tiny
-  // tags/components; at 5500px the canvas upscaled past native when zoomed in
-  // → blur. Vector source means 8000px is true crisp pixels, and line-art PNGs
-  // compress well so the byte cost stays modest. Paired with max-zoom 6 below.
-  const HI_DPI_TARGET_PX = 8000;
+  // ── On-demand zoom-aware re-render (FEATURES #43) ────────────────────────
+  // The page is a single raster the canvas upscales via `transform: scale()`
+  // (PidCanvas). Past the source's native pixels that upscale blurs — and the
+  // 8000px baseline is fixed regardless of zoom or devicePixelRatio, so deep
+  // zoom on a Retina/4K display pixelates. Fix: when the zoom level needs more
+  // pixels than we currently hold, re-request the page at exactly that width.
+  // The backend (jobs.py serve_page_full ?w=) renders true vector pixels and
+  // caches per-width, so each tier costs one render then a hot file.
+  //
+  // Width target = viewportWidth × zoom × devicePixelRatio, bucketed up to
+  // BUCKET_PX steps (so a wheel-notch doesn't spawn a render per frame) and
+  // clamped to [BASELINE, MAX]. Monotonic-increase: once sharpened we keep the
+  // bigger render (it downscales cleanly for the fit view), so zooming back out
+  // never re-flickers. Reset to baseline on page change.
+  const [renderWidthPx, setRenderWidthPx] = useState(HI_DPI_BASELINE_PX);
+
+  // Reset to baseline when the active page changes (new page = fit view).
+  useEffect(() => {
+    setRenderWidthPx(HI_DPI_BASELINE_PX);
+  }, [activePageIndex]);
+
+  // Sharpen on zoom-in (debounced + preloaded to avoid a blank flash).
+  useEffect(() => {
+    const wanted = targetRenderWidth(
+      window.innerWidth || 1280,
+      zoom,
+      window.devicePixelRatio || 1,
+    );
+    if (wanted <= renderWidthPx) return; // monotonic — only ever sharpen
+    const t = setTimeout(() => {
+      // Decode the higher-res render before swapping the visible <img> src so
+      // the user keeps seeing the (CSS-upscaled) current frame until the crisp
+      // one is ready — like a map tile sharpening in place.
+      const pre = new Image();
+      pre.onload = () => setRenderWidthPx(wanted);
+      pre.src = `/jobs/${project.id}/page/${activePageIndex}/full?w=${wanted}`;
+    }, 280);
+    return () => clearTimeout(t);
+  }, [zoom, activePageIndex, project.id, renderWidthPx]);
+
   const activePageFullUrl = realSheets && realSheets.length > 0
-    ? `/jobs/${project.id}/page/${activePageIndex}/full?w=${HI_DPI_TARGET_PX}`
+    ? `/jobs/${project.id}/page/${activePageIndex}/full?w=${renderWidthPx}`
     : null;
 
   // ── FEATURES #38: marking + edge drawing state ──────────────────────────
