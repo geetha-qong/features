@@ -24,6 +24,25 @@
 
 ---
 
+## [2026-06-15] #43 — Studio canvas: on-demand zoom-aware page re-render (fix deep-zoom pixelation)
+
+**Type:** bugfix | feature
+**Stage:** webapp/frontend | webapp
+**Status:** shipped (deployed to dev)
+
+**Why:** Users reported P&ID pages pixelate/blur on deep zoom. Root cause (code-traced, not the #41 symptom): the page is a single fixed-resolution raster (`?w=8000`) and Studio zoom is a CSS `transform: scale()` (PidCanvas) that magnifies the already-painted bitmap rather than sampling the high-res source — so the 8000px detail is wasted and, on Retina/4K (effective px = viewport×zoom×devicePixelRatio), deep zoom upscales past native → blur. #41 only raised the fixed render size; it didn't make zoom request sharper pixels.
+
+**What:**
+- **Frontend (`Studio.tsx`):** zoom-aware render width. New pure helper `targetRenderWidth(viewportW, zoom, dpr)` = `viewportW×zoom×dpr`, rounded UP to a 2000px bucket, clamped to [8000, 12000]. A debounced (280ms) effect watches `zoom`; when the target exceeds the current width it **preloads** the higher-`?w` render via `new Image()` and only swaps the visible `<img>` src on decode (no blank flash — sharpens in place like map tiles). Monotonic-increase (zoom-out keeps the sharper render; it downscales cleanly); resets to baseline on page change. Safe because all overlay geometry derives from the loaded image's `natural.w/h`, so a higher-res render of the same page stays aligned.
+- **Backend (`webapp/routers/jobs.py serve_page_full`):** raised the on-demand cap 9000→12000px and the per-page zoom clamp 12→16 (lets landscape A3 reach 12000px).
+- **Test:** `__tests__/targetRenderWidth.test.ts` (5) — baseline floor, max ceiling, bucket rounding, monotonicity, dpr sensitivity.
+
+**Result:** Deep zoom re-renders true vector pixels at the resolution the display needs (kicks in above ~2.6× zoom on a 1512px dpr=2 laptop), instead of upscaling a fixed 8000px raster. Frontend `tsc` clean; 89 vitest pass (84 + 5 new).
+
+**Notes:**
+- **12000px ceiling is a memory/latency tradeoff in the WEB process** — landscape A3 @ 12000px ≈ 100MP ≈ ~400MB transient pixmap, and the `fitz` render is synchronous (~2-3s, briefly blocks the event loop). Acceptable on low-traffic dev; if it bites, offload via `run_in_threadpool` or the cpu-worker before raising further. At max zoom (6×) on a dpr=2 laptop the target wants ~18000px so it still mildly upscales past 12000 — true crispness at max zoom needs the **tile-pyramid** approach (deferred; bigger change). PDF.js vector rendering remains the no-pixelation-ever end-state.
+- `HI_DPI_MAX_PX` in `Studio.tsx` MUST match the `serve_page_full` cap — change both together.
+
 ## [2026-06-15] #42 — v1-11 YOLO ONNX deployed (retrain on +32% annotations; +0.06 mAP50 over v1-10)
 
 **Type:** model-swap | training
