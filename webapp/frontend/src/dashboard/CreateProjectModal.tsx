@@ -261,7 +261,7 @@ export default function CreateProjectModal({ open, onClose, onCreated }: CreateP
             className="btn btn-primary"
             disabled={!name.trim() || submitting}
           >
-            {submitting ? "Uploading…" : "Create & Extract"}{" "}
+            {submitting ? "Uploading…" : "Submit"}{" "}
             <ArrowRight size={14} strokeWidth={1.6} />
           </button>
         </div>

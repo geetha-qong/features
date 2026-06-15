@@ -1,0 +1,30 @@
+# Local isolated-run override (not committed; created by Claude run session).
+# Purpose: run this repo's webapp WITHOUT colliding with the already-running
+# `qs` compose project or native system services (postgres, redis, minio).
+# Uses `!override` to REPLACE base port lists (Compose concatenates otherwise).
+#
+# Host port mapping:
+#   web       8001 -> 8000  (base uses 8000, qs stack also on 8000)
+#   postgres  5433 -> 5432  (native postgres on 5432)
+#   redis     6380 -> 6379  (native redis on 6379)
+#   minio S3  9102 -> 9000  (native/other service on 9100)
+#   minio UI  9103 -> 9001  (native/other service on 9101)
+services:
+  web:
+    ports: !override
+      - "127.0.0.1:8001:8000"
+    environment:
+      COOKIE_SECURE: "0"
+
+  postgres:
+    ports: !override
+      - "127.0.0.1:5433:5432"
+
+  redis:
+    ports: !override
+      - "127.0.0.1:6380:6379"
+
+  minio:
+    ports: !override
+      - "127.0.0.1:9102:9000"
+      - "127.0.0.1:9103:9001"

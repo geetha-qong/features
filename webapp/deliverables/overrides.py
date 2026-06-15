@@ -34,8 +34,6 @@ from webapp.deliverables.job_loader import load_canonical_for_job
 READ_ONLY_FIELDS = frozenset({
     "entity_id",
     "entity_class",
-    "pid_number",
-    "sheet_number",
     "bbox",
 })
 
