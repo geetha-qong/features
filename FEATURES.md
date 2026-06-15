@@ -24,6 +24,52 @@
 
 ---
 
+## [2026-06-15] #45 — Studio canvas: P&ID symbol glyphs replace detection rectangles (LS-style per-class colors)
+
+**Type:** feature
+**Stage:** webapp/frontend
+**Status:** shipped (deployed to dev)
+
+**Why:** On the canvas, model detections + user-marked symbols rendered as plain
+`<rect>` boxes. The 37 `PidSymbol` glyphs + class→glyph mapping existed but were
+only used in the palette/side-panel. User wanted the real symbol shown on the
+drawing, colored per class like Label Studio. (Auto-detect, manual marking,
+draw-edge connections, and DB persistence already existed — FEATURES #38/#40 —
+so this is purely the canvas rendering.)
+
+**What (frontend-only, no backend/API/DB change):**
+- **`paletteColors.ts`** (new): single source of truth for per-class colors,
+  moved out of `PalettePanel.tsx`. `colorForSubClass(entityClass, sub)` +
+  `colorForKind(kind)` (built by running each palette sub through
+  `subClassToSymKind`). `PalettePanel` refactored to import it (identical render).
+- **`PidSymbol.tsx`**: `labelToSymKind(label)` (YOLO label → glyph kind; aliases
+  `Pump/Dwg Pump`→`pump`; unknown→`valve_gen`) + `PidGlyphAt({kind,x,y,w,h,color})`
+  — a nested positioned `<svg viewBox="0 0 30 26">` that drops into the page SVG,
+  scales with zoom, and colorizes via `currentColor` (glyphs already use it).
+- **`PidCanvas.tsx`** Layer 1 (model) + Layer 2 (user): replaced the visible
+  `<rect>` with glyph + class-colored outline (model = **solid**, manual =
+  **dashed**) + invisible hit-rect (preserves click/select) + pink select box;
+  labels recolored to the class color.
+
+**Result (verified live on dev, Playwright, job 1):** canvas renders **225
+glyphs** in **28 distinct class colors**, **0 legacy blue (#3B82F6) detection
+rects** remain; glyphs crisp + recognizable at 544% zoom (teal ball valves, pink
+butterfly), overlaid at symbol locations. `GET /jobs/1/{edges,graph}` round-trip
+200 (connect/save path intact). Built via 2 parallel subagents (Task 1 color map
+/ Task 2 glyph wrapper, disjoint files) + lead integration (Task 3).
+tsc clean; 96 vitest pass (7 new: paletteColors 4 + glyphMapping 3).
+
+**Notes:**
+- Spec `docs/superpowers/specs/2026-06-15-canvas-symbol-glyphs-design.md`; plan
+  `docs/superpowers/plans/2026-06-15-canvas-symbol-glyphs.md`.
+- **Tiny at fit:** glyphs scale with zoom (sit on the equally-small real
+  symbols); labels stay visible. Follow-up if needed: a minimum on-screen size.
+- Canvas glyph layers aren't jsdom-unit-tested (`natural` dims gate on real img
+  `onLoad`); live Playwright is the acceptance. Pure mappers are unit-tested.
+- **PR #1 (swaraj "Qong studio updated features")** overlaps `PidCanvas`/`Studio`/
+  `buildElements`/`PropertiesPanel` and is now further behind — it must be rebased
+  onto this `dev` before merge (conflicts on the glyph + zoom + v1-11 work).
+
 ## [2026-06-15] #44 — Studio canvas: layout-based zoom (the actual deep-zoom pixelation fix; completes #43)
 
 **Type:** bugfix
