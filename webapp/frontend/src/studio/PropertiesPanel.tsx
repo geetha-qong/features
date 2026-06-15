@@ -37,6 +37,11 @@ type Category = "all" | "valve" | "instrument" | "equipment" | "other";
 function getElementCategory(el: CanvasElement): Exclude<Category, "all"> {
   // Primary signal: entityClass set by the backend YOLO label mapper.
   if (el.entityClass === "valve") return "valve";
+  // Interlock and SIS-R are P&ID logic/connector symbols, not field instruments.
+  // Their YOLO class maps to entity_class="instrument" on the backend (so they
+  // appear on canvas), but the sidebar should group them under "Other".
+  if (el.tag === "interlock" || el.tag === "SIS-R" ||
+      el.type === "Interlock" || el.type === "SIS Device") return "other";
   if (el.entityClass === "instrument") return "instrument";
   if (el.entityClass === "equipment") return "equipment";
 

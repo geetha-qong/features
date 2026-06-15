@@ -369,11 +369,17 @@ def _attach_entity_ids(detections: list, entities: list) -> None:
                     consumed.add(eid)
                     break
                 if entity_id is None and sub:
-                    # Sub_class didn't match anything; try class-only.
+                    # Sub_class didn't match exactly. Only accept entities that
+                    # have NO sub_class set (pipeline left it blank) — never
+                    # pair a detection with an entity that has a DIFFERENT
+                    # sub_class (e.g. valve_db→BV entity is a wrong-type match
+                    # that would show "Ball Valve" for a diaphragm valve).
                     for e in entities:
                         eid = str(e.entity_id)
                         if eid in consumed or e.entity_class != cls:
                             continue
+                        if e.sub_class and e.sub_class.upper() != sub:
+                            continue  # different sub_class → skip
                         entity_id = eid
                         entity_class = e.entity_class
                         consumed.add(eid)

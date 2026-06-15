@@ -51,7 +51,11 @@ function humanType(
   fallbackLabel: string | undefined,
 ): string {
   if (entityClass === "valve") {
-    return VALVE_SUB_CLASS_LABELS[subClass || ""] || `Valve (${subClass || "?"})`;
+    // For unmatched detections the canonical entity has no sub_class; derive it
+    // from the YOLO label so "valve_db" → "Diaphragm Valve" not "Valve (?)".
+    const sub = subClass ||
+      (fallbackLabel?.startsWith("valve_") ? fallbackLabel.slice(6).toUpperCase() : undefined);
+    return VALVE_SUB_CLASS_LABELS[sub || ""] || `Valve (${sub || "?"})`;
   }
   if (entityClass === "instrument") {
     if (subClass) return subClass;
