@@ -1,5 +1,8 @@
-# Secrets
+# Secrets — NEVER commit .env files with real keys
+# .env.example is the template and IS committed with blank/placeholder values
 .env
+.env.local
+.env.*.local
 
 # Intermediate / temp files
 tmp/

@@ -206,8 +206,8 @@ export default function PidCanvas({
   tileImageUrl,
   tileFilename,
   detections,
-  valveCount,
-  valveCountTotal,
+  valveCount: _valveCount,
+  valveCountTotal: _valveCountTotal,
   mode = "select",
   userAnnotations,
   edges,
@@ -445,24 +445,6 @@ export default function PidCanvas({
             </g>
           </svg>
         )}
-        {(useFullPage || useTile) && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: "8px 14px",
-              fontSize: 12,
-              color: dark ? "#9498AE" : "#6B6F8A",
-              fontFamily: "JetBrains Mono, monospace",
-              textAlign: "center",
-            }}
-          >
-            {valveCount !== undefined && valveCount > 0
-              ? `${valveCount} valves on this sheet`
-              : valveCountTotal && valveCountTotal > 0
-                ? `${valveCountTotal} valves total — detection coords not yet available`
-                : "Valve list not yet generated for this job"}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -557,11 +539,13 @@ function PageWithOverlays({
   // doesn't match any computed offset (would indicate a multi-page mismatch).
   const pageDetections = useMemo(() => {
     if (!natural) return [];
+    // map first (preserves global index), then filter — _origIdx lets the
+    // render loop compute the same key that buildElementsForTile assigned.
     return detections
-      .filter((d) => Array.isArray(d.bbox) && d.bbox.length === 4 && d.tile)
-      .map((d) => {
+      .map((d, origIdx) => {
+        if (!Array.isArray(d.bbox) || d.bbox.length !== 4 || !d.tile) return null;
         const pb = tileBboxToPage(d.bbox as number[], d.tile as string, offsets);
-        return pb ? { ...d, pageBbox: pb } : null;
+        return pb ? { ...d, pageBbox: pb, _origIdx: origIdx } : null;
       })
       .filter((d): d is NonNullable<typeof d> => d !== null);
   }, [detections, offsets, natural]);
@@ -763,8 +747,11 @@ function PageWithOverlays({
             const placed: Array<{ x: number; y: number }> = [];
             return pageDetections.map((d, i) => {
               const [x1, y1, x2, y2] = d.pageBbox;
-              const clickable = typeof d.entity_id === "string" && d.entity_id.length > 0;
-              const isSelected = clickable && d.entity_id === selectedId;
+              // detKey mirrors the key buildElementsForTile assigns this detection.
+              // Matched detections use entity_id (UUID); unmatched use _det_<origIdx>.
+              const detKey = (d.entity_id as string | undefined) || `_det_${d._origIdx}`;
+              const clickable = mode === "select"; // all detections selectable in select mode
+              const isSelected = detKey === selectedId;
               const sw = Math.max(1, natural.w / 500);
               const kind = labelToSymKind(d.label);       // YOLO label -> glyph
               const klass = colorForKind(kind);            // per-class palette color (LS-style)
@@ -809,19 +796,19 @@ function PageWithOverlays({
                     height={h}
                     fill="transparent"
                     style={{
-                      pointerEvents: clickable && mode === "select" ? "auto" : "none",
-                      cursor: clickable && mode === "select" ? "pointer" : cursor,
+                      pointerEvents: clickable ? "auto" : "none",
+                      cursor: clickable ? "pointer" : cursor,
                     }}
                     onClick={
-                      clickable && mode === "select"
+                      clickable
                         ? (ev) => {
                             ev.stopPropagation();
-                            onSelect(d.entity_id as string, d.entity_class);
+                            onSelect(detKey, d.entity_class);
                           }
                         : undefined
                     }
                   >
-                    {clickable && <title>{human || d.label} — click to edit</title>}
+                    {clickable && <title>{human || d.label || "Detection"} — click to select</title>}
                   </rect>
                   {/* selection highlight (pink) */}
                   {isSelected && (

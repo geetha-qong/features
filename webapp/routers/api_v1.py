@@ -369,17 +369,30 @@ def _attach_entity_ids(detections: list, entities: list) -> None:
                     consumed.add(eid)
                     break
                 if entity_id is None and sub:
-                    # Sub_class didn't match anything; try class-only.
+                    # Sub_class didn't match exactly. Only accept entities that
+                    # have NO sub_class set (pipeline left it blank) — never
+                    # pair a detection with an entity that has a DIFFERENT
+                    # sub_class (e.g. valve_db→BV entity is a wrong-type match
+                    # that would show "Ball Valve" for a diaphragm valve).
                     for e in entities:
                         eid = str(e.entity_id)
                         if eid in consumed or e.entity_class != cls:
                             continue
+                        if e.sub_class and e.sub_class.upper() != sub:
+                            continue  # different sub_class → skip
                         entity_id = eid
                         entity_class = e.entity_class
                         consumed.add(eid)
                         break
 
         det["entity_id"] = entity_id
+        # Always set entity_class so the frontend can categorise the detection
+        # even when no canonical entity was matched (entity_id is None).
+        # Matched path already set entity_class; unmatched path derives it from
+        # the YOLO label so inst_bpcs/inst_sis/valve_* are correctly typed.
+        if not entity_class:
+            yolo_label = det.get("label") or det.get("yolo_class")
+            entity_class, _ = _yolo_class_to_canonical(yolo_label)
         if entity_class:
             det.setdefault("entity_class", entity_class)
 

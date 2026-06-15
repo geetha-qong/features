@@ -25,39 +25,25 @@ from webapp.deliverables.canonical import (
 # Values that indicate "no real vendor information"
 _EMPTY_VENDOR_VALUES = {"TBD", "LATER", "-", ""}
 
-# Instrument CSV column → canonical field name
+# Instrument CSV column → canonical field name.
+# Keys match the ALL-CAPS headers that instrument_validator.py writes via
+# InstrumentRow.to_csv_dict(). Previously used Title-Case names that never
+# matched, leaving all instrument fields empty in canonical.json.
 _INSTRUMENT_FIELD_MAP: Dict[str, str] = {
-    "Rev No": "rev_no",
-    "Unit Number": "unit_number",
-    "Loop Name": "loop_name",
-    "Tag Number": "tag_number",
-    "Instrument Type": "instrument_type",
-    "Service Description": "service_description",
-    "P&ID No": "pid_number",
-    "Line No": "line_no",
-    "Equipment No": "equipment_no",
-    "Location": "location",
-    "System": "system",
-    "Technical Room": "technical_room",
-    "IO Type": "io_type",
-    "Signal Type": "signal_type",
-    "Signal Level": "signal_level",
-    "IO Grouping": "io_grouping",
-    "External Power Supply": "external_power_supply",
-    "Analog Range Low": "analog_range_low_scale",
-    "Analog Range High": "analog_range_high_scale",
-    "Analog Range EU": "analog_range_eu",
-    "HH Alarm Limit": "alarm_high_high",
-    "H Alarm Limit": "alarm_high",
-    "L Alarm Limit": "alarm_low",
-    "LL Alarm Limit": "alarm_low_low",
-    "Junction Box/Panel": "junction_box_panel",
-    "Multi-Cable Pair No": "multi_cable_pair_no",
-    "Manufacturer": "manufacturer",
-    "Model No": "model_no",
-    "Inst. Datasheet": "datasheet_ref",
-    "Hook-up Drawing": "hookup_drawing",
-    "Remark": "remark",
+    "INSTRUMENT TYPE DESCRIPTION": "instrument_type",
+    "TAG SERVICE":                  "service_description",
+    "LINE NUMBER":                  "line_no",
+    "EQUIP NO":                     "equipment_no",
+    "POWER SUPPLY":                 "external_power_supply",
+    "SIGNAL VOLTAGE LEVEL":         "signal_level",
+    "LOCATION":                     "location",
+    "RANGE MIN":                    "analog_range_low_scale",
+    "RANGE MAX":                    "analog_range_high_scale",
+    "RANGE UOM":                    "analog_range_eu",
+    "DATA SHEET / REQUISITION №":   "datasheet_ref",
+    "MANUFACTURER":                 "manufacturer",
+    "MODEL":                        "model_no",
+    "REMARKS":                      "remark",
 }
 
 
@@ -133,7 +119,7 @@ def _build_instrument_entities(instrument_csv: Path, job_id: int) -> List[Canoni
     with instrument_csv.open(newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for idx, row in enumerate(reader):
-            tag = row.get("Tag Number") or None
+            tag = row.get("TAG NUMBER") or None
 
             entity_id = _make_entity_uuid(job_id, "instrument", tag, idx)
 
@@ -142,9 +128,9 @@ def _build_instrument_entities(instrument_csv: Path, job_id: int) -> List[Canoni
             for csv_col, field_name in _INSTRUMENT_FIELD_MAP.items():
                 fields[field_name] = row.get(csv_col, "")
 
-            # Synthesize VendorMatch only when Manufacturer + Model No are real values
-            manufacturer = (row.get("Manufacturer") or "").strip()
-            model_no = (row.get("Model No") or "").strip()
+            # Synthesize VendorMatch only when Manufacturer + Model are real values
+            manufacturer = (row.get("MANUFACTURER") or "").strip()
+            model_no = (row.get("MODEL") or "").strip()
             vendor_match: Optional[VendorMatch] = None
             if manufacturer not in _EMPTY_VENDOR_VALUES and model_no not in _EMPTY_VENDOR_VALUES:
                 vendor_id = uuid.uuid5(uuid.NAMESPACE_DNS, manufacturer)
@@ -160,9 +146,9 @@ def _build_instrument_entities(instrument_csv: Path, job_id: int) -> List[Canoni
                 CanonicalEntity(
                     entity_id=entity_id,
                     entity_class="instrument",
-                    sub_class=row.get("Instrument Type", ""),
+                    sub_class=row.get("INSTRUMENT TYPE DESCRIPTION", ""),
                     tag=tag,
-                    pid_number=row.get("P&ID No", ""),
+                    pid_number=row.get("P&ID", ""),
                     sheet_number=1,
                     bbox=(0.0, 0.0, 0.0, 0.0),
                     fields=fields,

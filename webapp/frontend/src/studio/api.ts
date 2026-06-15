@@ -214,3 +214,24 @@ export const patchEntity = (
     `/api/v1/jobs/${jobId}/entities/${encodeURIComponent(entityId)}`,
     { fields },
   );
+
+export interface CreateEntityResponse {
+  entity_id: string;
+  applied: number;
+}
+
+/** Create a brand-new entity in canonical.json (for YOLO detections that
+ *  the pipeline didn't extract into the instrumentation_index / valve_list). */
+export const createEntity = (
+  jobId: number,
+  data: {
+    entity_class: string;
+    sub_class?: string;
+    fields: Record<string, unknown>;
+  },
+) =>
+  callJson<CreateEntityResponse>(
+    "POST",
+    `/api/v1/jobs/${jobId}/entities`,
+    data,
+  );

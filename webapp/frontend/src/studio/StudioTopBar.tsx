@@ -109,12 +109,17 @@ export default function StudioTopBar({
       <button className="studio-back" onClick={onBack} title="Back to projects">
         <ArrowLeft size={16} strokeWidth={1.6} />
       </button>
-      <div className="studio-brand">
+      <button
+        className="studio-brand"
+        onClick={onBack}
+        title="Go to dashboard"
+        style={{ cursor: "pointer", background: "none", border: "none", padding: 0 }}
+      >
         <img src={qongMark} alt="" />
         <span>
           <span className="qm">QONG</span>&nbsp;Studio
         </span>
-      </div>
+      </button>
       <div className="studio-divider"></div>
       <div className="studio-project">
         <div className="proj-name">{projectName}</div>

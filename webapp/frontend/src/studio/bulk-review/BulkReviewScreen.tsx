@@ -8,6 +8,7 @@ import {
   Filter,
   PanelRight,
   RotateCcw,
+  Save,
   Search,
   X,
 } from "lucide-react";
@@ -103,7 +104,7 @@ const IDENTITY_COLS: { field: keyof EntityRow; header: string }[] = [
 
 export default function BulkReviewScreen({
   jobId,
-  projectName,
+  projectName: _projectName,
   initialDeliverableType,
   onBack,
   onOpenEntity,
@@ -138,6 +139,9 @@ export default function BulkReviewScreen({
   const [showDetail, setShowDetail] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [exportErr, setExportErr] = useState<string | null>(null);
+  // Cache entity counts per tab key so non-active tabs show their count too.
+  const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   // Download the active deliverable. Wires the previously-stubbed "Export"
   // button to the same POST /export endpoint Studio's right-panel uses.
@@ -172,6 +176,33 @@ export default function BulkReviewScreen({
     }
   }, [activeType, jobId]);
 
+  // Batch-save all cells currently in edit mode. PATCHes each independently
+  // then does a single refresh so the table reflects the saved state.
+  async function saveAll() {
+    const entries = Object.entries(editing);
+    if (entries.length === 0) {
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 1500);
+      return;
+    }
+    setSaveStatus("saving");
+    await Promise.all(
+      entries.map(([k, draft]) => {
+        const colonIdx = k.indexOf(":");
+        const entityId = k.slice(0, colonIdx);
+        const field = k.slice(colonIdx + 1);
+        const entity = rows.find(r => r.entity_id === entityId);
+        if (!entity) return Promise.resolve();
+        const origVal = entity.values[field]?.value;
+        if (draft === valueToString(origVal)) return Promise.resolve();
+        return patchEntity(jobId, entityId, { [field]: stringToValue(draft, origVal) }).catch(() => {});
+      })
+    );
+    await fetchRows();
+    setSaveStatus("saved");
+    setTimeout(() => setSaveStatus("idle"), 1500);
+  }
+
   // Filter: typed value (immediate) + debounced value (the one we actually
   // filter on). Debounce reduces re-render churn on big tables.
   const [filterText, setFilterText] = useState("");
@@ -197,6 +228,8 @@ export default function BulkReviewScreen({
       if (myReq !== reqIdRef.current) return;
       setResp(r);
       setSelectedId(r.entities[0]?.entity_id ?? null);
+      // Cache this tab's count so the sidebar shows it even when tab is inactive.
+      setTabCounts(prev => ({ ...prev, [activeKey]: r.entities.length }));
       // Drop stale edit state from the previous tab — different rows / schema.
       setEditing({});
       setCellError({});
@@ -217,6 +250,27 @@ export default function BulkReviewScreen({
   useEffect(() => {
     void fetchRows();
   }, [fetchRows]);
+
+  // Pre-fetch counts for every supported tab in parallel on mount so the
+  // sidebar shows totals immediately without the user clicking each tab.
+  useEffect(() => {
+    const supported = (
+      Object.entries(DELIVERABLE_KEY_TO_TYPE) as [string, string | undefined][]
+    ).filter((e): e is [string, string] => e[1] !== undefined);
+    Promise.all(
+      supported.map(([key, type]) =>
+        getEntities(jobId, type)
+          .then(r => ({ key, count: r.entities.length }))
+          .catch(() => null)
+      )
+    ).then(results => {
+      const counts: Record<string, number> = {};
+      for (const r of results) {
+        if (r) counts[r.key] = r.count;
+      }
+      setTabCounts(counts);
+    });
+  }, [jobId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 150ms filter debounce — fast enough to feel live, slow enough that typing
   // doesn't re-filter every keystroke on a 500-row table.
@@ -371,10 +425,6 @@ export default function BulkReviewScreen({
         </button>
         <div className="br-divider"></div>
         <div className="br-crumbs">
-          <span>{projectName}</span>
-          <span className="sep">›</span>
-          <span>Bulk Review</span>
-          <span className="sep">›</span>
           <span className="strong">
             {DELIVERABLES.find((d) => d.key === activeKey)?.name ?? "—"}
           </span>
@@ -486,9 +536,11 @@ export default function BulkReviewScreen({
                   </span>
                 ) : (
                   <span className="completion">
-                    {/* No completion math from API yet; show entity count for
-                     *  the active tab, dash for the others. */}
-                    {isActive && resp ? resp.entities.length : "—"}
+                    {isActive && resp
+                      ? resp.entities.length
+                      : tabCounts[d.key] !== undefined
+                        ? tabCounts[d.key]
+                        : "—"}
                   </span>
                 )}
               </button>
@@ -521,6 +573,22 @@ export default function BulkReviewScreen({
                 <strong>{editableColumns.length}</strong>
                 <span>Editable Cols</span>
               </div>
+              <button
+                className={`br-btn${saveStatus === "saved" ? " primary" : ""}`}
+                onClick={() => void saveAll()}
+                disabled={saveStatus === "saving"}
+                title={
+                  Object.keys(editing).length > 0
+                    ? `Save ${Object.keys(editing).length} unsaved cell(s) · Ctrl+S`
+                    : "All changes saved · Ctrl+S"
+                }
+                style={{ marginLeft: 8 }}
+              >
+                <Save size={12} strokeWidth={1.6} />
+                <span>
+                  {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved ✓" : "Save"}
+                </span>
+              </button>
             </div>
           </div>
 
@@ -860,6 +928,26 @@ function BulkCell({
   const isPidSourced = fv?.source === "pid" && !isOverride && !isEmpty;
   const isEditing = editing !== undefined;
 
+  // Auto-save: commit 10s after the last keystroke. onCommitRef keeps a
+  // stable pointer so the timer closure always calls the latest callback.
+  const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+
+  function resetAutoSave() {
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+    autoSaveRef.current = setTimeout(() => onCommitRef.current(), 10_000);
+  }
+
+  useEffect(() => {
+    if (!isEditing) {
+      if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+      return;
+    }
+    resetAutoSave();
+    return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
+  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Click-to-edit affordance: a single click flips the cell into an input,
   // pre-populated with the current value. We deliberately don't use a separate
   // "edit" icon — the whole cell is the affordance.
@@ -886,11 +974,11 @@ function BulkCell({
           type="text"
           value={editing ?? ""}
           disabled={saving}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => { onChange(e.target.value); resetAutoSave(); }}
           onClick={(e) => e.stopPropagation()}
           onBlur={() => onCommit()}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
+            if (e.key === "Enter" || (e.key === "s" && (e.ctrlKey || e.metaKey))) {
               e.preventDefault();
               onCommit();
             } else if (e.key === "Escape") {
