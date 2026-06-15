@@ -204,8 +204,8 @@ export default function PidCanvas({
   tileImageUrl,
   tileFilename,
   detections,
-  valveCount,
-  valveCountTotal,
+  valveCount: _valveCount,
+  valveCountTotal: _valveCountTotal,
   mode = "select",
   userAnnotations,
   edges,
@@ -421,24 +421,6 @@ export default function PidCanvas({
               <text x="240" y="3">orphan node</text>
             </g>
           </svg>
-        )}
-        {(useFullPage || useTile) && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: "8px 14px",
-              fontSize: 12,
-              color: dark ? "#9498AE" : "#6B6F8A",
-              fontFamily: "JetBrains Mono, monospace",
-              textAlign: "center",
-            }}
-          >
-            {valveCount !== undefined && valveCount > 0
-              ? `${valveCount} valves on this sheet`
-              : valveCountTotal && valveCountTotal > 0
-                ? `${valveCountTotal} valves total — detection coords not yet available`
-                : "Valve list not yet generated for this job"}
-          </div>
         )}
       </div>
     </div>
