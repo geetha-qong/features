@@ -41,6 +41,27 @@ def _api_key() -> str:
     return os.environ.get("VENDOR_MATCH_API_KEY", "")
 
 
+def _normalize_inst_type(code: str) -> str:
+    """Map compound ISA codes to the base catalog type for API lookup.
+
+    Any transmitter (ends in T) → {first_letter}T
+      PZIT → PT,  FZIT → FT,  LZIT → LT,  TZIT → TT,  FZAT → FT …
+
+    Any primary element / sensor (ends in E) → {first_letter}E
+      FE → FE (unchanged),  etc.
+
+    Anything else is returned as-is; the API will 422 if it has no catalog
+    entry for that code.
+    """
+    if not code:
+        return code
+    if code.endswith("T") and len(code) > 2:
+        return code[0] + "T"
+    if code.endswith("E") and len(code) > 2:
+        return code[0] + "E"
+    return code
+
+
 def fetch_vendor_fields(
     inst_type: str,
     range_min: Optional[str] = None,
@@ -61,7 +82,7 @@ def fetch_vendor_fields(
     if not base or not _REQUESTS_OK:
         return None
 
-    code = (inst_type or "").upper().strip()
+    code = _normalize_inst_type((inst_type or "").upper().strip())
     if not code:
         return None
 
