@@ -44,21 +44,32 @@ def _api_key() -> str:
 def _normalize_inst_type(code: str) -> str:
     """Map compound ISA codes to the base catalog type for API lookup.
 
-    Any transmitter (ends in T) → {first_letter}T
-      PZIT → PT,  FZIT → FT,  LZIT → LT,  TZIT → TT,  FZAT → FT …
+    Transmitter (last letter T) → {first_letter}T
+      PZIT → PT,  FZIT → FT,  LZIT → LT,  TZIT → TT …
 
-    Any primary element / sensor (ends in E) → {first_letter}E
-      FE → FE (unchanged),  etc.
+    Primary element (last letter E) → {first_letter}E
+      FE → FE (unchanged), etc.
+
+    Switch / manual-hand (last letter S, or trip suffixes HH/LL/SH/SL) → PBS
+      HS → PBS,  LIS → PBS,  PSHH → PBS,  FSLL → PBS …
+      All switches use the same PBS (Push Button Switch) vendor catalog entry.
 
     Anything else is returned as-is; the API will 422 if it has no catalog
     entry for that code.
     """
     if not code:
         return code
+    # Transmitter
     if code.endswith("T") and len(code) > 2:
         return code[0] + "T"
+    # Primary element
     if code.endswith("E") and len(code) > 2:
         return code[0] + "E"
+    # Switch / manual-hand — all map to PBS
+    if code.endswith("S"):
+        return "PBS"
+    if code.endswith(("HH", "LL", "SH", "SL")):
+        return "PBS"
     return code
 
 
