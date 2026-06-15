@@ -15,6 +15,7 @@ import DocTypeIcon from "./DocTypeIcon";
 import { DOC_TYPES, type DocTypeKey } from "./schemas";
 import {
   HttpError,
+  createEntity,
   getEntities,
   patchEntity,
   type EntitiesResponse,
@@ -47,15 +48,7 @@ interface Props {
   totalCount?: number;
 }
 
-/** Inverse of DOC_TYPE_TO_DELIVERABLE for the initial-default path. A clicked
- *  detection's `entity_class` decides which deliverable the drawer opens with.
- *  `instrument` maps to `index` (preserves the historical default; users can
- *  still flip to `datasheet` via the picker — both deliver the same UUID). */
-const ENTITY_CLASS_TO_DOC_TYPE: Record<string, DocTypeKey> = {
-  valve: "valves",
-  instrument: "index",
-  equipment: "equip",
-};
+/** deliverable_type → DocTypeKey inversion for auto-discovery docType switch. */
 
 /** 4 of 10 doc-types map to a real backend deliverable_type. The other 6 are
  *  "Coming soon" — visible in the dropdown so the design intent is preserved,
@@ -109,29 +102,26 @@ export default function DatasheetDrawer({
   onClose,
   jobId,
   entityId,
-  entityClass,
+  entityClass: _entityClass,
   fallbackTag,
   fallbackType,
   onBulkReview,
   totalCount = 0,
 }: Props) {
-  const [docType, setDocType] = useState<DocTypeKey>(
-    () => (entityClass && ENTITY_CLASS_TO_DOC_TYPE[entityClass]) || "index",
-  );
+  // Default to Instrument Index. The drawer no longer auto-switches docType
+  // based on entity_class — auto-discovery in fetchEntity finds the entity
+  // wherever it lives and only auto-switches when the entity genuinely isn't
+  // in the currently selected deliverable.
+  const [docType, setDocType] = useState<DocTypeKey>("index");
   const [showDocPicker, setShowDocPicker] = useState(false);
 
-  // Realign the drawer's deliverable to the clicked entity's class. We *only*
-  // do this on entityId/class change, not on every docType state-update — so
-  // the user can manually flip Instrument Index → Datasheet without us
-  // snapping them back. Effect-guard: an undefined class (prototype IDs,
-  // pre-D1.5 detections) leaves docType alone.
+  // When the user explicitly picks a deliverable type from the dropdown, flag
+  // it so fetchEntity won't immediately override their choice via auto-discovery.
+  // Reset on entityId change (new element selected → allow auto-discovery again).
+  const skipAutoDiscoveryRef = useRef(false);
   useEffect(() => {
-    if (!entityClass) return;
-    const target = ENTITY_CLASS_TO_DOC_TYPE[entityClass];
-    if (target) setDocType(target);
-    // Intentionally not listing docType — we want to drive it, not react to it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityId, entityClass]);
+    skipAutoDiscoveryRef.current = false;
+  }, [entityId]);
 
   // Backend response + drift between original (pre-edit snapshot) and the
   // editable working copy. `originalEntity` powers the diff that drives Save
@@ -161,6 +151,12 @@ export default function DatasheetDrawer({
   const deliverableType = docType ? DOC_TYPE_TO_DELIVERABLE[docType] : undefined;
   const isDeliverableSupported = !!deliverableType;
 
+  // Discovery order: try the current deliverable first, then the others.
+  // This handles the common mismatch where the user had switched to "Instrument
+  // Datasheet" but then clicks a valve — auto-discovery finds it in valve_list
+  // and flips docType automatically so the user never sees "entity not found".
+  const DISCOVERY_ORDER = ["valve_list", "instrument_index", "datasheet", "equipment_list"];
+
   const fetchEntity = useCallback(async () => {
     if (!entityId || !deliverableType || !open) return;
     const myReq = ++reqIdRef.current;
@@ -169,21 +165,66 @@ export default function DatasheetDrawer({
     setLegacyJobNoCanonical(false);
     setFetchError(null);
     try {
+      // Phase 1: fetch from the current deliverable type.
       const r = await getEntities(jobId, deliverableType);
-      if (myReq !== reqIdRef.current) return; // superseded
-      const match = r.entities.find((e) => e.entity_id === entityId) || null;
-      setResp(r);
+      if (myReq !== reqIdRef.current) return;
+
+      // Try UUID match first, then tag fallback (handles UUID drift between
+      // YOLO detection IDs and canonical pipeline_emitter UUIDs).
+      let match: EntityRow | null =
+        r.entities.find((e) => e.entity_id === entityId) ||
+        (fallbackTag ? r.entities.find((e) => e.tag === fallbackTag) || null : null) ||
+        null;
+      let activeResp = r;
+
+      // Phase 2: auto-discover across other deliverable types so clicking any
+      // element (valve / instrument / equipment) always surfaces its data even
+      // when the user has a mismatched deliverable type open.
+      // Skipped when the user explicitly chose a type from the dropdown.
+      if (!match && !skipAutoDiscoveryRef.current) {
+        const others = DISCOVERY_ORDER.filter((t) => t !== deliverableType);
+        for (const t of others) {
+          try {
+            const other = await getEntities(jobId, t);
+            if (myReq !== reqIdRef.current) return;
+            const found =
+              other.entities.find((e) => e.entity_id === entityId) ||
+              (fallbackTag ? other.entities.find((e) => e.tag === fallbackTag) || null : null) ||
+              null;
+            if (found) {
+              match = found;
+              activeResp = other;
+              // Flip docType so the header + dropdown reflect the real deliverable.
+              const newDocType = (
+                Object.entries(DOC_TYPE_TO_DELIVERABLE) as [string, string][]
+              ).find(([, v]) => v === t)?.[0] as DocTypeKey | undefined;
+              if (newDocType) setDocType(newDocType as DocTypeKey);
+              break;
+            }
+          } catch {
+            /* deliverable type unavailable — skip */
+          }
+        }
+      }
+
+      setResp(activeResp);
       setOriginalEntity(match);
       if (match) {
         const init: Record<string, string> = {};
-        for (const col of r.schema) {
+        for (const col of activeResp.schema) {
           init[col.field] = valueToString(match.values[col.field]?.value);
         }
         setEditValues(init);
         setUnlocked({});
         setNotFound(false);
       } else {
-        setEditValues({});
+        // Blank form: initialise every editable field to "" so the user can
+        // fill in data manually and create the entity via the POST endpoint.
+        const init: Record<string, string> = {};
+        for (const col of activeResp.schema) {
+          init[col.field] = "";
+        }
+        setEditValues(init);
         setNotFound(true);
       }
     } catch (e) {
@@ -201,7 +242,8 @@ export default function DatasheetDrawer({
     } finally {
       if (myReq === reqIdRef.current) setLoading(false);
     }
-  }, [jobId, entityId, deliverableType, open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId, entityId, deliverableType, open, fallbackTag]);
 
   useEffect(() => {
     if (open) void fetchEntity();
@@ -228,16 +270,21 @@ export default function DatasheetDrawer({
   // value differs from the original. Read-only fields are filtered out
   // upstream by the schema's `editable` flag.
   const dirtyFields = useMemo(() => {
-    if (!resp || !originalEntity) return {};
+    if (!resp) return {};
     const out: Record<string, unknown> = {};
     for (const col of resp.schema) {
       if (!col.editable) continue;
-      const orig = originalEntity.values[col.field]?.value;
-      const origStr = valueToString(orig);
       const cur = editValues[col.field] ?? "";
-      if (cur !== origStr) {
-        const origType = typeof orig === "number" ? "number" : "string";
-        out[col.field] = stringToValue(cur, origType);
+      if (!originalEntity) {
+        // New entity mode: every non-empty field is "dirty" (to be created).
+        if (cur.trim()) out[col.field] = cur;
+      } else {
+        const orig = originalEntity.values[col.field]?.value;
+        const origStr = valueToString(orig);
+        if (cur !== origStr) {
+          const origType = typeof orig === "number" ? "number" : "string";
+          out[col.field] = stringToValue(cur, origType);
+        }
       }
     }
     return out;
@@ -301,6 +348,37 @@ export default function DatasheetDrawer({
     }
   }
 
+  async function onCreateDraft() {
+    if (saving || dirtyCount === 0) {
+      setToast({ kind: "error", msg: "Fill in at least one field before creating" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const entityClassForCreate =
+        deliverableType === "valve_list" ? "valve"
+        : deliverableType === "equipment_list" ? "equipment"
+        : "instrument";
+      const result = await createEntity(jobId, {
+        entity_class: entityClassForCreate,
+        fields: dirtyFields,
+      });
+      setToast({ kind: "ok", msg: `Created — ${dirtyCount} field${dirtyCount === 1 ? "" : "s"} saved` });
+      // Refetch using the new UUID so the drawer flips from blank form to full edit mode.
+      setNotFound(false);
+      // Trigger re-fetch by temporarily bumping the request counter — the
+      // parent will pass the new entity_id on next render if it picks up the
+      // return value, but for now close the drawer so the user can reselect.
+      void result; // entity_id available here for future auto-select
+      await fetchEntity();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Create failed";
+      setToast({ kind: "error", msg });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div
       className="ds-backdrop"
@@ -329,6 +407,7 @@ export default function DatasheetDrawer({
                       title={supported ? d.name : "Coming soon — no backend generator yet"}
                       onClick={() => {
                         if (!supported) return;
+                        skipAutoDiscoveryRef.current = true; // user chose explicitly — don't auto-switch away
                         setDocType(d.key);
                         setShowDocPicker(false);
                       }}
@@ -440,21 +519,16 @@ export default function DatasheetDrawer({
             </div>
           )}
 
-          {isDeliverableSupported && !loading && !fetchError && notFound && !legacyJobNoCanonical && (
-            <div className="ds-empty-state" style={{ padding: 32, textAlign: "center" }}>
-              <p style={{ fontSize: 14, color: "var(--fg-2)" }}>
-                <strong>Pick an entity to view its fields.</strong>
-              </p>
-              <p style={{ fontSize: 12, color: "var(--fg-3)", marginTop: 8 }}>
-                <code>{entityId}</code> isn&rsquo;t in the {deliverableType?.replace(/_/g, " ")} for this
-                job. Click a highlighted bounding box on the canvas, or switch
-                the deliverable type above if you&rsquo;re looking for a
-                different class of entity (valve / instrument / equipment).
-              </p>
-              <button className="btn btn-secondary btn-sm" onClick={onClose} style={{ marginTop: 16 }}>
-                Close
-              </button>
-            </div>
+          {isDeliverableSupported && !loading && !fetchError && notFound && !legacyJobNoCanonical && resp && (
+            <EntityFieldList
+              schema={resp.schema}
+              entity={null}
+              editValues={editValues}
+              unlocked={unlocked}
+              onChange={update}
+              onUnlock={(k) => setUnlocked((u) => ({ ...u, [k]: true }))}
+              onReset={resetField}
+            />
           )}
 
           {isDeliverableSupported && !loading && !fetchError && !notFound && resp && originalEntity && (
@@ -474,9 +548,11 @@ export default function DatasheetDrawer({
           <div className="ds-foot-info">
             <Info size={13} strokeWidth={1.6} />
             <span>
-              {dirtyCount === 0
-                ? `${totalFields - filled} fields remaining`
-                : `${dirtyCount} unsaved change${dirtyCount === 1 ? "" : "s"}`}
+              {notFound
+                ? `${filled} / ${totalFields} fields filled`
+                : dirtyCount === 0
+                  ? `${totalFields - filled} fields remaining`
+                  : `${dirtyCount} unsaved change${dirtyCount === 1 ? "" : "s"}`}
             </span>
           </div>
           {toast && (
@@ -499,11 +575,15 @@ export default function DatasheetDrawer({
           <div style={{ flex: 1 }}></div>
           <button
             className="btn btn-secondary btn-sm"
-            onClick={() => void onSaveDraft()}
+            onClick={() => notFound ? void onCreateDraft() : void onSaveDraft()}
             disabled={saving || dirtyCount === 0}
-            title={dirtyCount === 0 ? "No changes to save" : `Save ${dirtyCount} change(s)`}
+            title={
+              notFound
+                ? dirtyCount === 0 ? "Fill in fields to create" : `Create entry with ${dirtyCount} field(s)`
+                : dirtyCount === 0 ? "No changes to save" : `Save ${dirtyCount} change(s)`
+            }
           >
-            {saving ? "Saving…" : "Save Draft"}
+            {saving ? (notFound ? "Creating…" : "Saving…") : (notFound ? "Create Entry" : "Save Draft")}
           </button>
           <button className="btn btn-primary btn-sm" disabled>
             <Download size={12} strokeWidth={1.6} /> Export
@@ -527,7 +607,7 @@ function EntityFieldList({
   onReset,
 }: {
   schema: EntityColumn[];
-  entity: EntityRow;
+  entity: EntityRow | null;
   editValues: Record<string, string>;
   unlocked: Record<string, boolean>;
   onChange: (k: string, v: string) => void;
@@ -541,7 +621,7 @@ function EntityFieldList({
 
   return (
     <div className="ds-fields-flat" style={{ padding: "12px 16px" }}>
-      {readOnly.length > 0 && (
+      {entity && readOnly.length > 0 && (
         <section className="ds-section open" style={{ marginBottom: 16 }}>
           <div
             className="ds-section-head"
@@ -556,7 +636,7 @@ function EntityFieldList({
             style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}
           >
             {readOnly.map((col) => (
-              <ReadOnlyCell key={col.field} col={col} fv={entity.values[col.field]} />
+              <ReadOnlyCell key={col.field} col={col} fv={entity?.values[col.field]} />
             ))}
           </div>
         </section>
@@ -576,7 +656,7 @@ function EntityFieldList({
           style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}
         >
           {editable.map((col) => {
-            const fv = entity.values[col.field];
+            const fv = entity?.values[col.field];
             const isOverridden = !!fv?.is_override;
             const pidBadge = isPidSourced(fv) && !isOverridden;
             const locked = pidBadge && !unlocked[col.field];

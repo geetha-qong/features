@@ -1,26 +1,18 @@
 /**
- * Derive the right-panel "Selected Element" + "Elements on Sheet" data from
- * live backend responses — replaces the prototype `DEMO_ELEMENT_DATA` fallback
- * that used to render even after real detections were loaded.
+ * Derive the right-panel "Elements on P&ID" list from live backend responses.
  *
- * Keyed by `detection.entity_id` (UUID) so the same key drives both the panel
- * row click and the DatasheetDrawer's `entityId` prop. Detections without an
- * `entity_id` (direction labels, arrows, page connectors — non-editable per
- * FEATURES #31) are intentionally excluded; they're visual aids only.
+ * ALL YOLO detections are included — no filtering by tile, by entity_class, or
+ * by whether the detection was matched to a canonical entity. Change 3 (2026-06-15).
+ *
+ * Keys:
+ *   - `detection.entity_id` (UUID) when the D1.5 matcher attached a canonical entity.
+ *   - `${entity_class|label}_${idx}` stable composite for unmatched detections
+ *     (arrows, connectors, instruments/equipment without a canonical row).
  */
 import type { DetectionItem, EntitiesResponse, EntityRow } from "./api";
 import type { CanvasElement } from "./types";
 
-// Human-readable names for the valve sub_class field. Two origins:
-//   1. YOLO-side codes (BV/BF/GT/CK/DB/GL/CV/NCBV/PNEUCTRL/RELIEF_SAFETY/
-//      3WAY_RELIEF) — derived from `_yolo_class_to_canonical` in
-//      webapp/routers/api_v1.py.
-//   2. CSV-side codes (VB/VF/VD/PV/SB/...) — customer-side conventions
-//      that appear in the canonical_entities backfill but not in the
-//      YOLO vocabulary. Inferred semantics from common P&ID engineering
-//      shorthand; revise per-customer if a slug-specific map emerges.
 const VALVE_SUB_CLASS_LABELS: Record<string, string> = {
-  // YOLO vocabulary (FEATURES #31)
   BV: "Ball Valve",
   BF: "Butterfly Valve",
   GT: "Gate Valve",
@@ -32,12 +24,25 @@ const VALVE_SUB_CLASS_LABELS: Record<string, string> = {
   PNEUCTRL: "Pneumatic Control",
   RELIEF_SAFETY: "Relief / Safety Valve",
   "3WAY_RELIEF": "3-Way Relief Valve",
-  // Customer/CSV-side codes surfaced by FEATURES #34 canonical_entities backfill
   VB: "Block Valve",
   VF: "Flow Valve",
   VD: "Drain Valve",
   PV: "Pressure Valve",
   SB: "Sample/Bleed Valve",
+};
+
+const INST_YOLO_LABELS: Record<string, string> = {
+  inst_bpcs:        "Instrument (BPCS)",
+  inst_sis:         "Instrument (SIS)",
+  inst_local_panel: "Instrument (Local Panel)",
+  "SIS-R":          "SIS Device",
+  interlock:        "Interlock",
+};
+
+const EQUIP_YOLO_LABELS: Record<string, string> = {
+  Motor:           "Motor",
+  "Pump/Dwg Pump": "Pump",
+  Pump_Dwg_Pump:   "Pump",
 };
 
 function humanType(
@@ -48,41 +53,48 @@ function humanType(
   if (entityClass === "valve") {
     return VALVE_SUB_CLASS_LABELS[subClass || ""] || `Valve (${subClass || "?"})`;
   }
-  if (entityClass === "instrument") return "Instrument";
-  if (entityClass === "equipment") return "Equipment";
+  if (entityClass === "instrument") {
+    if (subClass) return subClass;
+    return INST_YOLO_LABELS[fallbackLabel || ""] || "Instrument";
+  }
+  if (entityClass === "equipment") {
+    if (subClass) return subClass;
+    return EQUIP_YOLO_LABELS[fallbackLabel || ""] || "Equipment";
+  }
   if (fallbackLabel?.startsWith("arrow_")) return "Flow arrow";
   if (fallbackLabel?.startsWith("connector_")) return "Page connector";
   return fallbackLabel ?? "Unknown";
 }
 
-/** Per-tile element rows for PropertiesPanel. Keys are `entity_id` UUIDs. */
+/** Build element rows for PropertiesPanel from ALL YOLO detections in the job.
+ *  No tile filter, no entity_class filter — every bbox appears in the list. */
 export function buildElementsForTile(
   detections: DetectionItem[] | undefined,
   entityIdToCanonical: Map<string, EntityRow>,
-  activeTileFilename: string | null,
 ): Record<string, CanvasElement> {
-  if (!detections || !activeTileFilename) return {};
+  if (!detections) return {};
   const out: Record<string, CanvasElement> = {};
-  for (const d of detections) {
-    if (d.tile !== activeTileFilename) continue;
-    if (!d.entity_id) continue;
-    const ent = entityIdToCanonical.get(d.entity_id);
-    out[d.entity_id] = {
-      tag: ent?.tag || d.entity_id.slice(0, 8),
-      type: humanType(ent?.entity_class, ent?.sub_class, d.label),
+  for (let idx = 0; idx < detections.length; idx++) {
+    const d = detections[idx];
+    const entityClass = d.entity_class;
+    // Stable composite key for unmatched detections: index in the original
+    // detections array. PidCanvas preserves _origIdx via the same counter so
+    // sidebar key === canvas detKey for every detection, enabling bidirectional sync.
+    const key = d.entity_id || `_det_${idx}`;
+    const ent = d.entity_id ? entityIdToCanonical.get(d.entity_id) : undefined;
+    out[key] = {
+      tag:  ent?.tag || (d.entity_id ? d.entity_id.slice(0, 8) : (d.label || `${entityClass || "?"}-${idx}`)),
+      type: humanType(ent?.entity_class || entityClass, ent?.sub_class, d.label),
       confidence: typeof d.confidence === "number" ? d.confidence : 0,
       lines: [],
-      entityClass: ent?.entity_class || d.entity_class,
+      entityClass: ent?.entity_class || entityClass,
       subClass: ent?.sub_class,
     };
   }
   return out;
 }
 
-/** Merge multiple deliverable responses (valve_list + instrument_index + ...)
- *  into a single entity_id → EntityRow lookup. Later payloads can't collide
- *  in practice since each EntityRow belongs to one entity_class, but the Map
- *  semantics make "last write wins" the explicit contract anyway. */
+/** Merge multiple deliverable responses into a single entity_id → EntityRow lookup. */
 export function buildEntityIndex(
   responses: (EntitiesResponse | null | undefined)[],
 ): Map<string, EntityRow> {

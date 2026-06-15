@@ -21,7 +21,7 @@ import {
   type JobSheetsResp,
 } from "./api";
 import { buildElementsForTile, buildEntityIndex } from "./buildElements";
-import type { CanvasElement, JobGraph, ProjectLike, SessionEvent } from "./types";
+import type { CanvasElement, JobGraph, ProjectLike } from "./types";
 // FEATURES #38 — marking + edge drawing wiring
 import type { CanvasMode, LineType, UserAnnotationLite, EdgeLite } from "./PidCanvas";
 import PalettePanel from "./annotations/PalettePanel";
@@ -114,7 +114,7 @@ export default function Studio({ project, userName, onBack }: Props) {
   // it's the deliverable customers always see (Instrument Index only populates
   // when the instrumentation pass detects instruments, which on some P&IDs is
   // 0). Was "datasheet" — too narrow as a starting point.
-  const [activeDeliverableType] = useState<string>("valve_list");
+  const [activeDeliverableType] = useState<string>("instrument_index");
 
   // Real backend data — falls back to prototype when unavailable so the studio
   // never breaks on jobs without tiles/detections (e.g. seed data, brand-new
@@ -391,8 +391,8 @@ export default function Studio({ project, userName, onBack }: Props) {
     [valveEntitiesResp, instEntitiesResp],
   );
   const realElements = useMemo(
-    () => buildElementsForTile(detResp?.detections, entityIndex, activeTileFilename),
-    [detResp, entityIndex, activeTileFilename],
+    () => buildElementsForTile(detResp?.detections, entityIndex),
+    [detResp, entityIndex],
   );
   const hasRealElements = Object.keys(realElements).length > 0;
   const panelElements = hasRealElements ? realElements : DEMO_ELEMENT_DATA;
@@ -410,12 +410,6 @@ export default function Studio({ project, userName, onBack }: Props) {
 
   const sel = panelElements[selectedId] || Object.values(panelElements)[0];
   const hasDatasheet = DATASHEET_TYPES.has(sel.type) || sel.entityClass === "valve" || sel.entityClass === "instrument";
-
-  const sessionEvents: SessionEvent[] = [
-    { who: userName, when: "just now", what: "selected PV-203" },
-    { who: userName, when: "2m ago", what: "confirmed FT-101 type" },
-    { who: userName, when: "5m ago", what: "linked P-101 → V-101" },
-  ];
 
   // ── Redesign Jun 2026 — Apply / Properties strip / toast ───────────────
   // `appliedBySheet` is UI-only state: the design treats "Apply" as a
@@ -498,45 +492,6 @@ export default function Studio({ project, userName, onBack }: Props) {
   // Format is "xlsx" for everything except valve_list which has a CSV variant
   // we keep around for legacy customers. Errors surface as a toast — the
   // current panel doesn't have a per-row error slot yet (follow-up).
-  const EXPORT_FORMAT: Record<string, "csv" | "xlsx"> = {
-    valve_list: "csv",
-    instrument_index: "xlsx",
-    equipment_list: "xlsx",
-    datasheet: "xlsx",
-  };
-  async function onExportDeliverable(type: string) {
-    const format = EXPORT_FORMAT[type] || "xlsx";
-    // Soft-block unknown deliverable types — the prototype shipped 6 (Control
-    // Narrative, Cause & Effect, I/O List) that the backend doesn't generate
-    // yet. Surface clearly rather than 404.
-    if (!EXPORT_FORMAT[type]) {
-      showToast(`"${type}" export isn't available yet`);
-      return;
-    }
-    const url = `/api/v1/jobs/${project.id}/export/${type}/${format}`;
-    showToast(`Preparing ${type.replace("_", " ")} (${format.toUpperCase()})…`);
-    try {
-      const res = await fetch(url, { method: "POST", credentials: "include" });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
-        showToast(`Export failed (HTTP ${res.status}) ${detail.slice(0, 60)}`);
-        return;
-      }
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = `job-${project.id}-${type}.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(blobUrl);
-      showToast(`${type.replace("_", " ")} downloaded`);
-    } catch (e) {
-      showToast(`Export error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
   function onOpenDatasheet() {
     // If the user hasn't picked a real bbox yet, selectedId is still the
     // prototype default ("PV-203" etc.). Auto-select the first detection
@@ -735,11 +690,9 @@ export default function Studio({ project, userName, onBack }: Props) {
             elements={panelElements}
             selectedId={selectedId}
             onSelect={handleSelect}
-            sessionEvents={sessionEvents}
             hasDatasheet={hasDatasheet}
             onOpenDatasheet={onOpenDatasheet}
             onCollapse={() => setPropsOpen(false)}
-            onExportDeliverable={onExportDeliverable}
             canDelete={canDeleteSelected}
             onDelete={() => void handleDeleteAnnotation(selectedId)}
           />

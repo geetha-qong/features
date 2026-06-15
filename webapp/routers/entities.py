@@ -17,7 +17,10 @@ Auth: same IDOR pattern as exports.py — owner or super_admin, returns 404
 (not 403) to avoid leaking other users' job IDs.
 """
 
+import json
+import uuid as _uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -107,6 +110,16 @@ class PatchRequest(BaseModel):
     """Map of field-path → new value. e.g. {"tag": "FT-202", "fields.size": "3\""}.
 
     Empty `fields` is a no-op (returns the current state, doesn't 400).
+    """
+
+
+class CreateEntityBody(BaseModel):
+    """Payload for POST /jobs/{job_id}/entities — manually add a new entity."""
+    entity_class: str               # "valve" | "instrument" | "equipment"
+    sub_class: Optional[str] = ""
+    fields: Dict[str, Any] = Field(default_factory=dict)
+    """Flat field values using the same dot-notation as PATCH:
+       "tag" → entity.tag, "fields.instrument_type" → entity.fields["instrument_type"], etc.
     """
 
 
@@ -326,3 +339,103 @@ def patch_entity(
 
     db.commit()
     return {"entity_id": entity_id, "applied": applied}
+
+
+@router.post(
+    "/{job_id}/entities",
+    status_code=201,
+    responses={
+        201: {"description": "New entity created in canonical.json"},
+        400: {"description": "Invalid entity_class"},
+        404: {"description": "Job or canonical.json not found"},
+    },
+)
+def create_entity(
+    job_id: int,
+    payload: CreateEntityBody,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Manually create a new canonical entity for a job.
+
+    Inserts a new entry directly into canonical.json (not via entity_overrides)
+    and persists user-supplied field values as EntityOverride rows so they
+    survive future pipeline re-runs that would overwrite canonical.json.
+
+    Field path format (same as PATCH):
+      "tag"                  → entity.tag (top-level)
+      "fields.some_key"      → entity.fields["some_key"]
+    Other paths are stored as-is inside entity.fields.
+    """
+    from webapp.deliverables.canonical import CANONICAL_SCHEMA_VERSION
+
+    valid_classes = {"valve", "instrument", "equipment"}
+    if payload.entity_class not in valid_classes:
+        raise HTTPException(status_code=400, detail=f"entity_class must be one of {valid_classes}")
+
+    job = _load_job_or_404(job_id, db, current_user)
+
+    try:
+        canonical = load_canonical_for_job(job.output_csv_path)
+    except JobCanonicalNotFound:
+        raise HTTPException(status_code=404, detail=f"canonical.json missing for job {job_id}")
+
+    new_id = str(_uuid.uuid4())
+
+    # Parse dot-notation field paths into top-level and nested values.
+    tag: Optional[str] = None
+    pid_number: str = ""
+    nested_fields: Dict[str, Any] = {}
+
+    for path, value in payload.fields.items():
+        if not value and value != 0:
+            continue
+        str_value = str(value).strip() if value is not None else ""
+        if not str_value:
+            continue
+        if path == "tag":
+            tag = str_value
+        elif path == "pid_number":
+            pid_number = str_value
+        elif path.startswith("fields."):
+            nested_fields[path[len("fields."):]] = str_value
+        else:
+            nested_fields[path] = str_value
+
+    # Build the raw dict and append to canonical.json directly (bypassing
+    # Pydantic so we don't need to satisfy every required field for classes
+    # we don't have data for — bbox stays at placeholder zeros).
+    new_entity_raw = {
+        "entity_id": new_id,
+        "entity_class": payload.entity_class,
+        "sub_class": payload.sub_class or "",
+        "tag": tag,
+        "pid_number": pid_number,
+        "sheet_number": 1,
+        "bbox": [0.0, 0.0, 0.0, 0.0],
+        "fields": nested_fields,
+        "vendor_match": None,
+    }
+
+    canonical_path = Path(job.output_csv_path).parent / "canonical.json"
+    raw = json.loads(canonical_path.read_text())
+    raw.setdefault("entities", []).append(new_entity_raw)
+    canonical_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2))
+
+    # Persist all non-empty field values as EntityOverride rows so they survive
+    # a future canonical.json re-emit (which would wipe the appended entity).
+    for fname, new_value in payload.fields.items():
+        if new_value is None or (isinstance(new_value, str) and not new_value.strip()):
+            continue
+        row = EntityOverride(
+            job_id=job_id,
+            entity_id=new_id,
+            field_name=fname,
+            new_value=new_value,
+            prior_value=None,
+            edited_by=current_user.id,
+        )
+        db.add(row)
+    db.commit()
+
+    return {"entity_id": new_id, "applied": len(payload.fields)}

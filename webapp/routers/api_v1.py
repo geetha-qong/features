@@ -380,6 +380,13 @@ def _attach_entity_ids(detections: list, entities: list) -> None:
                         break
 
         det["entity_id"] = entity_id
+        # Always set entity_class so the frontend can categorise the detection
+        # even when no canonical entity was matched (entity_id is None).
+        # Matched path already set entity_class; unmatched path derives it from
+        # the YOLO label so inst_bpcs/inst_sis/valve_* are correctly typed.
+        if not entity_class:
+            yolo_label = det.get("label") or det.get("yolo_class")
+            entity_class, _ = _yolo_class_to_canonical(yolo_label)
         if entity_class:
             det.setdefault("entity_class", entity_class)
 
