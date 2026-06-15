@@ -24,6 +24,26 @@
 
 ---
 
+## [2026-06-15] #44 — Studio canvas: layout-based zoom (the actual deep-zoom pixelation fix; completes #43)
+
+**Type:** bugfix
+**Stage:** webapp/frontend
+**Status:** shipped (deployed to dev)
+
+**Why:** #43 made the canvas request a higher-res render as you zoom — but the page **still looked blurry on dev**. Browser-measured root cause (Playwright on dev, job 1 @ 600%): the hi-DPI source *was* loading (`imgNaturalW=12000`), but the `<img>` was laid out at only **656 CSS px** and zoom was a CSS `transform: scale(6)` on `.canvas-inner` (further pinned by `will-change: transform`). `transform: scale` magnifies the **already-rasterized 656px layer** — it never samples the 12000px source. So #43's higher-res fetch was wasted. The fix had to change the *display*, not just the source.
+
+**What:**
+- **Layout-based zoom** (`PidCanvas.tsx`): zoom now sizes the page box in real CSS pixels instead of transforming it. `.canvas-inner` carries only `translate` (pan); full-page mode drops `scale`. A `ResizeObserver` on the canvas tracks available size; `PageWithOverlays` computes `display = fit(natural, avail) × zoom` (object-fit-contain math) and sets the page container + `<img>` to those exact px. The browser then lays the image out at the zoomed size and samples the full-res source → crisp. Invariant to source resolution (same aspect), so #43's `?w` escalation only sharpens, never reflows. All overlay geometry already derives from `natural.w/h`, so detections/edges/labels stay aligned.
+- Removed `will-change: transform` from `.canvas-inner` (`studio.css`) — the page box can be ~12000px wide; pinning it as one GPU layer would waste large VRAM and isn't needed for translate-pan.
+- Legacy tile/proto modes keep `transform: scale` zoom (only full-page is layout-based).
+
+**Result (verified on dev, Playwright):** at 600% zoom the `<img>` layout width goes 656px → **3936px** (= fit 656 × 6), so a 3936px box samples the 8000–12000px source instead of upscaling a 656px raster. Screenshot confirms **sharp, readable tag text** (line numbers, `MUK-…` codes) where #43 alone was blurry. `tsc` clean; 89 vitest pass.
+
+**Notes:**
+- This + #43 together are the full fix: #44 makes the display sample real pixels; #43 ensures enough source pixels exist at deep zoom. Neither alone is sufficient.
+- Smooth zoom *animation* is gone (width isn't transition-animated like transform was) — acceptable; wheel-zoom was never animated.
+- Pinch/2-finger and the +/- buttons all flow through the same `zoom` state, so they all benefit.
+
 ## [2026-06-15] #43 — Studio canvas: on-demand zoom-aware page re-render (fix deep-zoom pixelation)
 
 **Type:** bugfix | feature

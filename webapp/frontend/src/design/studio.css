@@ -1167,8 +1167,10 @@ input, textarea { font-family: inherit; }
 }
 .canvas-wrap.panning { cursor: grabbing; }
 .canvas-inner {
-  /* transform applied inline; no transition while panning */
-  will-change: transform;
+  /* Only `translate` (pan) is applied inline now; zoom is layout-based sizing
+     on the page box (FEATURES #43 v2), not transform:scale. No will-change:
+     the page box can be ~12000px wide, so pinning it as one GPU layer would
+     waste large amounts of VRAM — translate-pan composites fine without it. */
 }
 .canvas-inner.animated { transition: transform 200ms var(--ease-out); }
 .pid-svg { width: min(720px, 70vw); height: auto; display: block; pointer-events: auto; }
