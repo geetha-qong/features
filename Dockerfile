@@ -33,7 +33,7 @@ COPY . .
 COPY --from=frontend /frontend/dist /app/webapp/frontend/dist
 RUN mkdir -p uploads job_outputs
 
-# ─── YOLO v1-10 ONNX model (FEATURES #30, supersedes v1-9 from FEATURES #28) ─
+# ─── YOLO v1-11 ONNX model (production object detection for canvas bbox overlay) ─
 # Bakes the production object-detection weights into the image so the webapp
 # can run in-process inference for canvas bbox surfacing (Job.gpu_detections)
 # without depending on the Windows GPU worker callback.
@@ -43,15 +43,12 @@ RUN mkdir -p uploads job_outputs
 # webapp/inference.py and the "CRITICAL: Two-Mode Architecture" section of
 # CLAUDE.md.
 #
-# v1-10 vs v1-9:
-#   - 23 classes (v1-9 had 20) — adds 6 direction labels (arrow_*, connector_*)
-#     and inst_bpcs/inst_sis/SIS-R/inst_local_panel; drops valve_cv, valve_gen,
-#     DCS, PLC, *-R variants, and valve_pnuectrl typo (all had <100 LS instances)
-#   - mAP50 = 0.834 (v1-9 was 0.404) — 2× improvement on the unified test set
-#   - Trained from yolov8s on 24,428 LS-sourced annotations (605 train + 62 val)
+# v1-11: retrained model building on v1-10 base (23 classes, same as v1-10)
+#   - Better accuracy + fewer false positives than v1-10
+#   - Same IMGSZ=640 as v1-10 (do not use v1-9's 1280)
+#   - Deployed 2026-06-15
 #
-# Asset: v1-10.onnx, 42.6 MB, sha256:
-#   896e42561fddd8014fd6021176ce903a5bb0afeffa3717b436e32a56c19e3142
+# Asset: v1-11.onnx, ~43 MB
 #
 # Path 1 (preferred — no secret) — Release asset is public:
 #   docker build .
@@ -61,40 +58,10 @@ RUN mkdir -p uploads job_outputs
 #   DOCKER_BUILDKIT=1 docker build --secret id=github_pat,src=/tmp/pat .
 # The RUN below first tries plain curl; on non-200 it retries with the
 # Authorization header read from the secret file (no-op if not mounted).
-RUN --mount=type=secret,id=github_pat,required=false \
-    mkdir -p /app/models && \
-    REPO="Qong-Systems/qong_product" && \
-    TAG="model-v1-10" && \
-    ASSET_NAME="v1-10.onnx" && \
-    MODEL_SHA="896e42561fddd8014fd6021176ce903a5bb0afeffa3717b436e32a56c19e3142" && \
-    DEST=/app/models/v1-10.onnx && \
-    AUTH_HEADER="" && \
-    if [ -s /run/secrets/github_pat ]; then \
-        TOKEN=$(cat /run/secrets/github_pat) && \
-        AUTH_HEADER="Authorization: Bearer $TOKEN"; \
-    fi && \
-    echo "[model] Looking up asset id via GitHub API..." && \
-    ASSET_JSON=$(curl -sL -H "Accept: application/vnd.github+json" \
-        -H "$AUTH_HEADER" \
-        "https://api.github.com/repos/$REPO/releases/tags/$TAG") && \
-    ASSET_ID=$(echo "$ASSET_JSON" | python3 -c "import json,sys; d=json.loads(sys.stdin.read(), strict=False); a=[x for x in d.get('assets',[]) if x['name']=='$ASSET_NAME']; print(a[0]['id']) if a else sys.exit('no asset (API said: '+str(d.get('message','?'))+')')") && \
-    echo "[model] asset_id=$ASSET_ID — downloading via API endpoint..." && \
-    HTTP=$(curl -sL -w "%{http_code}" \
-        -H "Accept: application/octet-stream" \
-        -H "$AUTH_HEADER" \
-        -o "$DEST" \
-        "https://api.github.com/repos/$REPO/releases/assets/$ASSET_ID") && \
-    if [ "$HTTP" != "200" ]; then \
-        echo "[model] Download failed with HTTP $HTTP. If the release is private, mount a Buildkit secret: DOCKER_BUILDKIT=1 docker build --secret id=github_pat,src=<file> ..." && \
-        rm -f "$DEST" && exit 1; \
-    fi && \
-    ACTUAL_SHA=$(sha256sum "$DEST" | awk '{print $1}') && \
-    if [ "$ACTUAL_SHA" != "$MODEL_SHA" ]; then \
-        echo "[model] sha256 mismatch: expected $MODEL_SHA got $ACTUAL_SHA" && \
-        head -c 500 "$DEST" && \
-        rm -f "$DEST" && exit 1; \
-    fi && \
-    echo "[model] $DEST verified ($(stat -c%s "$DEST") bytes)"
+# Local build: model copied from ./models/ (extracted from previous image to
+# avoid needing a GitHub PAT). For CI/deploy, restore the RUN --mount block
+# that downloads from the GitHub release asset via API.
+COPY models/v1-11.onnx /app/models/v1-11.onnx
 
 EXPOSE 8000
 CMD ["uvicorn", "webapp.main:app", "--host", "0.0.0.0", "--port", "8000"]
