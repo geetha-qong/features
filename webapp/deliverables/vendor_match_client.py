@@ -84,7 +84,13 @@ def fetch_vendor_fields(
         resp = _requests.post(
             f"{base}/api/instrument-match",
             json=payload,
-            headers={"X-API-KEY": key, "Accept": "application/json"},
+            headers={
+                "X-API-KEY": key,
+                "Accept": "application/json",
+                # ngrok free tunnels serve an interstitial page to non-browser
+                # clients; this header bypasses it.
+                "ngrok-skip-browser-warning": "true",
+            },
             timeout=8,
         )
         resp.raise_for_status()
