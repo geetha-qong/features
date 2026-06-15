@@ -12,6 +12,7 @@ import { useMemo, useState } from "react";
 import { Activity, Boxes, ChevronDown, Wrench } from "lucide-react";
 import PidSymbol, { subClassToSymKind } from "../PidSymbol";
 import { VALVE_SUB_CLASS_LABELS } from "./valveLabels";
+import { PALETTE } from "../paletteColors";
 import { useShortcuts } from "../shortcuts/useShortcuts";
 import type { ShortcutMap } from "../shortcuts/api";
 
@@ -64,42 +65,24 @@ interface CategoryDef {
   items: PaletteItem[];
 }
 
-// Order + hotkey + color come from the design's LIBRARY (drawio-symbols.jsx),
-// mapped to the canonical sub_class codes we already use in the backend.
-const VALVE_ITEMS: PaletteItem[] = [
-  { sub: "BV",   key: "2", color: "#86D8C4" },
-  { sub: "BF",   key: "1", color: "#FF6B6B" },
-  { sub: "GT",   key: "s", color: "#7EC9C2" },
-  { sub: "CK",   key: "4", color: "#D8C794" },
-  { sub: "DB",   key: "3", color: "#7FD4D2" },
-  { sub: "GL",   key: "5", color: "#A8DD92" },
-  { sub: "CV",   key: "6", color: "#C49AE2" },
-  { sub: "NCBV", key: "g", color: "#86A8E8" },
-  { sub: "VB",            color: "#8EE0CE" },
-  { sub: "VF",            color: "#92B4E8" },
-  { sub: "VD",            color: "#EBA6C6" },
-  { sub: "PV",   key: "z", color: "#EB8070" },
-  { sub: "SB",   key: "d", color: "#C3B4EC" },
-].map((it) => ({ ...it, label: VALVE_SUB_CLASS_LABELS[it.sub] ?? it.sub }));
+// Order + hotkey + color now live in `../paletteColors` (PALETTE) — the single
+// source of truth shared with the canvas glyph renderer. We just resolve each
+// entry's display label here: valves come from VALVE_SUB_CLASS_LABELS,
+// instruments/equipment carry their own `label`, falling back to the sub code.
+const VALVE_ITEMS: PaletteItem[] = PALETTE.valve.map((it) => ({
+  ...it,
+  label: VALVE_SUB_CLASS_LABELS[it.sub] ?? it.sub,
+}));
 
-const INSTRUMENT_ITEMS: PaletteItem[] = [
-  { sub: "FT",  label: "Flow Tx",            key: "8", color: "#E5CBA0" },
-  { sub: "PT",  label: "Pressure Tx",                 color: "#C5BCEC" },
-  { sub: "TT",  label: "Temp Tx",                     color: "#8585D6" },
-  { sub: "LT",  label: "Level Tx",                    color: "#B4ACE6" },
-  { sub: "AT",  label: "Analytic Tx",                 color: "#EC9696" },
-  { sub: "PIC", label: "Pressure Controller", key: "x", color: "#C6C6CE" },
-  { sub: "FIC", label: "Flow Controller",     key: "c", color: "#ACDC90" },
-  { sub: "TIC", label: "Temp Controller",               color: "#ECA666" },
-  { sub: "LIC", label: "Level Controller",              color: "#EC8698" },
-];
+const INSTRUMENT_ITEMS: PaletteItem[] = PALETTE.instrument.map((it) => ({
+  ...it,
+  label: it.label ?? it.sub,
+}));
 
-const EQUIPMENT_ITEMS: PaletteItem[] = [
-  { sub: "Pump",      label: "Pump",      key: "e", color: "#8CCC76" },
-  { sub: "Vessel",    label: "Vessel",              color: "#B496DC" },
-  { sub: "Exchanger", label: "Exchanger",           color: "#DCD486" },
-  { sub: "Tank",      label: "Tank",                color: "#DCC68C" },
-];
+const EQUIPMENT_ITEMS: PaletteItem[] = PALETTE.equipment.map((it) => ({
+  ...it,
+  label: it.label ?? it.sub,
+}));
 
 const CATEGORIES: CategoryDef[] = [
   { key: "valve",      label: "Valves",      Icon: Wrench,   items: VALVE_ITEMS },
