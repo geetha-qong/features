@@ -1,0 +1,52 @@
+meta {
+  name: PBS - Push Button Switch
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{base_url}}/api/qong-instrument
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  X-API-KEY: {{api_key}}
+}
+
+body:json {
+  {
+    "instType": "PBS"
+  }
+}
+
+docs {
+  # PBS — Qong Instrument
+
+  Returns the first active Push Button Switch product (OMRON C2UW-LP-I DA).
+
+  Note: the standard qong-instrument output surfaces operating temperature in
+  the `measuring_range_*` fields. PBS-specific fields (communication_protocol,
+  frequency, communication_range, wireless_type) are stored but not part of
+  this fixed response shape.
+
+  Expected response:
+
+  ```json
+  {
+    "success": true,
+    "instType": "PBS",
+    "data": {
+      "manufacturer": "OMRON",
+      "model_number": "C2UW-LP-I DA",
+      "measuring_range_min": 0,
+      "measuring_range_max": 40,
+      "measuring_range_unit": "°C",
+      "power_supply_input": "3V Battery",
+      "io_output": "SW1, SW2, SW3 Digital Outputs"
+    }
+  }
+  ```
+}
