@@ -24,6 +24,29 @@
 
 ---
 
+## [2026-06-15] #42 — v1-11 YOLO ONNX deployed (retrain on +32% annotations; +0.06 mAP50 over v1-10)
+
+**Type:** model-swap | training
+**Stage:** training | infra | webapp
+**Status:** shipped (deployed to dev)
+
+**Why:** Team added a large batch of new Label-Studio annotations since v1-10 (deployed 2026-06-05, FEATURES #30) — concentrated on the weak direction-arrow/connector and valve_ck/gt/gl classes #30 flagged. User asked to retrain on a cloud GPU and verify the model improved.
+
+**What:**
+- **Export:** `experiments/digital_twin/scripts/export_ls_dataset_v1-11.py` (clean copy of the v1-10 exporter → fresh `dataset_v1-11/` dir) pulled ALL dev-LS annotations → 812 train + 80 val tiles, ~32,212 in-schema annotations (+32% vs v1-10's 24,428). 1,139 out-of-schema labels dropped (`valve_needle`, `reducer`, `expander`, `interlock-R`, … — candidates for a v1-12 schema expansion). Same 23-class layout as v1-10.
+- **Train:** `experiments/digital_twin/scripts/ec2_train_v1-11.sh` — replays the v1-10 g5.2xlarge flow (yolov8s, imgsz=640, batch=32, 100 epochs, patience=20) **plus a dual-eval** step: after training it pulls v1-10's `best.pt` from S3 and runs `yolo val` on BOTH models against the SAME v1-11 val split (leak-free — split is `sha1(task_id)%10`, stable across exports).
+- **Promote (clean swap, no class change):** GitHub release `model-v1-11` (asset `v1-11.onnx`); `Dockerfile` TAG/ASSET/SHA/DEST → v1-11; `webapp/inference.py` MODEL_PATH → v1-11.onnx; `models/MODEL_VERSION.txt` registry updated (current: v1-11; also back-recorded v1-10, which #30 never registered).
+
+**Result (same 80-image / 2,295-instance val split, leak-free):**
+- **mAP50 0.745 → 0.805 (+0.060)**; recall 0.682 → 0.759; mAP50-95 0.453 → 0.489; precision flat (0.788 → 0.786).
+- Biggest gains exactly where annotation was added: arrow_up mAP50 0.426→0.673, arrow_right 0.403→0.653, arrow_down 0.407→0.626, valve_ck 0.57→0.76, valve_gt 0.77→0.87, Motor 0.80→0.94.
+- Minor regressions on tiny-instance classes (inst_local_panel 9 inst 0.96→0.80; valve_3way_relief 18 inst 0.63→0.54) — noise, more annotation would stabilize.
+
+**Notes:**
+- **v1-10's headline 0.834 (FEATURES #30) is NOT comparable** — that was on v1-10's own easier 62-image val set. On the current val set v1-10 scores 0.745. The dual-eval is what makes the +0.060 honest. Always re-score the incumbent on the new val split.
+- **Cloud-GPU footgun (cost trap):** the new `Deep Learning Base OSS NVIDIA Driver GPU Ubuntu 22.04` AMI ships **torch 2.12**, and `pip install ultralytics` left torch unpinned → `onnxscript 0.5.7` lacks `_framework_apis.torch_2_11/2_12` → `yolo export` crashed. Because that line ran bare under `set -e`, the script aborted before its `shutdown`, leaving the instance **running idle and billing**. Salvaged via SSM (`pip install -U onnxscript` fixed export; ran eval+export+upload+terminate). **TODO for next training script: pin torch to v1-10's known-good version AND guard every step before the final `shutdown` with `|| { …; shutdown }`.**
+- Artifacts: `s3://qong-pid-archive-2026-06-02/training/v1-11/` (best.onnx/best.pt/val_v1-1{0,1}.txt/runs/). ONNX sha256 `34022c91…f4e5`.
+
 ## [2026-06-13] #41 — KKS valve-tag parsing + All-Data view; readability + cache fixes; empty-deliverable root-cause
 
 **Type:** feature | bugfix | architecture

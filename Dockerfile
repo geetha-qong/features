@@ -33,7 +33,7 @@ COPY . .
 COPY --from=frontend /frontend/dist /app/webapp/frontend/dist
 RUN mkdir -p uploads job_outputs
 
-# ─── YOLO v1-10 ONNX model (FEATURES #30, supersedes v1-9 from FEATURES #28) ─
+# ─── YOLO v1-11 ONNX model (FEATURES #41, supersedes v1-10 from FEATURES #30) ─
 # Bakes the production object-detection weights into the image so the webapp
 # can run in-process inference for canvas bbox surfacing (Job.gpu_detections)
 # without depending on the Windows GPU worker callback.
@@ -43,15 +43,18 @@ RUN mkdir -p uploads job_outputs
 # webapp/inference.py and the "CRITICAL: Two-Mode Architecture" section of
 # CLAUDE.md.
 #
-# v1-10 vs v1-9:
-#   - 23 classes (v1-9 had 20) — adds 6 direction labels (arrow_*, connector_*)
-#     and inst_bpcs/inst_sis/SIS-R/inst_local_panel; drops valve_cv, valve_gen,
-#     DCS, PLC, *-R variants, and valve_pnuectrl typo (all had <100 LS instances)
-#   - mAP50 = 0.834 (v1-9 was 0.404) — 2× improvement on the unified test set
-#   - Trained from yolov8s on 24,428 LS-sourced annotations (605 train + 62 val)
+# v1-11 vs v1-10 (same 23-class layout — drop-in swap, no inference code change):
+#   - Trained from yolov8s on ~32,212 LS-sourced annotations (812 train + 80 val),
+#     ~+32% more annotation than v1-10, concentrated on the weak arrow/connector
+#     and valve_ck/gt/gl classes flagged in FEATURES #30.
+#   - mAP50 = 0.805 vs v1-10 = 0.745 on the SAME (leak-free) v1-11 val split
+#     (+0.060); recall 0.682 -> 0.759; precision flat. Biggest per-class gains:
+#     direction arrows (e.g. arrow_up 0.426 -> 0.673) and valve_ck 0.57 -> 0.76.
+#   - (v1-10's headline 0.834 was on its own easier 62-image val set — not
+#     comparable; the 0.745 above is v1-10 re-scored on the v1-11 val set.)
 #
-# Asset: v1-10.onnx, 42.6 MB, sha256:
-#   896e42561fddd8014fd6021176ce903a5bb0afeffa3717b436e32a56c19e3142
+# Asset: v1-11.onnx, 44.7 MB, sha256:
+#   34022c917ae3b5487b6a81d9cc9f12064efdd101ee96540a1c7dd0fec097f4e5
 #
 # Path 1 (preferred — no secret) — Release asset is public:
 #   docker build .
@@ -64,10 +67,10 @@ RUN mkdir -p uploads job_outputs
 RUN --mount=type=secret,id=github_pat,required=false \
     mkdir -p /app/models && \
     REPO="Qong-Systems/qong_product" && \
-    TAG="model-v1-10" && \
-    ASSET_NAME="v1-10.onnx" && \
-    MODEL_SHA="896e42561fddd8014fd6021176ce903a5bb0afeffa3717b436e32a56c19e3142" && \
-    DEST=/app/models/v1-10.onnx && \
+    TAG="model-v1-11" && \
+    ASSET_NAME="v1-11.onnx" && \
+    MODEL_SHA="34022c917ae3b5487b6a81d9cc9f12064efdd101ee96540a1c7dd0fec097f4e5" && \
+    DEST=/app/models/v1-11.onnx && \
     AUTH_HEADER="" && \
     if [ -s /run/secrets/github_pat ]; then \
         TOKEN=$(cat /run/secrets/github_pat) && \

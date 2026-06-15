@@ -46,15 +46,15 @@ except ImportError:  # pragma: no cover
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-MODEL_PATH = "/app/models/v1-10.onnx"
-IMGSZ = 640  # v1-10 was trained + ONNX-exported at 640; using a different
-             # IMGSZ here against a fixed-axes ONNX would fail with a shape
-             # mismatch. v1-9 used 1280 — don't blindly copy that value.
-CONF_THRESH = 0.50  # carried over from v1-9. v1-10's training mAP is much
-                    # higher (0.834 vs 0.404), so 0.50 should still be a
-                    # reasonable noise-floor; revisit after dev smoke-test
-                    # if the canvas overlay becomes either too sparse or
-                    # too cluttered.
+MODEL_PATH = "/app/models/v1-11.onnx"
+IMGSZ = 640  # v1-11 (like v1-10) was trained + ONNX-exported at 640; using a
+             # different IMGSZ here against a fixed-axes ONNX would fail with a
+             # shape mismatch. v1-9 used 1280 — don't blindly copy that value.
+CONF_THRESH = 0.50  # carried over from v1-10. v1-11 has the same 23-class
+                    # layout and a higher mAP50 (0.805 vs 0.745 on the same
+                    # val set), so 0.50 remains a reasonable noise-floor;
+                    # revisit after dev smoke-test if the canvas overlay
+                    # becomes either too sparse or too cluttered.
 IOU_THRESH = 0.45
 
 # Class IDs in v1-10 — order = class index (argmax over the output's class-
@@ -131,7 +131,7 @@ def _get_session() -> Any:
         if not model_path.exists():
             raise InferenceError(
                 f"YOLO model file missing at {MODEL_PATH}. "
-                "The Docker image build is expected to download v1-10.onnx "
+                "The Docker image build is expected to download v1-11.onnx "
                 "into /app/models/. Verify the Dockerfile build step succeeded."
             )
         try:

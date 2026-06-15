@@ -11,9 +11,36 @@
 # Adding a new version: append a row below, do NOT edit existing rows.
 # Format:  <version>\t<filename>\t<sha256>
 
-current: v1-9
+current: v1-11
 
 versions:
+  v1-11:
+    notes: |
+      Trained 2026-06-15 on AWS g5.2xlarge (A10G), yolov8s, imgsz=640, 100 epochs.
+      ~32,212 LS-sourced annotations (812 train + 80 val tiles), ~+32% more
+      annotation than v1-10, concentrated on the weak arrow/connector and
+      valve_ck/gt/gl classes flagged in FEATURES #30. Same 23-class layout as
+      v1-10 (drop-in swap — no inference code change).
+      mAP50 = 0.805 vs v1-10 = 0.745 on the SAME (leak-free) v1-11 val split
+      (+0.060); recall 0.682 -> 0.759; precision flat. Biggest per-class gains:
+      direction arrows (arrow_up 0.426 -> 0.673, arrow_right 0.403 -> 0.653) and
+      valve_ck 0.57 -> 0.76, valve_gt 0.77 -> 0.87, Motor 0.80 -> 0.94.
+      NOTE: the v1-10 0.834 in its own notes was on v1-10's easier 62-image val
+      set — not comparable; 0.745 is v1-10 re-scored on the v1-11 val set.
+      ONNX export needed an onnxscript upgrade on the g5 AMI (torch 2.12).
+    files:
+      best.pt:   (in s3://qong-pid-archive-2026-06-02/training/v1-11/best.pt)
+      best.onnx: 34022c917ae3b5487b6a81d9cc9f12064efdd101ee96540a1c7dd0fec097f4e5
+
+  v1-10:
+    notes: |
+      Trained 2026-06-05 on AWS g5.2xlarge (A10G), yolov8s, imgsz=640, 100 epochs.
+      24,428 LS-sourced annotations (605 train + 62 val). First 23-class layout
+      (added 6 direction labels). mAP50 = 0.834 on its own 62-image val set.
+      Deployed 2026-06-05 (FEATURES #30) but never recorded in this registry
+      until the v1-11 promotion — superseded by v1-11.
+    files:
+      best.onnx: 896e42561fddd8014fd6021176ce903a5bb0afeffa3717b436e32a56c19e3142
   v1-9:
     notes: |
       Trained 2026-05-25 on Windows GPU (RTX 2000 Ada).
