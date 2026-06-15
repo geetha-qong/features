@@ -1,0 +1,29 @@
+meta {
+  name: PG - Pressure Gauge
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/qong-instrument
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  X-API-KEY: {{api_key}}
+}
+
+body:json {
+  {
+    "instType": "PG"
+  }
+}
+
+docs {
+  # PG — Qong Instrument
+
+  Returns the first active Pressure Gauge product.
+}

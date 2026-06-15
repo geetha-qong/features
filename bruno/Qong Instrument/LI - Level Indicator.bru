@@ -1,0 +1,56 @@
+meta {
+  name: LI - Level Indicator
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{base_url}}/api/qong-instrument
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  X-API-KEY: {{api_key}}
+}
+
+body:json {
+  {
+    "instType": "LI"
+  }
+}
+
+docs {
+  # LI — Qong Instrument
+
+  Returns the first active Level Indicator product.
+
+  Expected response:
+
+  ```json
+  {
+    "success": true,
+    "instType": "LI",
+    "data": {
+      "product_id": 1,
+      "vendor_profile_id": 2,
+      "vendor_name": "Tarun Industrial Solutions Pvt Ltd",
+      "manufacturer": "WIKA",
+      "model_number": "UTN-C",
+      "piping_class": "ASME Class 150-600 / PN6-PN64",
+      "calibration_range_min": 0,
+      "calibration_range_max": 3000,
+      "calibration_range_unit": "mm",
+      "measuring_range_min": 0,
+      "measuring_range_max": 3000,
+      "measuring_range_unit": "mm",
+      "external_power_supply": "No",
+      "power_supply_input": null,
+      "power_supply_output": null,
+      "io_output": null
+    }
+  }
+  ```
+}

@@ -1,0 +1,57 @@
+meta {
+  name: PDT - Qong Fields
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/instrument-match
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-KEY: {{api_key}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "instType": "PDT",
+    "range_min": -622.72,
+    "range_max": 622.72,
+    "range_unit": "mbar"
+  }
+}
+
+docs {
+  # PDT - Qong Fields Verification
+
+  Matches ROSEMOUNT 3051CD (Qong expected response reference record).
+
+  Expected response:
+
+  ```json
+  {
+    "product_id": 2,
+    "vendor_profile_id": 5,
+    "vendor_name": "Apex Measurement Technologies Pvt Ltd",
+    "brand": "ROSEMOUNT",
+    "model_number": "3051CD",
+    "manufacturer": "ROSEMOUNT",
+    "model": "3051CD",
+    "piping_class": "Class 150",
+    "calibration_range_min": -622.72,
+    "calibration_range_max": 622.72,
+    "calibration_range_unit": "mbar",
+    "measuring_range_min": -622.72,
+    "measuring_range_max": 622.72,
+    "measuring_range_unit": "mbar",
+    "external_power_supply": "Yes",
+    "power_supply_input": "10.5-55VDC",
+    "power_supply_output": "4-20mA",
+    "io_output": "HART"
+  }
+  ```
+}

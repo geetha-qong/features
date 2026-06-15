@@ -1,0 +1,56 @@
+meta {
+  name: LT - Level Transmitter
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{base_url}}/api/qong-instrument
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  X-API-KEY: {{api_key}}
+}
+
+body:json {
+  {
+    "instType": "LT"
+  }
+}
+
+docs {
+  # LT — Qong Instrument
+
+  Returns the first active Level Transmitter product.
+
+  Expected response:
+
+  ```json
+  {
+    "success": true,
+    "instType": "LT",
+    "data": {
+      "product_id": 1,
+      "vendor_profile_id": 1,
+      "vendor_name": "Water Innovations India Pvt Ltd",
+      "manufacturer": "SUPMEA",
+      "model_number": "SUP-ZP",
+      "piping_class": null,
+      "calibration_range_min": 0,
+      "calibration_range_max": 15,
+      "calibration_range_unit": "m",
+      "measuring_range_min": 0,
+      "measuring_range_max": 15,
+      "measuring_range_unit": "m",
+      "external_power_supply": "Yes",
+      "power_supply_input": "18-28VDC / 12-24VDC / 220VAC",
+      "power_supply_output": null,
+      "io_output": "4-20mA, 1-5V, 1-10V, RS485, HART"
+    }
+  }
+  ```
+}

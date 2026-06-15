@@ -1,0 +1,40 @@
+meta {
+  name: Instrument Match Info
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/instrument-match
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+docs {
+  # Instrument Match — GET Info
+
+  Public endpoint. Returns usage information when the URL is opened in a browser.
+  No API key required.
+
+  Expected response:
+
+  ```json
+  {
+    "success": true,
+    "message": "API is running",
+    "method": "POST",
+    "endpoint": "/api/instrument-match",
+    "usage": {
+      "content_type": "application/json",
+      "header": "X-API-KEY: <your-key>",
+      "example": {
+        "instType": "PT"
+      }
+    }
+  }
+  ```
+}
