@@ -3,6 +3,8 @@ import type { DetectionItem } from "./api";
 import type { JobGraph } from "./types";
 import GraphLayer from "./GraphLayer";
 import { canvasDisplayLabel, displayNameForModelLabel } from "./labelMap";
+import { PidGlyphAt, labelToSymKind, subClassToSymKind } from "./PidSymbol";
+import { colorForKind, colorForSubClass } from "./paletteColors";
 
 interface PidElement {
   id: string;
@@ -764,7 +766,8 @@ function PageWithOverlays({
               const clickable = typeof d.entity_id === "string" && d.entity_id.length > 0;
               const isSelected = clickable && d.entity_id === selectedId;
               const sw = Math.max(1, natural.w / 500);
-              const stroke = isSelected ? STATUS_STROKE.user_added : STATUS_STROKE.model_found;
+              const kind = labelToSymKind(d.label);       // YOLO label -> glyph
+              const klass = colorForKind(kind);            // per-class palette color (LS-style)
               const human = displayNameForModelLabel(d.label);
               // Always keep labels for selected; otherwise skip if too close to
               // any earlier label that survived. Cheap O(n²) — fine because n
@@ -779,24 +782,32 @@ function PageWithOverlays({
                 }
               }
               if (showLabel) placed.push({ x: x1, y: y1 });
+              const w = x2 - x1;
+              const h = y2 - y1;
               return (
                 <g key={`det-${i}`}>
+                  {/* class-colored P&ID glyph (currentColor); scales with zoom */}
+                  <PidGlyphAt kind={kind} x={x1} y={y1} w={w} h={h} color={klass} />
+                  {/* model = SOLID thin outline in the class color */}
                   <rect
                     x={x1}
                     y={y1}
-                    width={x2 - x1}
-                    height={y2 - y1}
-                    fill={isSelected ? "rgba(255,77,168,0.15)" : "none"}
-                    stroke={stroke}
-                    // non-scaling-stroke keeps the outline a constant SCREEN
-                    // width regardless of zoom. The page is rendered ~7000px
-                    // wide but shown fit-to-screen (~10x downscale), so a
-                    // page-unit stroke shrinks to a sub-pixel smudge and the
-                    // box looks invisible. Constant 1.5px (2.5 selected) keeps
-                    // every detection visible even when zoomed all the way out.
+                    width={w}
+                    height={h}
+                    fill="none"
+                    stroke={klass}
                     vectorEffect="non-scaling-stroke"
-                    strokeWidth={isSelected ? 2.5 : 1.5}
-                    strokeDasharray={isSelected ? undefined : "4 3"}
+                    strokeWidth={1}
+                    opacity={0.55}
+                    style={{ pointerEvents: "none" }}
+                  />
+                  {/* invisible hit-target preserves click/select + tooltip */}
+                  <rect
+                    x={x1}
+                    y={y1}
+                    width={w}
+                    height={h}
+                    fill="transparent"
                     style={{
                       pointerEvents: clickable && mode === "select" ? "auto" : "none",
                       cursor: clickable && mode === "select" ? "pointer" : cursor,
@@ -812,6 +823,20 @@ function PageWithOverlays({
                   >
                     {clickable && <title>{human || d.label} — click to edit</title>}
                   </rect>
+                  {/* selection highlight (pink) */}
+                  {isSelected && (
+                    <rect
+                      x={x1}
+                      y={y1}
+                      width={w}
+                      height={h}
+                      fill="rgba(255,77,168,0.12)"
+                      stroke={STATUS_STROKE.user_added}
+                      vectorEffect="non-scaling-stroke"
+                      strokeWidth={2.5}
+                      style={{ pointerEvents: "none" }}
+                    />
+                  )}
                   {showLabel && (
                     <text
                       x={x1}
@@ -819,7 +844,7 @@ function PageWithOverlays({
                       fontSize={Math.max(8, natural.w / 140)}
                       fontFamily="Outfit, sans-serif"
                       fontWeight="600"
-                      fill={stroke}
+                      fill={klass}
                       style={{ pointerEvents: "none", paintOrder: "stroke" }}
                       stroke="#ffffff"
                       strokeWidth={sw * 0.8}
@@ -837,20 +862,36 @@ function PageWithOverlays({
           {userAnnotations.map((a, i) => {
             const [x1, y1, x2, y2] = a.bbox;
             const sw = Math.max(1, natural.w / 500);
-            const stroke = STATUS_STROKE[a.status];
             const isSelected = a.entity_id === selectedId;
+            const kind = subClassToSymKind(a.entity_class ?? undefined, a.sub_class ?? undefined);
+            const klass = colorForSubClass(a.entity_class ?? undefined, a.sub_class ?? undefined);
+            const w = x2 - x1;
+            const h = y2 - y1;
             return (
               <g key={`ann-${i}`}>
+                {/* class-colored glyph; scales with zoom */}
+                <PidGlyphAt kind={kind} x={x1} y={y1} w={w} h={h} color={klass} />
+                {/* manually-added = DASHED outline in the class color */}
                 <rect
                   x={x1}
                   y={y1}
-                  width={x2 - x1}
-                  height={y2 - y1}
-                  fill={isSelected ? "rgba(255,77,168,0.18)" : "none"}
-                  stroke={stroke}
+                  width={w}
+                  height={h}
+                  fill="none"
+                  stroke={klass}
+                  strokeDasharray="4 3"
                   vectorEffect="non-scaling-stroke"
-                  strokeWidth={a.source === "user" ? 2.5 : 1.5}
-                  strokeDasharray={a.status === "user_rejected" ? "4 3" : undefined}
+                  strokeWidth={1.2}
+                  opacity={0.75}
+                  style={{ pointerEvents: "none" }}
+                />
+                {/* invisible hit-target preserves click/select + tooltip */}
+                <rect
+                  x={x1}
+                  y={y1}
+                  width={w}
+                  height={h}
+                  fill="transparent"
                   style={{
                     pointerEvents: mode === "select" ? "auto" : "none",
                     cursor: mode === "select" ? "pointer" : cursor,
@@ -868,13 +909,27 @@ function PageWithOverlays({
                     {(a.tag ?? a.placeholder_tag ?? a.entity_id) + " — " + a.status}
                   </title>
                 </rect>
+                {/* selection highlight (pink) */}
+                {isSelected && (
+                  <rect
+                    x={x1}
+                    y={y1}
+                    width={w}
+                    height={h}
+                    fill="rgba(255,77,168,0.18)"
+                    stroke={STATUS_STROKE.user_added}
+                    vectorEffect="non-scaling-stroke"
+                    strokeWidth={2.5}
+                    style={{ pointerEvents: "none" }}
+                  />
+                )}
                 <text
                   x={x1}
                   y={y1 - sw * 2}
                   fontSize={Math.max(8, natural.w / 140)}
                   fontFamily="Outfit, sans-serif"
                   fontWeight="600"
-                  fill={stroke}
+                  fill={klass}
                   style={{ pointerEvents: "none", paintOrder: "stroke" }}
                   stroke="#ffffff"
                   strokeWidth={sw * 0.8}
