@@ -10,6 +10,7 @@ Usage (later wired into pipeline_runner.py):
 """
 
 import csv
+import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,9 @@ from webapp.deliverables.canonical import (
     JobCanonical,
     VendorMatch,
 )
+from webapp.deliverables.vendor_match_client import fetch_vendor_fields
+
+log = logging.getLogger(__name__)
 
 # Values that indicate "no real vendor information"
 _EMPTY_VENDOR_VALUES = {"TBD", "LATER", "-", ""}
@@ -309,15 +313,37 @@ def _build_instrument_entities(instrument_csv: Path, job_id: int) -> List[Canoni
             # IO type: AI / AO / DI / DO from instrument signal-flow perspective
             fields["io_type"] = _classify_io_type(type_code)
 
-            # Synthesize VendorMatch only when Manufacturer + Model are real values
-            manufacturer = (row.get("MANUFACTURER") or "").strip()
-            model_no = (row.get("MODEL") or "").strip()
+            # --- Vendor Match API enrichment ---
+            # Use analog range from CSV as hints to get a tighter API match.
+            api_data = fetch_vendor_fields(
+                inst_type=type_code,
+                range_min=fields.get("analog_range_low_scale") or None,
+                range_max=fields.get("analog_range_high_scale") or None,
+                range_unit=fields.get("analog_range_eu") or None,
+            )
+
+            if api_data:
+                # Overwrite spec fields with API values (non-empty values only)
+                for fld in (
+                    "piping_class", "calb_range_min", "calb_range_max", "calb_range_unit",
+                    "measuring_range_min", "measuring_range_max", "measuring_range_unit",
+                    "power_in", "power_out", "io_output",
+                ):
+                    val = api_data.get(fld, "")
+                    if val and val.upper() not in _PLACEHOLDER_VALUES:
+                        fields[fld] = val
+
+            # Build VendorMatch: prefer API data, fall back to CSV
+            manufacturer = (api_data or {}).get("_manufacturer") or (row.get("MANUFACTURER") or "").strip()
+            model_no = (api_data or {}).get("_model_number") or (row.get("MODEL") or "").strip()
+            vendor_name = (api_data or {}).get("_vendor_name") or manufacturer
+
             vendor_match: Optional[VendorMatch] = None
             if manufacturer not in _EMPTY_VENDOR_VALUES and model_no not in _EMPTY_VENDOR_VALUES:
-                vendor_id = uuid.uuid5(uuid.NAMESPACE_DNS, manufacturer)
+                vendor_id = uuid.uuid5(uuid.NAMESPACE_DNS, vendor_name or manufacturer)
                 vendor_match = VendorMatch(
                     vendor_id=vendor_id,
-                    vendor_name=manufacturer,
+                    vendor_name=vendor_name,
                     product_name=model_no,
                     part_number="",
                     catalog_fields={},

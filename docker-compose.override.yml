@@ -21,6 +21,19 @@ services:
     volumes:
       - ./webapp:/app/webapp
 
+  # Remap host ports for postgres/redis so the stack starts even when
+  # orphaned docker-proxy processes occupy :5432/:6379.
+  # The web/cpu-worker containers always connect via Docker internal DNS
+  # (postgres:5432 / redis:6379) — host port mapping is only for psql/redis-cli
+  # access from the host. These alternate ports let the stack come up cleanly.
+  postgres:
+    ports: !override
+      - "127.0.0.1:5434:5432"
+
+  redis:
+    ports: !override
+      - "127.0.0.1:6381:6379"
+
   # Local-only LS overrides. Base docker-compose.yml ships the dev-prod
   # values (LABEL_STUDIO_HOST=https://dev.qongsystems.com/ls) which make Django
   # redirect to /ls/* paths that 404 on http://localhost:8080. CSRF list also
