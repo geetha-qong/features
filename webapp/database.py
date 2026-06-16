@@ -140,14 +140,20 @@ def run_migrations():
 
     # Ensure default admin account exists with fixed credentials (admin / admin)
     with engine.connect() as conn:
+        # Guard on BOTH email and username: the unique constraint is on
+        # `username`, so an env that already has an `admin` user (different
+        # email — e.g. dev/qa restored from a pg_dump) would hit a
+        # UniqueViolation and crash-loop the web container if we only checked
+        # email. ON CONFLICT DO NOTHING is belt-and-braces against a race.
         row = conn.execute(
-            text("SELECT id FROM users WHERE email = 'admin@qong.local'")
+            text("SELECT id FROM users WHERE email = 'admin@qong.local' OR username = 'admin'")
         ).fetchone()
         if not row:
             from webapp.auth import pwd_context
             conn.execute(text("""
                 INSERT INTO users (username, email, password_hash, role, is_active, credits_remaining)
                 VALUES ('admin', 'admin@qong.local', :ph, 'super_admin', TRUE, 999)
+                ON CONFLICT (username) DO NOTHING
             """), {"ph": pwd_context.hash("admin")})
             conn.commit()
             print("[startup] Created default admin user (admin@qong.local / admin)")
