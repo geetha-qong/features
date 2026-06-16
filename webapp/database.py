@@ -138,6 +138,21 @@ def run_migrations():
             """))
             conn.commit()
 
+    # Sync the symbol taxonomy (taxonomy.json) into its DB read-index.
+    # Source of truth stays the on-disk file; this is a denormalised cache for
+    # cross-cutting queries. Non-fatal — a sync failure must not block startup
+    # (mirrors the billing-plan seed's best-effort posture).
+    try:
+        from webapp.taxonomy_db import sync_taxonomy_to_db
+        db = SessionLocal()
+        try:
+            inserted, updated = sync_taxonomy_to_db(db)
+            print(f"[startup] Synced taxonomy to label_taxonomy ({inserted} inserted, {updated} updated)")
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[startup] taxonomy sync to DB failed (non-fatal): {exc!r}")
+
     # Optional initial-admin bootstrap. SECURITY (CRITICAL finding): never
     # hard-code credentials and never reset a password on restart. The previous
     # code seeded admin/admin as super_admin and re-applied "admin" on every

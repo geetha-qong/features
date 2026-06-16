@@ -527,3 +527,67 @@ class GraphEdgeRow(Base):
     __table_args__ = (
         UniqueConstraint("job_id", "edge_id", name="uq_graph_edges_je"),
     )
+
+
+class LabelTaxonomy(Base):
+    """DB read-index of the P&ID symbol taxonomy — mirrors `webapp/taxonomy.json`.
+
+    **Source of truth remains the on-disk `taxonomy.json`** (mirrors the
+    `canonical_entities` contract — FEATURES #34). `webapp/taxonomy.py` is the
+    in-process accessor every consumer reads; this table is a denormalised
+    read-index so cross-cutting SQL/admin surfaces (palette config UI, triage
+    assignment dropdowns, audits) can query the class list without parsing the
+    JSON. Populated by `webapp.taxonomy_db.sync_taxonomy_to_db()` at startup
+    and idempotent on (entity_class, sub_class).
+
+    Never edit through this table — change `taxonomy.json` and re-sync. New
+    labels discovered at runtime flow through `LabelTriage`, not direct writes
+    here.
+    """
+    __tablename__ = "label_taxonomy"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_class = Column(String, nullable=True, index=True)    # 'valve' | 'instrument' | 'equipment'; None for structural (arrow/connector) classes
+    sub_class = Column(String, nullable=True)                   # 'BV', 'PT', ... ; None for unsubclassed classes
+    display_name = Column(String, nullable=False)
+    yolo_label = Column(String, nullable=True)                  # ONNX channel label; None for OCR-only canonical classes
+    color = Column(String, nullable=False)                      # hex '#RRGGBB'
+    glyph_kind = Column(String, nullable=False)
+    isa_code = Column(String, nullable=True)
+    order = Column("display_order", Integer, nullable=False, default=0)   # 'order' is a SQL reserved word -> safe column name
+    active = Column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        UniqueConstraint("entity_class", "sub_class", name="uq_label_taxonomy_cs"),
+    )
+
+
+class LabelTriage(Base):
+    """Queue of label values seen in the wild (Label Studio imports, raw
+    detections) that aren't yet mapped into the taxonomy.
+
+    A reviewer triages each `label_value` to an `(entity_class, sub_class,
+    display_name, color, glyph_kind)` assignment (status 'approved') or marks
+    it 'ignored'/'rejected'. Approved assignments are then promoted into
+    `taxonomy.json` (the source of truth) by a separate step — this table is
+    the staging/audit surface, not a live taxonomy override.
+
+    Audit columns (`decided_by_user_id`, `decided_at`) mirror
+    :class:`EntityOverride`. `label_value` is unique — the same raw label is
+    one triage row, re-discovery doesn't duplicate it.
+    """
+    __tablename__ = "label_triage"
+
+    id = Column(Integer, primary_key=True, index=True)
+    label_value = Column(String, nullable=False, unique=True, index=True)
+    source = Column(String, nullable=False)                     # 'ls' | 'detection'
+    discovered_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    status = Column(String, nullable=False, default="pending")  # pending|approved|ignored|rejected
+    assigned_entity_class = Column(String, nullable=True)
+    assigned_sub_class = Column(String, nullable=True)
+    assigned_display_name = Column(String, nullable=True)
+    assigned_color = Column(String, nullable=True)
+    assigned_glyph_kind = Column(String, nullable=True)
+    decided_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
