@@ -8,6 +8,7 @@ import {
   GitBranch,
   Inbox,
   LayoutDashboard,
+  ListChecks,
   Tags,
   Users,
 } from "lucide-react";
@@ -22,6 +23,7 @@ const NAV: Array<{ to: string; label: string; icon: typeof Users }> = [
   { to: "/admin/custom-columns", label: "Custom Columns", icon: Columns3 },
   { to: "/admin/label-studio", label: "Label Studio", icon: GitBranch },
   { to: "/admin/entities", label: "Entity Index", icon: Database },
+  { to: "/admin/label-triage", label: "Label Triage", icon: ListChecks },
   { to: "/admin/annotation-metrics", label: "Annotation Metrics", icon: BarChart3 },
 ];
 
