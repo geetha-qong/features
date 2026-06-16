@@ -105,6 +105,18 @@ export function targetRenderWidth(
   return Math.max(HI_DPI_BASELINE_PX, Math.min(HI_DPI_MAX_PX, bucketed));
 }
 
+// Page index a detection belongs to (FEATURES bug #2/#3). Tiles are named
+// `tile_p{page}_r{r}_c{c}.png`, so the page is encoded in the filename; fall
+// back to an explicit `page` field, else null. Used to filter the sidebar's
+// element list to the active sheet so it matches what the canvas draws (the
+// canvas already filters per-page via tile→offset matching).
+export function detectionPage(d: { tile?: string; page?: number }): number | null {
+  const m = (d.tile ?? "").match(/tile_p(\d+)/);
+  if (m) return parseInt(m[1], 10);
+  if (typeof d.page === "number") return d.page;
+  return null;
+}
+
 export default function Studio({ project, userName, onBack }: Props) {
   const navigate = useNavigate();
   const { theme } = useTheme();
@@ -477,9 +489,23 @@ export default function Studio({ project, userName, onBack }: Props) {
     () => buildEntityIndex([valveEntitiesResp, instEntitiesResp]),
     [valveEntitiesResp, instEntitiesResp],
   );
+  // Bug fix: the sidebar element list previously counted ALL job detections,
+  // while the canvas only draws the active sheet's (PidCanvas filters by
+  // tile→page). That made "elements on sheet" disagree with what's on screen
+  // and with per-sheet expectations. Filter the sidebar's input to the active
+  // page so the two views match. (Detections with no resolvable page are kept,
+  // so single-page/legacy jobs are unaffected.)
+  const activePageDetections = useMemo(
+    () =>
+      (detResp?.detections ?? []).filter((d) => {
+        const pg = detectionPage(d);
+        return pg === null || pg === activePageIndex;
+      }),
+    [detResp, activePageIndex],
+  );
   const realElements = useMemo(
-    () => buildElementsForTile(detResp?.detections, entityIndex),
-    [detResp, entityIndex],
+    () => buildElementsForTile(activePageDetections, entityIndex),
+    [activePageDetections, entityIndex],
   );
   const hasRealElements = Object.keys(realElements).length > 0;
   const panelElements = hasRealElements ? realElements : DEMO_ELEMENT_DATA;
