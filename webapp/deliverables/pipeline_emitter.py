@@ -10,6 +10,7 @@ Usage (later wired into pipeline_runner.py):
 """
 
 import csv
+import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,9 +22,157 @@ from webapp.deliverables.canonical import (
     JobCanonical,
     VendorMatch,
 )
+from webapp.deliverables.vendor_match_client import fetch_vendor_fields
+
+log = logging.getLogger(__name__)
 
 # Values that indicate "no real vendor information"
 _EMPTY_VENDOR_VALUES = {"TBD", "LATER", "-", ""}
+
+# Placeholder values that mean "not yet filled in"
+_PLACEHOLDER_VALUES = {"TBD", "T.B.D", "N/A", "NA", "NONE", "-", ""}
+
+# ISA 5.1 measured-variable letter (first letter of instrument type code)
+_ISA_VARIABLE: Dict[str, str] = {
+    "A": "Analysis", "B": "Burner/Combustion", "C": "Conductivity",
+    "D": "Density", "E": "Voltage", "F": "Flow",
+    "G": "Gauging/Viewing", "H": "Hand/Manual", "I": "Current",
+    "J": "Power", "K": "Time/Schedule", "L": "Level",
+    "M": "Moisture/Humidity", "N": "User Defined", "P": "Pressure",
+    "Q": "Quantity/Totalizer", "R": "Radiation", "S": "Speed/Frequency",
+    "T": "Temperature", "U": "Multivariable", "V": "Vibration",
+    "W": "Weight/Force", "X": "Unclassified", "Y": "Event/State",
+    "Z": "Position/Dimension",
+}
+
+# ISA 5.1 readout/output function letters (subsequent letters)
+_ISA_FUNCTION: Dict[str, str] = {
+    "A": "Alarm", "C": "Controller", "E": "Primary Element",
+    "G": "Gauge/Glass", "H": "High", "I": "Indicator",
+    "K": "Control Station", "L": "Low", "R": "Recorder",
+    "S": "Switch", "T": "Transmitter", "V": "Valve/Final Element",
+    "W": "Well/Thermowell", "Y": "Relay/Converter", "Z": "Driver/Actuator",
+}
+
+# Tag type codes that are always part of the Safety Instrumented System
+_SIS_TYPE_CODES = {
+    "PSV", "TSV", "LSV", "FSV", "PRV",        # Safety/relief valves
+    "ESV", "ESD", "SDV", "BDV",               # Emergency/blowdown/shutdown valves
+    "PSHH", "PSLL", "TSHH", "TSLL",           # Safety high-high / low-low switches
+    "LSHH", "LSLL", "FSHH", "FSLL",
+    "PAHH", "PALL", "TAHH", "TALL",
+    "LAHH", "LALL", "FAHH", "FALL",
+    "XV",                                      # On/off safety valve
+}
+
+_SIS_DESC_KEYWORDS = {"SAFETY", "SHUTDOWN", "EMERGENCY", "RELIEF", "INTERLOCK", "SIS", "ESD", "TRIP"}
+
+# --- IO type classification (instrument's signal perspective) ---
+# AO = instrument transmits analog signal to DCS/PLC (4-20 mA out)
+# AI = instrument receives analog signal from DCS/PLC (4-20 mA in)
+# DO = instrument outputs discrete/digital signal to DCS/PLC
+# DI = instrument receives discrete/digital signal from DCS/PLC
+
+# Solenoids / on-off valves / actuators: controller sends digital command → DO
+_DO_TYPE_CODES = {"XV", "SDV", "ESV", "BDV", "SOV", "AOV", "MOV"}
+
+# Safety relief valves have a position-feedback switch wired back to controller → DI
+_DI_TYPE_CODES = {"PSV", "TSV", "LSV", "FSV", "PRV", "RV", "SV"}
+
+# Last ISA function letter → IO type (from CONTROLLER perspective)
+# AI = Field → Controller (analog: 4-20mA, RTD/TC)
+# AO = Controller → Field (analog: 4-20mA, 0-10V)
+# DI = Field → Controller (discrete: dry contact, 24VDC, NAMUR)
+# DO = Controller → Field (discrete: 24VDC, 120VAC, relay)
+_LAST_LETTER_IO: Dict[str, str] = {
+    "T": "AI",   # Transmitter — field sends 4-20 mA to controller (AI)
+    "E": "AI",   # Primary element — analog sensing input to controller
+    "R": "AI",   # Recorder — receives analog from field
+    "W": "AI",   # Thermowell — temperature sensing input
+    "C": "AO",   # Controller output — sends 4-20 mA to control valve
+    "V": "AO",   # Control valve / positioner — receives 4-20 mA from controller
+    "Z": "AO",   # Actuator/Driver — receives analog from controller
+    "Y": "AO",   # Relay/Converter — analog output
+    "S": "DI",   # Switch — discrete contact from field to controller
+    "A": "DI",   # Alarm — discrete signal from field to controller
+    "H": "DI",   # High switch (FSH, PSH …) — discrete from field
+    "L": "DI",   # Low switch (FSL, PSL …) — discrete from field
+    "I": "",     # Indicator — local display, leave blank
+    "G": "",     # Gauge/glass — local/visual, leave blank
+    "K": "",     # Control station — operator interface, leave blank
+}
+
+
+def _classify_io_type(type_code: str) -> str:
+    """Return AI / AO / DI / DO (or '') from the controller/DCS perspective.
+
+    AI  Field → Controller  4-20mA, RTD/TC  (transmitters, sensors)
+    AO  Controller → Field  4-20mA, 0-10V   (control valves, VFDs, dampers)
+    DI  Field → Controller  dry contact, 24VDC, NAMUR  (switches, alarms, PSV feedback)
+    DO  Controller → Field  24VDC, 120VAC, relay  (solenoids, MCC starters, horns)
+    ''  Local/visual instruments with no DCS IO (indicators, gauges)
+
+    Vendor power data refines AI↔AO distinction later (mA = analog, V = digital).
+    """
+    code = (type_code or "").upper().strip()
+    if not code:
+        return ""
+    if code in _DO_TYPE_CODES:
+        return "DO"
+    if code in _DI_TYPE_CODES:
+        return "DI"
+    # Compound switch / trip codes (PSHH, FSLL, LSHH, etc.) → DI
+    if code.endswith(("HH", "LL", "SH", "SL")):
+        return "DI"
+    return _LAST_LETTER_IO.get(code[-1], "")
+
+
+def _infer_service_description(type_code: str, line_no: str, equip_no: str) -> str:
+    """Build a service description from the ISA tag code + nearest line/equipment."""
+    if not type_code:
+        return ""
+    code = type_code.upper()
+    variable = _ISA_VARIABLE.get(code[0], code[0])
+
+    func_parts: list = []
+    i = 1
+    while i < len(code):
+        two = code[i: i + 2] if i + 1 < len(code) else ""
+        if two in ("HH", "LL", "AH", "AL"):
+            func_parts.append(two)
+            i += 2
+        else:
+            fn = _ISA_FUNCTION.get(code[i], code[i])
+            func_parts.append(fn)
+            i += 1
+
+    desc = " ".join([variable] + func_parts)
+
+    context = (line_no or equip_no or "").strip()
+    if context:
+        desc = f"{desc} on {context}"
+    return desc
+
+
+def _classify_system(type_code: str, instrument_description: str) -> str:
+    """Return 'SIS' or 'BPCS' for this instrument.
+
+    SIS instruments are safety-critical — pressure/level/temp safety valves,
+    emergency shutdowns, high-high / low-low trip switches.  Everything else
+    defaults to BPCS (Basic Process Control System / DCS).
+    """
+    code = (type_code or "").upper()
+    desc = (instrument_description or "").upper()
+
+    if code in _SIS_TYPE_CODES:
+        return "SIS"
+    if any(kw in desc for kw in _SIS_DESC_KEYWORDS):
+        return "SIS"
+    # Codes ending in SHH / SLL / SH / SL are safety trip switches
+    if code.endswith(("SHH", "SLL", "SH", "SL")):
+        return "SIS"
+    return "BPCS"
+
 
 # Instrument CSV column → canonical field name.
 # Keys match the ALL-CAPS headers that instrument_validator.py writes via
@@ -128,15 +277,73 @@ def _build_instrument_entities(instrument_csv: Path, job_id: int) -> List[Canoni
             for csv_col, field_name in _INSTRUMENT_FIELD_MAP.items():
                 fields[field_name] = row.get(csv_col, "")
 
-            # Synthesize VendorMatch only when Manufacturer + Model are real values
-            manufacturer = (row.get("MANUFACTURER") or "").strip()
-            model_no = (row.get("MODEL") or "").strip()
+            # --- Derived fields computed from tag ---
+            tag_str = tag or ""
+            tag_parts = tag_str.split("-") if tag_str else []
+
+            # Unit Number: first hyphen-segment (e.g. "62" from "62-FE-151002B")
+            fields["unit_number"] = tag_parts[0] if tag_parts else ""
+
+            # Tag type code: purely alphabetic segment (e.g. "FE", "LIC", "PZIT")
+            type_code = next((p for p in tag_parts if p.isalpha()), "")
+            fields["tag_type_code"] = type_code
+
+            # Loop Number: replace type code with its first letter only
+            # "62-FE-151002B" → "62-F-151002B"  |  "62-LIC-151006" → "62-L-151006"
+            if type_code and type_code in tag_parts:
+                loop_parts = list(tag_parts)
+                loop_parts[loop_parts.index(type_code)] = type_code[0]
+                fields["loop_name"] = "-".join(loop_parts)
+            else:
+                fields["loop_name"] = tag_str
+
+            # Service Description: if CSV value is a placeholder or empty,
+            # infer from the ISA tag code + line/equipment context.
+            svc = fields.get("service_description", "").strip()
+            if svc.upper() in _PLACEHOLDER_VALUES:
+                fields["service_description"] = _infer_service_description(
+                    type_code,
+                    fields.get("line_no", ""),
+                    fields.get("equipment_no", ""),
+                )
+
+            # System: classify as BPCS or SIS based on tag code + description
+            fields["system"] = _classify_system(type_code, fields.get("instrument_type", ""))
+
+            # IO type: AI / AO / DI / DO from instrument signal-flow perspective
+            fields["io_type"] = _classify_io_type(type_code)
+
+            # --- Vendor Match API enrichment ---
+            # Use analog range from CSV as hints to get a tighter API match.
+            api_data = fetch_vendor_fields(
+                inst_type=type_code,
+                range_min=fields.get("analog_range_low_scale") or None,
+                range_max=fields.get("analog_range_high_scale") or None,
+                range_unit=fields.get("analog_range_eu") or None,
+            )
+
+            if api_data:
+                # Overwrite spec fields with API values (non-empty values only)
+                for fld in (
+                    "piping_class", "calb_range_min", "calb_range_max", "calb_range_unit",
+                    "measuring_range_min", "measuring_range_max", "measuring_range_unit",
+                    "power_in", "power_out", "io_output",
+                ):
+                    val = api_data.get(fld, "")
+                    if val and val.upper() not in _PLACEHOLDER_VALUES:
+                        fields[fld] = val
+
+            # Build VendorMatch: prefer API data, fall back to CSV
+            manufacturer = (api_data or {}).get("_manufacturer") or (row.get("MANUFACTURER") or "").strip()
+            model_no = (api_data or {}).get("_model_number") or (row.get("MODEL") or "").strip()
+            vendor_name = (api_data or {}).get("_vendor_name") or manufacturer
+
             vendor_match: Optional[VendorMatch] = None
             if manufacturer not in _EMPTY_VENDOR_VALUES and model_no not in _EMPTY_VENDOR_VALUES:
-                vendor_id = uuid.uuid5(uuid.NAMESPACE_DNS, manufacturer)
+                vendor_id = uuid.uuid5(uuid.NAMESPACE_DNS, vendor_name or manufacturer)
                 vendor_match = VendorMatch(
                     vendor_id=vendor_id,
-                    vendor_name=manufacturer,
+                    vendor_name=vendor_name,
                     product_name=model_no,
                     part_number="",
                     catalog_fields={},

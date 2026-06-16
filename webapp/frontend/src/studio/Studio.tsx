@@ -21,6 +21,7 @@ import {
   type JobSheetsResp,
 } from "./api";
 import { buildElementsForTile, buildEntityIndex } from "./buildElements";
+import { computeTileOffsets } from "./PidCanvas";
 import type { CanvasElement, JobGraph, ProjectLike } from "./types";
 // FEATURES #38 — marking + edge drawing wiring
 import type { CanvasMode, LineType, UserAnnotationLite, EdgeLite } from "./PidCanvas";
@@ -117,12 +118,41 @@ export default function Studio({ project, userName, onBack }: Props) {
   // for prototype SVG clicks. Drives the DatasheetDrawer's initial doctype so
   // clicking a valve opens Valve List, not Instrument Index.
   const [selectedClass, setSelectedClass] = useState<string | undefined>(undefined);
-  const handleSelect = (id: string, entityClass?: string) => {
-    setSelectedId(id);
-    setSelectedClass(entityClass);
-  };
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+
+  const handleSelect = (id: string, entityClass?: string, panToElement = false) => {
+    setSelectedId(id);
+    setSelectedClass(entityClass);
+    // Pan canvas to center on the element when triggered from sidebar
+    if (panToElement && naturalSize && detResp?.detections) {
+      const det = detResp.detections.find((d) => (d.entity_id as string | undefined) === id);
+      if (det?.bbox && det?.tile) {
+        const offsets = computeTileOffsets(naturalSize, activePageIndex);
+        const off = offsets.get(det.tile as string);
+        if (off) {
+          const [bx1, by1, bx2, by2] = det.bbox as number[];
+          const cx = (bx1 + bx2) / 2 + off.x0;
+          const cy = (by1 + by2) / 2 + off.y0;
+          // canvas-wrap uses place-items:center, so at pan={0,0} the image
+          // is centred. To place (cx,cy) at viewport centre we need to shift
+          // in CSS display pixels, not natural pixels.
+          const canvasWrap = document.querySelector(".canvas-wrap") as HTMLElement | null;
+          if (canvasWrap) {
+            const s = Math.min(
+              canvasWrap.clientWidth / naturalSize.w,
+              canvasWrap.clientHeight / naturalSize.h,
+            );
+            setPan({
+              x: (naturalSize.w / 2 - cx) * s * zoom,
+              y: (naturalSize.h / 2 - cy) * s * zoom,
+            });
+          }
+        }
+      }
+    }
+  };
   const [datasheetOpen, setDatasheetOpen] = useState(false);
   const [mode, setMode] = useState<"studio" | "bulk">("studio");
   // The deliverable_type the workbench opens with. Today we default to
@@ -710,6 +740,7 @@ export default function Studio({ project, userName, onBack }: Props) {
             activeMarkClass={activeMarkClass}
             graph={graph}
             showGraph={showGraph}
+            onNaturalSize={(w, h) => setNaturalSize({ w, h })}
           />
           <div className="zoom-ctl">
             <button
@@ -746,7 +777,7 @@ export default function Studio({ project, userName, onBack }: Props) {
           <PropertiesPanel
             elements={panelElements}
             selectedId={selectedId}
-            onSelect={handleSelect}
+            onSelect={(id, ec) => handleSelect(id, ec, true)}
             hasDatasheet={hasDatasheet}
             onOpenDatasheet={onOpenDatasheet}
             onCollapse={() => setPropsOpen(false)}

@@ -47,14 +47,9 @@ except ImportError:  # pragma: no cover
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 MODEL_PATH = "/app/models/v1-11.onnx"
-IMGSZ = 640  # v1-11 (like v1-10) was trained + ONNX-exported at 640; using a
-             # different IMGSZ here against a fixed-axes ONNX would fail with a
-             # shape mismatch. v1-9 used 1280 — don't blindly copy that value.
-CONF_THRESH = 0.50  # carried over from v1-10. v1-11 has the same 23-class
-                    # layout and a higher mAP50 (0.805 vs 0.745 on the same
-                    # val set), so 0.50 remains a reasonable noise-floor;
-                    # revisit after dev smoke-test if the canvas overlay
-                    # becomes either too sparse or too cluttered.
+IMGSZ = 640
+CONF_THRESH = 0.50
+
 IOU_THRESH = 0.45
 
 # Class IDs in v1-10 — order = class index (argmax over the output's class-

@@ -1,0 +1,26 @@
+meta {
+  name: TG - Temperature Gauge
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/api/instrument-match
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-KEY: {{api_key}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "instType": "TG",
+    "range_min": 0,
+    "range_max": 120,
+    "range_unit": "C"
+  }
+}

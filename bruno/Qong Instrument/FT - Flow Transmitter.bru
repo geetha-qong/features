@@ -1,0 +1,55 @@
+meta {
+  name: FT - Flow Transmitter
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{base_url}}/api/qong-instrument
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  X-API-KEY: {{api_key}}
+}
+
+body:json {
+  {
+    "instType": "FT"
+  }
+}
+
+docs {
+  # FT — Qong Instrument
+
+  Returns the first active Flow Transmitter product.
+
+  Expected response:
+
+  ```json
+  {
+    "success": true,
+    "instType": "FT",
+    "data": {
+      "product_id": 1,
+      "vendor_profile_id": 1,
+      "manufacturer": "SUPMEA",
+      "model_number": "SUP-LDG",
+      "piping_class": "ANSI150",
+      "calibration_range_min": 4,
+      "calibration_range_max": 20,
+      "calibration_range_unit": "mA",
+      "measuring_range_min": 0,
+      "measuring_range_max": 15,
+      "measuring_range_unit": "m/s",
+      "external_power_supply": "Yes",
+      "power_supply_input": "85-245VAC 50/60Hz, 22-26VDC",
+      "power_supply_output": "24VDC",
+      "io_output": "4-20mA, Pulse, Frequency, Status Switch"
+    }
+  }
+  ```
+}

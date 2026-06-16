@@ -94,12 +94,14 @@ function stringToValue(s: string, original: unknown): unknown {
   return s;
 }
 
-/** Identity columns rendered sticky-left, regardless of template schema. */
-const IDENTITY_COLS: { field: keyof EntityRow; header: string }[] = [
-  { field: "tag", header: "Tag" },
-  { field: "sub_class", header: "Sub-class" },
-  { field: "pid_number", header: "P&ID" },
-  { field: "sheet_number", header: "Sheet" },
+/** Identity columns rendered sticky-left, regardless of template schema.
+ *  editable: true → double-click opens inline edit (backend allows PATCH).
+ *  pid_number + sheet_number are in READ_ONLY_FIELDS on the backend — keep them display-only. */
+const IDENTITY_COLS: { field: keyof EntityRow; header: string; editable: boolean }[] = [
+  { field: "tag",          header: "Tag",              editable: true },
+  { field: "sub_class",    header: "Process Function", editable: true },
+  { field: "pid_number",   header: "P&ID",             editable: true },
+  { field: "sheet_number", header: "Sheet",            editable: true },
 ];
 
 export default function BulkReviewScreen({
@@ -142,6 +144,13 @@ export default function BulkReviewScreen({
   // Cache entity counts per tab key so non-active tabs show their count too.
   const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  // Column header renames — persisted in localStorage; double-click any <th> to rename.
+  const [headerOverrides, setHeaderOverrides] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem("br-header-overrides") ?? "{}"); } catch { return {}; }
+  });
+  const [editingHeader, setEditingHeader] = useState<string | null>(null);
+  const [headerDraft, setHeaderDraft] = useState("");
 
   // Download the active deliverable. Wires the previously-stubbed "Export"
   // button to the same POST /export endpoint Studio's right-panel uses.
@@ -234,6 +243,7 @@ export default function BulkReviewScreen({
       setEditing({});
       setCellError({});
       setSaving({});
+      setEditingHeader(null);
     } catch (e) {
       if (myReq !== reqIdRef.current) return;
       if (e instanceof HttpError && e.status === 404) {
@@ -342,7 +352,11 @@ export default function BulkReviewScreen({
   function beginEdit(entity: EntityRow, field: string) {
     const k = cellKey(entity.entity_id, field);
     if (editing[k] !== undefined) return; // already editing
-    const cur = valueToString(entity.values[field]?.value);
+    // Prefer the values dict (tracks overrides). Fall back to the top-level
+    // entity property for identity fields like sub_class that aren't in the schema.
+    const cur = field in entity.values
+      ? valueToString(entity.values[field]?.value)
+      : valueToString((entity as unknown as Record<string, unknown>)[field]);
     setEditing((s) => ({ ...s, [k]: cur }));
     setCellError((s) => {
       if (!(k in s)) return s;
@@ -387,6 +401,12 @@ export default function BulkReviewScreen({
     setSaving((s) => ({ ...s, [k]: true }));
     try {
       await patchEntity(jobId, entity.entity_id, { [field]: coerced });
+      // If Rev. No is edited, apply the same value to all other rows so the
+      // entire deliverable shares one revision number.
+      if (field === "fields.rev_no") {
+        const others = rows.filter((r) => r.entity_id !== entity.entity_id);
+        await Promise.all(others.map((r) => patchEntity(jobId, r.entity_id, { [field]: coerced })));
+      }
       // Refresh just the active tab — keeps badges (is_override) accurate and
       // pulls in any concurrent edits from another tab. Cheap at current
       // entity counts; see open-question note on virtualization for the
@@ -405,6 +425,26 @@ export default function BulkReviewScreen({
       });
     }
   }
+
+  // --- Column header rename helpers ---
+  function headerKey(field: string) { return `${activeType ?? ""}:${field}`; }
+  function getHeader(field: string, def: string) { return headerOverrides[headerKey(field)] ?? def; }
+  function startHeaderEdit(field: string, def: string) {
+    setEditingHeader(field);
+    setHeaderDraft(getHeader(field, def));
+  }
+  function commitHeaderEdit() {
+    if (!editingHeader) return;
+    const k = headerKey(editingHeader);
+    const val = headerDraft.trim();
+    const next = val
+      ? { ...headerOverrides, [k]: val }
+      : ((): Record<string, string> => { const o = { ...headerOverrides }; delete o[k]; return o; })();
+    setHeaderOverrides(next);
+    localStorage.setItem("br-header-overrides", JSON.stringify(next));
+    setEditingHeader(null);
+  }
+  function cancelHeaderEdit() { setEditingHeader(null); }
 
   // Grid template: identity cols (sticky-left) · editable cols · open-action.
   const gridTemplate = useMemo(() => {
@@ -619,15 +659,47 @@ export default function BulkReviewScreen({
             )}
             {!loading && !fetchError && activeType && rows.length > 0 && (
               <div className="br-table" style={{ gridTemplateColumns: gridTemplate }}>
-                {/* Identity headers (sticky-left visually via column order) */}
+                {/* Headers — double-click any cell to rename it (saved in localStorage) */}
                 {IDENTITY_COLS.map((c) => (
-                  <div key={`id-${c.field}`} className="br-th">
-                    {c.header}
+                  <div
+                    key={`id-${c.field}`}
+                    className="br-th"
+                    style={{ cursor: "text" }}
+                    onDoubleClick={() => startHeaderEdit(c.field, c.header)}
+                    title="Double-click to rename column"
+                  >
+                    {editingHeader === c.field ? (
+                      <input
+                        autoFocus
+                        value={headerDraft}
+                        style={{ width: "100%", border: 0, outline: 0, background: "transparent", font: "inherit", color: "inherit", padding: 0 }}
+                        onChange={(e) => setHeaderDraft(e.target.value)}
+                        onBlur={commitHeaderEdit}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitHeaderEdit(); } else if (e.key === "Escape") cancelHeaderEdit(); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : getHeader(c.field, c.header)}
                   </div>
                 ))}
                 {editableColumns.map((c) => (
-                  <div key={`ed-${c.field}`} className="br-th">
-                    {c.header}
+                  <div
+                    key={`ed-${c.field}`}
+                    className="br-th"
+                    style={{ cursor: "text" }}
+                    onDoubleClick={() => startHeaderEdit(c.field, c.header)}
+                    title="Double-click to rename column"
+                  >
+                    {editingHeader === c.field ? (
+                      <input
+                        autoFocus
+                        value={headerDraft}
+                        style={{ width: "100%", border: 0, outline: 0, background: "transparent", font: "inherit", color: "inherit", padding: 0 }}
+                        onChange={(e) => setHeaderDraft(e.target.value)}
+                        onBlur={commitHeaderEdit}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitHeaderEdit(); } else if (e.key === "Escape") cancelHeaderEdit(); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : getHeader(c.field, c.header)}
                   </div>
                 ))}
                 <div className="br-th"></div>
@@ -641,24 +713,46 @@ export default function BulkReviewScreen({
                       style={{ display: "contents" }}
                       onClick={() => setSelectedId(r.entity_id)}
                     >
-                      {/* Identity cells — read-only, sticky-left visually muted. */}
+                      {/* Identity cells — editable ones (tag, sub_class) use BulkCell;
+                          pid_number + sheet_number stay display-only (backend READ_ONLY_FIELDS). */}
                       {IDENTITY_COLS.map((c) => {
+                        if (c.editable) {
+                          // Construct fv: prefer values dict (has override tracking);
+                          // fall back to raw entity property for sub_class which
+                          // isn't in the schema template.
+                          const fv = r.values[c.field as string] ?? {
+                            value: r[c.field],
+                            source: "pid" as const,
+                            is_override: false,
+                          };
+                          const fakecol = { field: c.field as string, header: c.header, order: 0, editable: true };
+                          return (
+                            <BulkCell
+                              key={`id-${r.entity_id}-${c.field}`}
+                              entity={r}
+                              col={fakecol}
+                              fv={fv as import("../api").EntityFieldValue}
+                              ck={cellKey(r.entity_id, c.field as string)}
+                              editing={editing[cellKey(r.entity_id, c.field as string)]}
+                              saving={!!saving[cellKey(r.entity_id, c.field as string)]}
+                              error={cellError[cellKey(r.entity_id, c.field as string)]}
+                              onBeginEdit={() => beginEdit(r, c.field as string)}
+                              onChange={(v) => setEditingValue(r, c.field as string, v)}
+                              onCancel={() => cancelEdit(r, c.field as string)}
+                              onCommit={() => void commitEdit(r, c.field as string)}
+                            />
+                          );
+                        }
                         const raw = r[c.field];
-                        const display =
-                          raw === null || raw === undefined || raw === ""
-                            ? "—"
-                            : String(raw);
+                        const display = raw === null || raw === undefined || raw === "" ? "—" : String(raw);
                         const isEmpty = display === "—";
                         const cls = ["br-td"];
-                        if (c.field === "tag" || c.field === "pid_number") cls.push("mono");
+                        if (c.field === "pid_number") cls.push("mono");
                         return (
                           <div
                             key={`id-${r.entity_id}-${c.field}`}
                             className={cls.join(" ")}
-                            style={{
-                              color: isEmpty ? "var(--fg-3)" : "var(--fg-2)",
-                              fontStyle: isEmpty ? "italic" : "normal",
-                            }}
+                            style={{ color: isEmpty ? "var(--fg-3)" : "var(--fg-2)", fontStyle: isEmpty ? "italic" : "normal" }}
                             title="Read-only — pipeline-extracted"
                           >
                             {display}
@@ -961,12 +1055,12 @@ function BulkCell({
         background: isEditing ? "var(--bg-elev)" : undefined,
         boxShadow: error ? "inset 0 0 0 1px var(--error, #dc2626)" : undefined,
       }}
-      onClick={(e) => {
+      onDoubleClick={(e) => {
         if (isEditing) return;
         e.stopPropagation();
         onBeginEdit();
       }}
-      title={error || (isOverride ? "Edited" : isPidSourced ? "P&ID-extracted" : undefined)}
+      title={error || (isOverride ? "Edited — double-click to edit" : isPidSourced ? "P&ID-extracted — double-click to edit" : "Double-click to edit")}
     >
       {isEditing ? (
         <input

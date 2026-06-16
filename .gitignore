@@ -72,3 +72,6 @@ themes/screenshots/
 #  docker-compose.local.yml which IS gitignored:)
 docker-compose.local.yml
 .github_pat
+
+# Bruno API client — collection files are committed, env files contain keys
+bruno/environments/

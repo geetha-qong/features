@@ -191,6 +191,9 @@ interface Props {
   graph?: JobGraph | null;
   /** Whether the graph overlay layer is toggled on. */
   showGraph?: boolean;
+  /** Called once when the full-page image loads, providing its natural dimensions.
+   *  Studio uses this to compute pan-to coordinates for sidebar → canvas sync. */
+  onNaturalSize?: (w: number, h: number) => void;
 }
 
 export default function PidCanvas({
@@ -217,6 +220,7 @@ export default function PidCanvas({
   activeMarkClass,
   graph,
   showGraph,
+  onNaturalSize,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const innerRef = useRef<HTMLDivElement | null>(null);
@@ -327,6 +331,7 @@ export default function PidCanvas({
             dark={dark}
             graph={graph ?? null}
             showGraph={!!showGraph}
+            onNaturalSize={onNaturalSize}
           />
         )}
         {useTile && (
@@ -474,6 +479,7 @@ function PageWithOverlays({
   dark,
   graph,
   showGraph,
+  onNaturalSize,
 }: {
   pageFullUrl: string;
   zoom: number;
@@ -497,6 +503,7 @@ function PageWithOverlays({
   dark: boolean;
   graph: JobGraph | null;
   showGraph: boolean;
+  onNaturalSize?: (w: number, h: number) => void;
 }) {
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -689,6 +696,7 @@ function PageWithOverlays({
         onLoad={(e) => {
           const img = e.currentTarget;
           setNatural({ w: img.naturalWidth, h: img.naturalHeight });
+          onNaturalSize?.(img.naturalWidth, img.naturalHeight);
         }}
         style={{
           display: "block",

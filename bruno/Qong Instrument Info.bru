@@ -1,0 +1,40 @@
+meta {
+  name: Qong Instrument Info
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/api/qong-instrument
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+docs {
+  # Qong Instrument — GET Info
+
+  Public endpoint. Returns usage information when the URL is opened in a browser.
+  No API key required.
+
+  Expected response:
+
+  ```json
+  {
+    "success": true,
+    "message": "API is running",
+    "method": "POST",
+    "endpoint": "/api/qong-instrument",
+    "usage": {
+      "content_type": "application/json",
+      "header": "X-API-KEY: <your-key>",
+      "example": {
+        "instType": "PT"
+      }
+    }
+  }
+  ```
+}

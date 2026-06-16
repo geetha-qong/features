@@ -138,6 +138,27 @@ def run_migrations():
             """))
             conn.commit()
 
+    # Ensure default admin account exists with fixed credentials (admin / admin)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id FROM users WHERE email = 'admin@qong.local'")
+        ).fetchone()
+        if not row:
+            from webapp.auth import pwd_context
+            conn.execute(text("""
+                INSERT INTO users (username, email, password_hash, role, is_active, credits_remaining)
+                VALUES ('admin', 'admin@qong.local', :ph, 'super_admin', TRUE, 999)
+            """), {"ph": pwd_context.hash("admin")})
+            conn.commit()
+            print("[startup] Created default admin user (admin@qong.local / admin)")
+        else:
+            # Always keep password in sync so restarting the container resets it
+            from webapp.auth import pwd_context
+            conn.execute(text(
+                "UPDATE users SET password_hash = :ph WHERE email = 'admin@qong.local'"
+            ), {"ph": pwd_context.hash("admin")})
+            conn.commit()
+
 
 def get_db():
     db = SessionLocal()

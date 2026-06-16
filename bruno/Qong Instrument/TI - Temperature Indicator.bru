@@ -1,0 +1,29 @@
+meta {
+  name: TI - Temperature Indicator
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/api/qong-instrument
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  X-API-KEY: {{api_key}}
+}
+
+body:json {
+  {
+    "instType": "TI"
+  }
+}
+
+docs {
+  # TI — Qong Instrument
+
+  Returns the first active Temperature Indicator product.
+}
