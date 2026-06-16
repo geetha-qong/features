@@ -24,6 +24,90 @@
 
 ---
 
+## [2026-06-16] #48 — Local Docker build no longer requires a model PAT (model-bake skip)
+
+**Type:** infra, bugfix
+**Stage:** infra
+**Status:** shipped (deployed to dev)
+
+**Why:** Local `docker compose build` was impossible without a GitHub PAT — the
+Dockerfile baked `v1-11.onnx` from a **private** release and `exit 1`'d on any
+failure, including the no-PAT local case. The local `.github_pat` placeholder is
+a lone newline (size>0 but blank), so the old `[ -s ... ]` guard didn't catch it
+and the build died trying to download with an empty token (`Bad credentials`).
+This blocked all local testing of root-level pipeline modules (baked, not mounted).
+
+**What:** Dockerfile model step now reads the secret, strips whitespace, and
+`exit 0`s with a clear log when blank (`TOKEN=$(... | tr -d '[:space:]'); [ -z "$TOKEN" ]`).
+Matches the step's long-documented intent. CI/deploys are unaffected — they inject
+a real PAT from SSM, so the sha-verify fail-hard path still runs. Local images
+build without the YOLO model; `webapp/inference.py` raises `InferenceError` only
+if in-process inference is actually invoked (canvas overlay), which local feature
+testing doesn't need.
+
+**Notes:** Local FE iteration gotcha confirmed (FEATURES #18): `override.yml`
+mounts `./webapp`, so the host SPA dist shadows the image — run `npx vite build`
+on the host for frontend changes; `docker compose build` only matters for
+repo-root `*.py` (extractor/parser/pdf_to_tiles).
+
+---
+
+## [2026-06-16] #47 — Studio: hotkey-hint collision fix + element-count tooltip
+
+**Type:** bugfix
+**Stage:** webapp/frontend
+**Status:** shipped (deployed to dev)
+
+**Why:** Palette rows advertised stale hardcoded digit hotkeys (Double Block→`3`,
+Globe→`5`, Pressure→`Z`, NC Ball→dup `G`). Digits 1/2/3 are reserved for mode
+switching (select/mark-symbol/draw-edge, `routers/shortcuts.py:DEFAULT_SHORTCUTS`),
+so pressing the advertised `3` on Double Block triggered draw-edge instead of
+selecting the class. Separately, users were confused that the stage element count
+differs from Bulk Review.
+
+**What:**
+- `paletteColors.ts`: removed all static `key` hints. Badges now come solely from
+  the live merged-with-defaults shortcut map (`PalettePanel.buildClassKeyIndex`);
+  the 9 default-bound classes show their real letter, unbound classes show no
+  badge until assigned at `/account/shortcuts`. The assignable-shortcuts UI itself
+  already existed (FEATURES #38).
+- `PropertiesPanel.tsx`: explanatory `title` on the count clarifying stage = every
+  detection on the sheet (incl. arrows/connectors) vs Bulk Review = deliverable
+  entities only across all sheets — they are *expected* to differ.
+
+**Result:** Verified in-browser on local (job 2) — Double Block shows no badge,
+only bound classes show letters. `tsc` clean; **101/101 vitest pass** (added a
+paletteColors regression test asserting no entry uses a reserved mode key; updated
+the PalettePanel fallback test to the corrected no-badge behavior).
+
+---
+
+## [2026-06-16] #46 — Multi-page P&ID: thread source page into per-sheet number
+
+**Type:** bugfix
+**Stage:** associate, export
+**Status:** shipped (deployed to dev)
+
+**Why:** Canonical entities hardcoded `sheet_number=1` regardless of which page a
+detection came from, so multi-page jobs collapsed all entities onto sheet 1 (user
+report: "sometimes the sheet has a mismatched number"). The per-sheet sidebar fix
+(`detectionPage()`, FEATURES #43-adjacent) addressed the canvas; this fixes the
+deliverable/canonical attribution.
+
+**What:** `extractor.py` stamps `page` on valves + instruments → `parser.py` /
+`instrument_parser.py` carry `ValveRow.page` / `InstrumentRow.page` and emit a
+`"Sheet"` CSV column (`page+1`) → `webapp/deliverables/pipeline_emitter.py`
+`_sheet_from_row()` reads it into `sheet_number` (defaults to 1 for legacy CSVs —
+backward-compatible). Tests: new `tests/unit/test_parser_sheet.py` (3) + 4 emitter
+sheet-column cases.
+
+**Result:** Corrects **new** jobs only; existing multi-page jobs need a re-run to
+backfill. 12/13 emitter+parser tests pass (the 1 failure,
+`test_emit_instruments_with_synthetic_vendor_match`, is a **pre-existing** PR-merge
+vendor-match fixture bug — fails identically on clean HEAD, flagged for swaraj).
+
+---
+
 ## [2026-06-15] #45 — Studio canvas: P&ID symbol glyphs replace detection rectangles (LS-style per-class colors)
 
 **Type:** feature
