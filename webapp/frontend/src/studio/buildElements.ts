@@ -11,25 +11,14 @@
  */
 import type { DetectionItem, EntitiesResponse, EntityRow } from "./api";
 import type { CanvasElement } from "./types";
+import { DISPLAY_NAME_BY_SUB } from "./taxonomy.generated";
 
-const VALVE_SUB_CLASS_LABELS: Record<string, string> = {
-  BV: "Ball Valve",
-  BF: "Butterfly Valve",
-  GT: "Gate Valve",
-  CK: "Check Valve",
-  DB: "Diaphragm Valve",
-  GL: "Globe Valve",
-  CV: "Control Valve",
-  NCBV: "Non-Compliant Ball Valve",
-  PNEUCTRL: "Pneumatic Control",
-  RELIEF_SAFETY: "Relief / Safety Valve",
-  "3WAY_RELIEF": "3-Way Relief Valve",
-  VB: "Block Valve",
-  VF: "Flow Valve",
-  VD: "Drain Valve",
-  PV: "Pressure Valve",
-  SB: "Sample/Bleed Valve",
-};
+// Sourced from the generated taxonomy module (single source of truth). This
+// used to be a private hand-maintained copy that had drifted from valveLabels.ts
+// / labelMap.ts (DB="Diaphragm Valve", NCBV="Non-Compliant Ball Valve",
+// PNEUCTRL="Pneumatic Control"); it now reads the reconciled taxonomy so a code
+// renders the same name on the stage, palette, canvas, and exports.
+const VALVE_SUB_CLASS_LABELS: Record<string, string> = DISPLAY_NAME_BY_SUB;
 
 const INST_YOLO_LABELS: Record<string, string> = {
   inst_bpcs:        "Instrument (BPCS)",

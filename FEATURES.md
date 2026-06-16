@@ -24,6 +24,40 @@
 
 ---
 
+## [2026-06-16] #50 — Taxonomy reconciliation: taxonomy.json is now the sole display/glyph source
+
+**Type:** refactor
+**Stage:** symbols, webapp
+**Status:** experimental (branch `feat/taxonomy-foundation`, with #49)
+
+**Why:** #49 preserved behavior via frontend override maps where my Phase-1 seed
+diverged from live values, and investigation found the codebase had **three**
+drifting display-name maps (`valveLabels.ts` palette, `buildElements.ts` stage,
+`labelMap.ts` canvas) — e.g. DB was "Double Block" in one and "Diaphragm Valve"
+in two; NCBV "NC Ball Valve" vs "Non-Compliant Ball Valve". User chose **DB =
+"Double Block"** as canonical (product decision; resolves spec open-question #3).
+
+**What:**
+- `taxonomy.json`: DB glyph `valve_gen→valve_db`, NCBV glyph `valve_bv→valve_ncbv`
+  (the specific glyphs exist + were rendered via overrides), RELIEF_SAFETY display
+  `"Relief/Safety Valve"→"Relief / Safety Valve"`, added `PNEUCTRL` row
+  (valve / "Pneumatic Valve" / valve_pneuctrl). Now 43 classes.
+- Regenerated `taxonomy.generated.ts`.
+- Removed `FRONTEND_SUB_CLASS_OVERRIDES` (`labelMap.ts`) + `FRONTEND_GLYPH_OVERRIDES`
+  (`PidSymbol.tsx`). Pointed `valveLabels.ts` + `buildElements.ts` at
+  `DISPLAY_NAME_BY_SUB` (deleted their private hardcoded maps).
+
+**Result:** DB now renders "Double Block" everywhere (palette/stage/canvas/exports);
+NCBV "NC Ball Valve"; PNEUCTRL "Pneumatic Valve". Frontend `tsc` clean, vitest
+112/112 (updated the one frozen parity snapshot: DB → "Double Block"); backend
+taxonomy suite 30 pass; `label_taxonomy` synced to 43 rows (PNEUCTRL verified).
+
+**Notes:** `sync_taxonomy_to_db` log counter mis-reports inserts as "updated"
+(cosmetic; row data verified correct). taxonomy.json is now the single source of
+truth for class display names + glyph kinds — no override maps remain.
+
+---
+
 ## [2026-06-16] #49 — Unified symbol taxonomy + label triage (Phases 1–4)
 
 **Type:** architecture, feature

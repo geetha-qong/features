@@ -46,12 +46,14 @@ const FROZEN_SUB_COLORS: Record<string, string> = {
 };
 
 // displayNameForSubClass(sub) for every current SUB_CLASS_NAMES entry.
+// DB reconciled to "Double Block" (was "Diaphragm Valve") — taxonomy.json is now
+// the sole source of truth and the frontend override map was removed.
 const FROZEN_SUB_NAMES: Record<string, string> = {
   BV: "Ball Valve",
   BF: "Butterfly Valve",
   GT: "Gate Valve",
   CK: "Check Valve",
-  DB: "Diaphragm Valve",
+  DB: "Double Block",
   GL: "Globe Valve",
   CV: "Control Valve",
   NCBV: "NC Ball Valve",

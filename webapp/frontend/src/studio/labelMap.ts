@@ -78,26 +78,13 @@ export const MODEL_LABEL_NAMES: Record<string, string> = {
 
 /** Canonical sub_class codes → human label.
  *
- *  Base values are sourced from the generated taxonomy module
- *  (taxonomy.generated.ts → DISPLAY_NAME_BY_SUB, from webapp/taxonomy.json).
- *  A small `FRONTEND_SUB_CLASS_OVERRIDES` map preserves three frontend-only
- *  names that differ from / are absent in taxonomy.json so canvas labels render
- *  byte-identically to before:
- *    - DB             → "Diaphragm Valve"  (taxonomy.json says "Double Block")
- *    - RELIEF_SAFETY  → "Relief / Safety Valve"  (taxonomy.json: "Relief/Safety Valve")
- *    - PNEUCTRL       → "Pneumatic Valve"  (no taxonomy.json row — model-only code)
- *  See FEATURES taxonomy phase 3 + the StructuredOutput issues note. Reconcile
- *  these in a later pass once the backend/frontend display-name divergence is
- *  intentionally resolved. */
-const FRONTEND_SUB_CLASS_OVERRIDES: Record<string, string> = {
-  DB: "Diaphragm Valve",
-  RELIEF_SAFETY: "Relief / Safety Valve",
-  PNEUCTRL: "Pneumatic Valve",
-};
-
+ *  Sourced entirely from the generated taxonomy module (taxonomy.generated.ts →
+ *  DISPLAY_NAME_BY_SUB, from webapp/taxonomy.json) — the single source of truth.
+ *  The previous FRONTEND_SUB_CLASS_OVERRIDES map was removed once taxonomy.json
+ *  was reconciled to the canonical names (DB="Double Block",
+ *  RELIEF_SAFETY="Relief / Safety Valve", PNEUCTRL="Pneumatic Valve"). */
 export const SUB_CLASS_NAMES: Record<string, string> = {
   ...DISPLAY_NAME_BY_SUB,
-  ...FRONTEND_SUB_CLASS_OVERRIDES,
 };
 
 /** Best human label for a YOLO detection on the canvas. Falls back to the raw

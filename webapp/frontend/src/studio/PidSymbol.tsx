@@ -365,18 +365,12 @@ export default function PidSymbol({ kind, className, strokeWidth = 1.5 }: PidSym
  *
  * Unknown inputs return "valve_gen" — PidSymbol itself also falls back to it,
  * but returning it here keeps callers explicit.
+ *
+ * Glyph kinds come entirely from the generated taxonomy module
+ * (GLYPH_KIND_BY_KEY, from webapp/taxonomy.json) — the single source of truth.
+ * The previous FRONTEND_GLYPH_OVERRIDES map was removed once taxonomy.json was
+ * reconciled (valve|NCBV → valve_ncbv, valve|DB → valve_db).
  */
-// Frontend-only glyph overrides that intentionally differ from taxonomy.json's
-// existing 23-class rows so the on-stage glyph renders exactly as it does today:
-//   - valve|NCBV → valve_ncbv  (taxonomy.json's valve_ncbv row maps to valve_bv)
-//   - valve|DB   → valve_db    (taxonomy.json's valve_db row maps to valve_gen)
-// Reconcile these in a later pass once the backend/frontend glyph divergence is
-// intentionally resolved. See StructuredOutput issues note.
-const FRONTEND_GLYPH_OVERRIDES: Record<string, string> = {
-  "valve|NCBV": "valve_ncbv",
-  "valve|DB": "valve_db",
-};
-
 // Equipment Pump/Motor use canonical-cased sub_class in taxonomy.json keys
 // (equipment|Pump). The legacy function uppercased the sub before matching, so
 // also try the raw sub to hit the taxonomy key.
@@ -384,12 +378,9 @@ export function subClassToSymKind(entityClass: string | undefined, subClass: str
   const ec = (entityClass || "").toLowerCase();
   const scUpper = (subClass || "").toUpperCase();
 
-  // 1. Frontend overrides win (preserve today's NCBV / DB glyphs).
-  const upperKey = `${ec}|${scUpper}`;
-  if (FRONTEND_GLYPH_OVERRIDES[upperKey]) return FRONTEND_GLYPH_OVERRIDES[upperKey];
-
-  // 2. Taxonomy mapping — try the raw sub then the upper-cased sub so both
+  // 1. Taxonomy mapping — try the raw sub then the upper-cased sub so both
   //    "Pump" (canonical) and "PUMP" route to the taxonomy "equipment|Pump" key.
+  const upperKey = `${ec}|${scUpper}`;
   const raw = GLYPH_KIND_BY_KEY[`${ec}|${subClass ?? ""}`];
   if (raw) return raw;
   const upper = GLYPH_KIND_BY_KEY[upperKey];

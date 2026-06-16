@@ -34,15 +34,16 @@ export const COLOR_BY_KEY: Record<string, string> = {
   "equipment|Vessel": "#B496DC",
   "equipment|Exchanger": "#DCD486",
   "equipment|Tank": "#DCC68C",
+  "valve|PNEUCTRL": "#EB8070",
 };
 
 export const GLYPH_KIND_BY_KEY: Record<string, string> = {
   "valve|BV": "valve_bv",
-  "valve|NCBV": "valve_bv",
+  "valve|NCBV": "valve_ncbv",
   "valve|GT": "valve_gt",
   "valve|BF": "valve_bf",
   "valve|CK": "valve_ck",
-  "valve|DB": "valve_gen",
+  "valve|DB": "valve_db",
   "valve|RELIEF_SAFETY": "valve_gen",
   "valve|GL": "valve_gl",
   "valve|3WAY_RELIEF": "valve_gen",
@@ -65,6 +66,7 @@ export const GLYPH_KIND_BY_KEY: Record<string, string> = {
   "equipment|Vessel": "inst_field",
   "equipment|Exchanger": "inst_field",
   "equipment|Tank": "inst_field",
+  "valve|PNEUCTRL": "valve_pneuctrl",
 };
 
 export const DISPLAY_NAME_BY_SUB: Record<string, string> = {
@@ -74,7 +76,7 @@ export const DISPLAY_NAME_BY_SUB: Record<string, string> = {
   "BF": "Butterfly Valve",
   "CK": "Check Valve",
   "DB": "Double Block",
-  "RELIEF_SAFETY": "Relief/Safety Valve",
+  "RELIEF_SAFETY": "Relief / Safety Valve",
   "GL": "Globe Valve",
   "3WAY_RELIEF": "3-Way Relief Valve",
   "CV": "Control Valve",
@@ -96,6 +98,7 @@ export const DISPLAY_NAME_BY_SUB: Record<string, string> = {
   "Vessel": "Vessel",
   "Exchanger": "Exchanger",
   "Tank": "Tank",
+  "PNEUCTRL": "Pneumatic Valve",
 };
 
 export const PALETTE_DATA: Record<string, { sub: string; color: string }[]> = {
@@ -115,6 +118,7 @@ export const PALETTE_DATA: Record<string, { sub: string; color: string }[]> = {
     { sub: "VD", color: "#EBA6C6" },
     { sub: "PV", color: "#EB8070" },
     { sub: "SB", color: "#C3B4EC" },
+    { sub: "PNEUCTRL", color: "#EB8070" },
   ],
   "instrument": [
     { sub: "FT", color: "#E5CBA0" },

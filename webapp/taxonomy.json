@@ -2,12 +2,12 @@
   "schema_version": 1,
   "classes": [
     {"order": 0,  "yolo_label": "valve_bv",            "entity_class": "valve",      "sub_class": "BV",            "display_name": "Ball Valve",            "color": "#86D8C4", "glyph_kind": "valve_bv"},
-    {"order": 1,  "yolo_label": "valve_ncbv",          "entity_class": "valve",      "sub_class": "NCBV",          "display_name": "NC Ball Valve",         "color": "#86A8E8", "glyph_kind": "valve_bv"},
+    {"order": 1,  "yolo_label": "valve_ncbv",          "entity_class": "valve",      "sub_class": "NCBV",          "display_name": "NC Ball Valve",         "color": "#86A8E8", "glyph_kind": "valve_ncbv"},
     {"order": 2,  "yolo_label": "valve_gt",            "entity_class": "valve",      "sub_class": "GT",            "display_name": "Gate Valve",            "color": "#7EC9C2", "glyph_kind": "valve_gt"},
     {"order": 3,  "yolo_label": "valve_bf",            "entity_class": "valve",      "sub_class": "BF",            "display_name": "Butterfly Valve",       "color": "#FF6B6B", "glyph_kind": "valve_bf"},
     {"order": 4,  "yolo_label": "valve_ck",            "entity_class": "valve",      "sub_class": "CK",            "display_name": "Check Valve",           "color": "#D8C794", "glyph_kind": "valve_ck"},
-    {"order": 5,  "yolo_label": "valve_db",            "entity_class": "valve",      "sub_class": "DB",            "display_name": "Double Block",          "color": "#7FD4D2", "glyph_kind": "valve_gen"},
-    {"order": 6,  "yolo_label": "valve_relief_safety", "entity_class": "valve",      "sub_class": "RELIEF_SAFETY", "display_name": "Relief/Safety Valve",   "color": "#A8DD92", "glyph_kind": "valve_gen"},
+    {"order": 5,  "yolo_label": "valve_db",            "entity_class": "valve",      "sub_class": "DB",            "display_name": "Double Block",          "color": "#7FD4D2", "glyph_kind": "valve_db"},
+    {"order": 6,  "yolo_label": "valve_relief_safety", "entity_class": "valve",      "sub_class": "RELIEF_SAFETY", "display_name": "Relief / Safety Valve", "color": "#A8DD92", "glyph_kind": "valve_gen"},
     {"order": 7,  "yolo_label": "valve_gl",            "entity_class": "valve",      "sub_class": "GL",            "display_name": "Globe Valve",           "color": "#A8DD92", "glyph_kind": "valve_gl"},
     {"order": 8,  "yolo_label": "valve_3way_relief",   "entity_class": "valve",      "sub_class": "3WAY_RELIEF",   "display_name": "3-Way Relief Valve",    "color": "#C49AE2", "glyph_kind": "valve_gen"},
     {"order": 9,  "yolo_label": "inst_field",          "entity_class": "instrument", "sub_class": null,            "display_name": "Field Instrument",      "color": "#E5CBA0", "glyph_kind": "inst_field"},
@@ -43,7 +43,8 @@
     {"order": 38, "yolo_label": null, "entity_class": "equipment",  "sub_class": "Pump",      "display_name": "Pump",               "color": "#8CCC76", "glyph_kind": "pump"},
     {"order": 39, "yolo_label": null, "entity_class": "equipment",  "sub_class": "Vessel",    "display_name": "Vessel",             "color": "#B496DC", "glyph_kind": "inst_field"},
     {"order": 40, "yolo_label": null, "entity_class": "equipment",  "sub_class": "Exchanger", "display_name": "Exchanger",          "color": "#DCD486", "glyph_kind": "inst_field"},
-    {"order": 41, "yolo_label": null, "entity_class": "equipment",  "sub_class": "Tank",      "display_name": "Tank",               "color": "#DCC68C", "glyph_kind": "inst_field"}
+    {"order": 41, "yolo_label": null, "entity_class": "equipment",  "sub_class": "Tank",      "display_name": "Tank",               "color": "#DCC68C", "glyph_kind": "inst_field"},
+    {"order": 42, "yolo_label": null, "entity_class": "valve",      "sub_class": "PNEUCTRL",  "display_name": "Pneumatic Valve",    "color": "#EB8070", "glyph_kind": "valve_pneuctrl"}
   ],
   "yolo_routing": [
     {"match": "prefix", "value": "valve_",     "entity_class": "valve",      "sub_class": "suffix_upper"},

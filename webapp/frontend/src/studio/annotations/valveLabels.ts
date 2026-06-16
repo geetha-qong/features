@@ -1,21 +1,15 @@
 /**
- * Local copy of the valve sub_class label map. buildElements.ts keeps its own
- * private VALVE_SUB_CLASS_LABELS const that isn't exported; rather than mutate
- * a file outside this phase's scope, the same table is mirrored here. If the
- * two ever drift, fix buildElements.ts to export the map and import it here.
+ * Valve sub_class label lookup for the palette.
+ *
+ * Sourced from the generated taxonomy module (taxonomy.generated.ts →
+ * DISPLAY_NAME_BY_SUB, from webapp/taxonomy.json) — the single source of truth.
+ * Previously this file (and buildElements.ts) kept private hand-maintained
+ * copies that had drifted (e.g. DB = "Double Block" here vs "Diaphragm Valve"
+ * in buildElements). They now both read the taxonomy so a code always renders
+ * the same name everywhere. PalettePanel does `VALVE_SUB_CLASS_LABELS[sub] ?? sub`
+ * and only looks up valve codes, so the extra instrument/equipment keys are
+ * harmless.
  */
-export const VALVE_SUB_CLASS_LABELS: Record<string, string> = {
-  BV: "Ball Valve",
-  BF: "Butterfly Valve",
-  GT: "Gate Valve",
-  CK: "Check Valve",
-  DB: "Double Block",
-  GL: "Globe Valve",
-  CV: "Control Valve",
-  NCBV: "NC Ball Valve",
-  VB: "Block Valve",
-  VF: "Flow Valve",
-  VD: "Drain Valve",
-  PV: "Pressure Valve",
-  SB: "Sample/Bleed Valve",
-};
+import { DISPLAY_NAME_BY_SUB } from "../taxonomy.generated";
+
+export const VALVE_SUB_CLASS_LABELS: Record<string, string> = DISPLAY_NAME_BY_SUB;
