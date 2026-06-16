@@ -35,7 +35,9 @@ def class_names() -> List[str]:
     """Ordered YOLO labels (ONNX channel order). Equivalent to the legacy
     ``inference.CLASS_NAMES`` constant."""
     classes = sorted(load_taxonomy()["classes"], key=lambda c: c["order"])
-    return [c["yolo_label"] for c in classes]
+    # Palette-only canonical classes carry yolo_label=null (they come from OCR,
+    # not the model); skip them so this stays the exact 23-channel ONNX order.
+    return [c["yolo_label"] for c in classes if c["yolo_label"] is not None]
 
 
 def yolo_to_canonical(label: Optional[str]) -> Tuple[Optional[str], Optional[str]]:

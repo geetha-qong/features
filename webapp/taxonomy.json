@@ -23,7 +23,27 @@
     {"order": 19, "yolo_label": "arrow_right",         "entity_class": null,         "sub_class": null,            "display_name": "Arrow Right",           "color": "#9498AE", "glyph_kind": "valve_gen"},
     {"order": 20, "yolo_label": "arrow_down",          "entity_class": null,         "sub_class": null,            "display_name": "Arrow Down",            "color": "#9498AE", "glyph_kind": "valve_gen"},
     {"order": 21, "yolo_label": "connector_out",       "entity_class": null,         "sub_class": null,            "display_name": "Connector Out",         "color": "#9498AE", "glyph_kind": "valve_gen"},
-    {"order": 22, "yolo_label": "connector_in",        "entity_class": null,         "sub_class": null,            "display_name": "Connector In",          "color": "#9498AE", "glyph_kind": "valve_gen"}
+    {"order": 22, "yolo_label": "connector_in",        "entity_class": null,         "sub_class": null,            "display_name": "Connector In",          "color": "#9498AE", "glyph_kind": "valve_gen"},
+
+    {"order": 23, "yolo_label": null, "entity_class": "valve",      "sub_class": "CV",        "display_name": "Control Valve",      "color": "#C49AE2", "glyph_kind": "valve_cv"},
+    {"order": 24, "yolo_label": null, "entity_class": "valve",      "sub_class": "VB",        "display_name": "Block Valve",        "color": "#8EE0CE", "glyph_kind": "valve_gen"},
+    {"order": 25, "yolo_label": null, "entity_class": "valve",      "sub_class": "VF",        "display_name": "Flow Valve",         "color": "#92B4E8", "glyph_kind": "valve_gen"},
+    {"order": 26, "yolo_label": null, "entity_class": "valve",      "sub_class": "VD",        "display_name": "Drain Valve",        "color": "#EBA6C6", "glyph_kind": "valve_gen"},
+    {"order": 27, "yolo_label": null, "entity_class": "valve",      "sub_class": "PV",        "display_name": "Pressure Valve",     "color": "#EB8070", "glyph_kind": "valve_pneuctrl"},
+    {"order": 28, "yolo_label": null, "entity_class": "valve",      "sub_class": "SB",        "display_name": "Sample/Bleed Valve", "color": "#C3B4EC", "glyph_kind": "valve_gen"},
+    {"order": 29, "yolo_label": null, "entity_class": "instrument", "sub_class": "FT",        "display_name": "Flow Tx",            "color": "#E5CBA0", "glyph_kind": "inst_field"},
+    {"order": 30, "yolo_label": null, "entity_class": "instrument", "sub_class": "PT",        "display_name": "Pressure Tx",        "color": "#C5BCEC", "glyph_kind": "inst_field"},
+    {"order": 31, "yolo_label": null, "entity_class": "instrument", "sub_class": "TT",        "display_name": "Temperature Tx",     "color": "#8585D6", "glyph_kind": "inst_field"},
+    {"order": 32, "yolo_label": null, "entity_class": "instrument", "sub_class": "LT",        "display_name": "Level Tx",           "color": "#B4ACE6", "glyph_kind": "inst_field"},
+    {"order": 33, "yolo_label": null, "entity_class": "instrument", "sub_class": "AT",        "display_name": "Analytic Tx",        "color": "#EC9696", "glyph_kind": "inst_field"},
+    {"order": 34, "yolo_label": null, "entity_class": "instrument", "sub_class": "PIC",       "display_name": "Pressure Ctrl",      "color": "#C6C6CE", "glyph_kind": "inst_field"},
+    {"order": 35, "yolo_label": null, "entity_class": "instrument", "sub_class": "FIC",       "display_name": "Flow Ctrl",          "color": "#ACDC90", "glyph_kind": "inst_field"},
+    {"order": 36, "yolo_label": null, "entity_class": "instrument", "sub_class": "TIC",       "display_name": "Temperature Ctrl",   "color": "#ECA666", "glyph_kind": "inst_field"},
+    {"order": 37, "yolo_label": null, "entity_class": "instrument", "sub_class": "LIC",       "display_name": "Level Ctrl",         "color": "#EC8698", "glyph_kind": "inst_field"},
+    {"order": 38, "yolo_label": null, "entity_class": "equipment",  "sub_class": "Pump",      "display_name": "Pump",               "color": "#8CCC76", "glyph_kind": "pump"},
+    {"order": 39, "yolo_label": null, "entity_class": "equipment",  "sub_class": "Vessel",    "display_name": "Vessel",             "color": "#B496DC", "glyph_kind": "inst_field"},
+    {"order": 40, "yolo_label": null, "entity_class": "equipment",  "sub_class": "Exchanger", "display_name": "Exchanger",          "color": "#DCD486", "glyph_kind": "inst_field"},
+    {"order": 41, "yolo_label": null, "entity_class": "equipment",  "sub_class": "Tank",      "display_name": "Tank",               "color": "#DCC68C", "glyph_kind": "inst_field"}
   ],
   "yolo_routing": [
     {"match": "prefix", "value": "valve_",     "entity_class": "valve",      "sub_class": "suffix_upper"},

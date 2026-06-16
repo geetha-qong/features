@@ -21,8 +21,10 @@
  * Adding a new label?
  *  - If it's a new YOLO class: add it to `MODEL_LABEL_NAMES`.
  *  - If it's a new canonical sub_class (from canonical_entities / user-picker):
- *    add it to `SUB_CLASS_NAMES`.
+ *    add it to webapp/taxonomy.json + rerun scripts/gen_taxonomy_ts.py; it
+ *    flows into `SUB_CLASS_NAMES` via DISPLAY_NAME_BY_SUB below.
  */
+import { DISPLAY_NAME_BY_SUB } from "./taxonomy.generated";
 
 /** YOLO model class codes → human label.
  *
@@ -76,42 +78,26 @@ export const MODEL_LABEL_NAMES: Record<string, string> = {
 
 /** Canonical sub_class codes → human label.
  *
- *  Source: webapp/deliverables/canonical_db_index.py + the canonical_entities
- *  backfill. Mirrors the table inside buildElements.ts (extended). */
-export const SUB_CLASS_NAMES: Record<string, string> = {
-  // Valves — YOLO vocabulary
-  BV: "Ball Valve",
-  BF: "Butterfly Valve",
-  GT: "Gate Valve",
-  CK: "Check Valve",
+ *  Base values are sourced from the generated taxonomy module
+ *  (taxonomy.generated.ts → DISPLAY_NAME_BY_SUB, from webapp/taxonomy.json).
+ *  A small `FRONTEND_SUB_CLASS_OVERRIDES` map preserves three frontend-only
+ *  names that differ from / are absent in taxonomy.json so canvas labels render
+ *  byte-identically to before:
+ *    - DB             → "Diaphragm Valve"  (taxonomy.json says "Double Block")
+ *    - RELIEF_SAFETY  → "Relief / Safety Valve"  (taxonomy.json: "Relief/Safety Valve")
+ *    - PNEUCTRL       → "Pneumatic Valve"  (no taxonomy.json row — model-only code)
+ *  See FEATURES taxonomy phase 3 + the StructuredOutput issues note. Reconcile
+ *  these in a later pass once the backend/frontend display-name divergence is
+ *  intentionally resolved. */
+const FRONTEND_SUB_CLASS_OVERRIDES: Record<string, string> = {
   DB: "Diaphragm Valve",
-  GL: "Globe Valve",
-  CV: "Control Valve",
-  NCBV: "NC Ball Valve",
-  PNEUCTRL: "Pneumatic Valve",
   RELIEF_SAFETY: "Relief / Safety Valve",
-  "3WAY_RELIEF": "3-Way Relief Valve",
-  // Valves — customer/CSV codes from canonical_entities
-  VB: "Block Valve",
-  VF: "Flow Valve",
-  VD: "Drain Valve",
-  PV: "Pressure Valve",
-  SB: "Sample/Bleed Valve",
-  // Instruments (sub_class on canonical_entities + PalettePanel rows)
-  FT:  "Flow Tx",
-  PT:  "Pressure Tx",
-  TT:  "Temperature Tx",
-  LT:  "Level Tx",
-  AT:  "Analytic Tx",
-  PIC: "Pressure Ctrl",
-  FIC: "Flow Ctrl",
-  TIC: "Temperature Ctrl",
-  LIC: "Level Ctrl",
-  // Equipment
-  Pump:      "Pump",
-  Vessel:    "Vessel",
-  Exchanger: "Exchanger",
-  Tank:      "Tank",
+  PNEUCTRL: "Pneumatic Valve",
+};
+
+export const SUB_CLASS_NAMES: Record<string, string> = {
+  ...DISPLAY_NAME_BY_SUB,
+  ...FRONTEND_SUB_CLASS_OVERRIDES,
 };
 
 /** Best human label for a YOLO detection on the canvas. Falls back to the raw
