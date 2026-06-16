@@ -12,6 +12,7 @@
  * category→entity_class scheme (CategoryDef.key, used as `sub_class`'s class).
  */
 import { subClassToSymKind } from "./PidSymbol";
+import { COLOR_BY_KEY } from "./taxonomy.generated";
 
 export const NEUTRAL_COLOR = "#9498AE";
 
@@ -22,9 +23,13 @@ export interface PaletteEntry {
   color: string;
 }
 
-// MOVED from PalettePanel.tsx — exact sub codes + hex preserved.
-// Grouped by entity_class. Valve labels are resolved in PalettePanel via
-// VALVE_SUB_CLASS_LABELS, so they intentionally carry no `label` here.
+// Palette membership + sub-class display order live here (unchanged from the
+// original PalettePanel tables); the HEX COLOR for each entry is now sourced
+// from the generated taxonomy module (taxonomy.generated.ts → COLOR_BY_KEY),
+// whose values come from webapp/taxonomy.json — the single source of truth.
+//
+// Valve labels are resolved in PalettePanel via VALVE_SUB_CLASS_LABELS, so they
+// intentionally carry no `label` here.
 //
 // HOTKEY HINTS: intentionally NOT defined here. The palette badge is sourced
 // from the live merged-with-defaults shortcut map (PalettePanel's
@@ -34,48 +39,58 @@ export interface PaletteEntry {
 // so an unbound class like "DB" fell back to the static "3" and pressing it
 // triggered draw-edge instead of selecting the class. Unbound classes now show
 // no badge until the user assigns one at /account/shortcuts.
-export const PALETTE: Record<string, PaletteEntry[]> = {
+
+// (entity_class, sub) order + optional palette label. Color is filled from the
+// generated map below so a class shows one consistent hex everywhere.
+const PALETTE_LAYOUT: Record<string, { sub: string; label?: string }[]> = {
   valve: [
-    { sub: "BV", color: "#86D8C4" },
-    { sub: "BF", color: "#FF6B6B" },
-    { sub: "GT", color: "#7EC9C2" },
-    { sub: "CK", color: "#D8C794" },
-    { sub: "DB", color: "#7FD4D2" },
-    { sub: "GL", color: "#A8DD92" },
-    { sub: "CV", color: "#C49AE2" },
-    { sub: "NCBV", color: "#86A8E8" },
-    { sub: "VB", color: "#8EE0CE" },
-    { sub: "VF", color: "#92B4E8" },
-    { sub: "VD", color: "#EBA6C6" },
-    { sub: "PV", color: "#EB8070" },
-    { sub: "SB", color: "#C3B4EC" },
+    { sub: "BV" },
+    { sub: "BF" },
+    { sub: "GT" },
+    { sub: "CK" },
+    { sub: "DB" },
+    { sub: "GL" },
+    { sub: "CV" },
+    { sub: "NCBV" },
+    { sub: "VB" },
+    { sub: "VF" },
+    { sub: "VD" },
+    { sub: "PV" },
+    { sub: "SB" },
   ],
   instrument: [
-    { sub: "FT", label: "Flow Tx", color: "#E5CBA0" },
-    { sub: "PT", label: "Pressure Tx", color: "#C5BCEC" },
-    { sub: "TT", label: "Temp Tx", color: "#8585D6" },
-    { sub: "LT", label: "Level Tx", color: "#B4ACE6" },
-    { sub: "AT", label: "Analytic Tx", color: "#EC9696" },
-    { sub: "PIC", label: "Pressure Controller", color: "#C6C6CE" },
-    { sub: "FIC", label: "Flow Controller", color: "#ACDC90" },
-    { sub: "TIC", label: "Temp Controller", color: "#ECA666" },
-    { sub: "LIC", label: "Level Controller", color: "#EC8698" },
+    { sub: "FT", label: "Flow Tx" },
+    { sub: "PT", label: "Pressure Tx" },
+    { sub: "TT", label: "Temp Tx" },
+    { sub: "LT", label: "Level Tx" },
+    { sub: "AT", label: "Analytic Tx" },
+    { sub: "PIC", label: "Pressure Controller" },
+    { sub: "FIC", label: "Flow Controller" },
+    { sub: "TIC", label: "Temp Controller" },
+    { sub: "LIC", label: "Level Controller" },
   ],
   equipment: [
-    { sub: "Pump", label: "Pump", color: "#8CCC76" },
-    { sub: "Vessel", label: "Vessel", color: "#B496DC" },
-    { sub: "Exchanger", label: "Exchanger", color: "#DCD486" },
-    { sub: "Tank", label: "Tank", color: "#DCC68C" },
+    { sub: "Pump", label: "Pump" },
+    { sub: "Vessel", label: "Vessel" },
+    { sub: "Exchanger", label: "Exchanger" },
+    { sub: "Tank", label: "Tank" },
   ],
 };
 
-const SUB_INDEX = new Map<string, string>(); // "valve|BV" -> hex
-for (const [cls, entries] of Object.entries(PALETTE))
-  for (const e of entries) SUB_INDEX.set(`${cls}|${e.sub}`, e.color);
+function paletteColor(cls: string, sub: string): string {
+  return COLOR_BY_KEY[`${cls}|${sub}`] ?? NEUTRAL_COLOR;
+}
+
+export const PALETTE: Record<string, PaletteEntry[]> = Object.fromEntries(
+  Object.entries(PALETTE_LAYOUT).map(([cls, entries]) => [
+    cls,
+    entries.map((e) => ({ ...e, color: paletteColor(cls, e.sub) })),
+  ]),
+);
 
 export function colorForSubClass(entityClass?: string, sub?: string): string {
   if (!entityClass || !sub) return NEUTRAL_COLOR;
-  return SUB_INDEX.get(`${entityClass}|${sub}`) ?? NEUTRAL_COLOR;
+  return COLOR_BY_KEY[`${entityClass}|${sub}`] ?? NEUTRAL_COLOR;
 }
 
 // Derive kind -> color by running each palette sub through the shared mapper.

@@ -15,6 +15,7 @@
  * (palette, element rows) use so the glyph for a given class is consistent.
  */
 import type { ReactNode } from "react";
+import { GLYPH_KIND_BY_KEY } from "./taxonomy.generated";
 
 interface PidSymbolProps {
   kind: string;
@@ -364,48 +365,36 @@ export default function PidSymbol({ kind, className, strokeWidth = 1.5 }: PidSym
  *
  * Unknown inputs return "valve_gen" — PidSymbol itself also falls back to it,
  * but returning it here keeps callers explicit.
+ *
+ * Glyph kinds come entirely from the generated taxonomy module
+ * (GLYPH_KIND_BY_KEY, from webapp/taxonomy.json) — the single source of truth.
+ * The previous FRONTEND_GLYPH_OVERRIDES map was removed once taxonomy.json was
+ * reconciled (valve|NCBV → valve_ncbv, valve|DB → valve_db).
  */
+// Equipment Pump/Motor use canonical-cased sub_class in taxonomy.json keys
+// (equipment|Pump). The legacy function uppercased the sub before matching, so
+// also try the raw sub to hit the taxonomy key.
 export function subClassToSymKind(entityClass: string | undefined, subClass: string | undefined): string {
   const ec = (entityClass || "").toLowerCase();
-  const sc = (subClass || "").toUpperCase();
+  const scUpper = (subClass || "").toUpperCase();
 
-  if (ec === "valve") {
-    switch (sc) {
-      case "BV":
-        return "valve_bv";
-      case "BF":
-        return "valve_bf";
-      case "GT":
-        return "valve_gt";
-      case "CK":
-        return "valve_ck";
-      case "DB":
-        return "valve_db";
-      case "GL":
-        return "valve_gl";
-      case "CV":
-        return "valve_cv";
-      case "NCBV":
-        return "valve_ncbv";
-      case "PV":
-        return "valve_pneuctrl";
-      // VB / VF / VD / SB and any other valve code → generic valve glyph.
-      default:
-        return "valve_gen";
-    }
-  }
+  // 1. Taxonomy mapping — try the raw sub then the upper-cased sub so both
+  //    "Pump" (canonical) and "PUMP" route to the taxonomy "equipment|Pump" key.
+  const upperKey = `${ec}|${scUpper}`;
+  const raw = GLYPH_KIND_BY_KEY[`${ec}|${subClass ?? ""}`];
+  if (raw) return raw;
+  const upper = GLYPH_KIND_BY_KEY[upperKey];
+  if (upper) return upper;
 
-  if (ec === "instrument") {
-    // FT / PT / TT / LT and any other transmitter/controller → field instrument.
-    return "inst_field";
-  }
-
+  // 3. Class-level fallbacks for sub_classes with no taxonomy row.
+  if (ec === "instrument") return "inst_field";
   if (ec === "equipment") {
-    if (sc === "PUMP") return "pump";
-    if (sc === "MOTOR") return "Motor";
+    if (scUpper === "PUMP") return "pump";
+    if (scUpper === "MOTOR") return "Motor";
     return "inst_field";
   }
 
+  // VB / VF / VD / SB and any other valve code → generic valve glyph.
   return "valve_gen";
 }
 

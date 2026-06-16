@@ -170,4 +170,53 @@ export const searchEntities = (f: EntitySearchFilters = {}) => {
   return call<EntitySearchResp>("GET", `/api/v1/admin/entities${q ? "?" + q : ""}`);
 };
 
+// Taxonomy + label triage (Phase 4c — unified-taxonomy track)
+export interface TaxonomyClass {
+  order?: number;
+  yolo_label: string | null;
+  entity_class: string | null;
+  sub_class: string | null;
+  display_name: string;
+  color: string;
+  glyph_kind: string;
+}
+export interface TaxonomyResp {
+  schema_version: number;
+  classes: TaxonomyClass[];
+  yolo_routing: Array<Record<string, unknown>>;
+}
+export interface LabelTriageItem {
+  id: number;
+  label_value: string;
+  source: string | null;
+  discovered_at: string | null;
+  status: string;
+  assigned_entity_class: string | null;
+  assigned_sub_class: string | null;
+  assigned_display_name: string | null;
+  assigned_color: string | null;
+  assigned_glyph_kind: string | null;
+  decided_by_user_id: number | null;
+  decided_at: string | null;
+  notes: string | null;
+}
+export interface ClassifyTriagePayload {
+  action: "approve" | "ignore" | "reject";
+  entity_class?: string;
+  sub_class?: string;
+  display_name?: string;
+  color?: string;
+  glyph_kind?: string;
+}
+
+export const getTaxonomy = () =>
+  call<TaxonomyResp>("GET", "/api/v1/admin/taxonomy");
+export const listLabelTriage = (status = "pending") =>
+  call<{ items: LabelTriageItem[]; status: string }>(
+    "GET",
+    `/api/v1/admin/label-triage?status=${encodeURIComponent(status)}`,
+  );
+export const classifyLabelTriage = (id: number, payload: ClassifyTriagePayload) =>
+  call<LabelTriageItem>("POST", `/api/v1/admin/label-triage/${id}/classify`, payload);
+
 export { HttpError };

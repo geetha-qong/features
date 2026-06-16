@@ -28,6 +28,7 @@ from webapp.config import JOB_OUTPUT_DIR, get_job_dir, get_user_upload_dir
 from webapp.database import get_db
 from webapp.queue import get_cpu_queue
 from webapp.routers.jobs import RQ_JOB_TIMEOUT_SECONDS
+from webapp.taxonomy import yolo_to_canonical
 
 router = APIRouter(prefix="/api/v1", tags=["api_v1"])
 
@@ -267,19 +268,12 @@ def _yolo_class_to_canonical(label: Optional[str]) -> tuple:
     Returns ``(None, None)`` for labels that don't correspond to a canonical
     entity (direction arrows, unknown classes). Detection of those labels
     will not be paired with any entity.
+
+    Thin delegator to the taxonomy module (single source of truth, FEATURES
+    taxonomy phase 2) — the routing rules now live in webapp/taxonomy.json.
+    Name + signature kept stable for the two call sites in this module.
     """
-    if not label:
-        return None, None
-    if label.startswith("valve_"):
-        return "valve", label[len("valve_"):].upper()
-    if label.startswith("inst_") or label in {"interlock", "SIS-R"}:
-        return "instrument", None
-    # v1-9 used "Pump_Dwg_Pump" (underscore); v1-10 uses "Pump/Dwg Pump" — handle both
-    if label in {"Motor", "Pump/Dwg Pump", "Pump_Dwg_Pump"}:
-        return "equipment", None
-    if label.startswith("arrow_") or label.startswith("connector_"):
-        return None, None  # direction labels are not editable entities
-    return None, None
+    return yolo_to_canonical(label)
 
 
 def _normalize_detection_shape(detections: list) -> None:
@@ -397,6 +391,58 @@ def _attach_entity_ids(detections: list, entities: list) -> None:
             det.setdefault("entity_class", entity_class)
 
 
+def _discover_unknown_labels(detections: list, db: Session) -> None:
+    """Best-effort: upsert a ``LabelTriage`` row for any detection whose YOLO
+    label has no taxonomy match.
+
+    A label is "unknown" when :func:`yolo_to_canonical` returns ``(None, None)``
+    AND the label is not an intentional non-entity direction marker
+    (``arrow_*`` / ``connector_*``). Those carry geometry only and are never
+    promoted to entities, so we must not file triage rows for them.
+
+    Dedup is on ``label_value`` (unique column) — re-discovery of the same raw
+    label is a no-op. Entirely non-fatal: any DB/parse error is swallowed and
+    logged so the detections response is never broken.
+    """
+    try:
+        seen: set = set()
+        for det in detections:
+            label = det.get("label") or det.get("yolo_class")
+            if not label or label in seen:
+                continue
+            seen.add(label)
+            if label.startswith("arrow_") or label.startswith("connector_"):
+                continue
+            cls, sub = yolo_to_canonical(label)
+            if cls is not None or sub is not None:
+                continue  # has a taxonomy match
+            exists = (
+                db.query(models.LabelTriage)
+                .filter(models.LabelTriage.label_value == label)
+                .first()
+            )
+            if exists:
+                continue
+            db.add(
+                models.LabelTriage(
+                    label_value=label,
+                    source="detection",
+                    status="pending",
+                )
+            )
+        db.commit()
+    except Exception:  # noqa: BLE001 — discovery must never break the response
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "label discovery failed during detections enrichment", exc_info=True
+        )
+
+
 @router.get("/jobs/{job_id}/detections")
 async def api_job_detections(
     job_id: int,
@@ -456,6 +502,10 @@ async def api_job_detections(
     # in-process inference shape the frontend expects (bbox, label, tile).
     if detections:
         _normalize_detection_shape(detections)
+        # Discovery hook: file triage rows for YOLO labels with no taxonomy
+        # match (non-fatal). Runs post-normalisation so `label` is populated
+        # for legacy `yolo_class` rows too.
+        _discover_unknown_labels(detections, db)
 
     if detections and job.output_csv_path:
         try:
