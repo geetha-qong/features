@@ -46,7 +46,7 @@ except ImportError:  # pragma: no cover
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-MODEL_PATH = "/app/models/v1-10.onnx"
+MODEL_PATH = "/app/models/v1-11.onnx"
 IMGSZ = 640
 CONF_THRESH = 0.50
 
