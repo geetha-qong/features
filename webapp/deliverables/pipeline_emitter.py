@@ -211,6 +211,22 @@ def _make_entity_uuid(job_id: int, entity_class: str, tag: Optional[str], idx: i
     return uuid.uuid5(uuid.NAMESPACE_DNS, key)
 
 
+def _sheet_from_row(row: dict) -> int:
+    """Read the 1-based "Sheet" column from a CSV row.
+
+    Returns 1 when the column is absent, blank, or non-integer — this preserves
+    correctness for legacy CSVs written before the multi-page "Sheet" column was
+    added (single-page jobs were always sheet 1).
+    """
+    raw = row.get("Sheet")
+    if raw is None or str(raw).strip() == "":
+        return 1
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 1
+
+
 def _build_valve_entities(valve_csv: Path, job_id: int) -> List[CanonicalEntity]:
     """Parse valve_list.csv and return a list of CanonicalEntity objects."""
     entities: List[CanonicalEntity] = []
@@ -253,7 +269,7 @@ def _build_valve_entities(valve_csv: Path, job_id: int) -> List[CanonicalEntity]
                     sub_class=category,
                     tag=tag,
                     pid_number=row.get("P&ID No", ""),
-                    sheet_number=1,
+                    sheet_number=_sheet_from_row(row),
                     bbox=(0.0, 0.0, 0.0, 0.0),
                     fields=fields,
                     vendor_match=None,
@@ -356,7 +372,7 @@ def _build_instrument_entities(instrument_csv: Path, job_id: int) -> List[Canoni
                     sub_class=row.get("INSTRUMENT TYPE DESCRIPTION", ""),
                     tag=tag,
                     pid_number=row.get("P&ID", ""),
-                    sheet_number=1,
+                    sheet_number=_sheet_from_row(row),
                     bbox=(0.0, 0.0, 0.0, 0.0),
                     fields=fields,
                     vendor_match=vendor_match,

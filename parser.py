@@ -113,6 +113,7 @@ class ValveRow:
     pneumatic_actuator: str = "-"
     solenoid: str = "-"
     line: str = ""
+    page: int = 0  # 0-based source page index; CSV "Sheet" column = page + 1
     raw_tag: str = field(default="", repr=False)
     confidence: float = field(default=0.0, repr=False)
     _series_codes: list = field(default_factory=list, repr=False)
@@ -141,6 +142,7 @@ class ValveRow:
             "Pneumatic Actuator ": self.pneumatic_actuator,
             "Solenoid": self.solenoid,
             "line": self.line,
+            "Sheet": (self.page or 0) + 1,  # 1-based sheet number for multi-page jobs
         }
 
 
@@ -376,6 +378,7 @@ def build_valve_row(raw: dict, pid_no: str = "") -> Optional[ValveRow]:
         pneumatic_actuator=act_cols["pneumatic"],
         solenoid=act_cols["solenoid"],
         line=raw.get("line_number") or "",
+        page=int(raw.get("page", 0) or 0),
         raw_tag=tag,
         confidence=float(raw.get("confidence", 0.0)),
         _series_codes=series_codes,

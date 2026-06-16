@@ -32,6 +32,78 @@ def _write_instrument_csv(path: Path) -> None:
         csv.writer(f).writerows(rows)
 
 
+def _write_valve_csv_with_sheet(path: Path) -> None:
+    """valve_list.csv WITH the multi-page 'Sheet' column (1-based)."""
+    rows = [
+        ['P&ID No','Dynamic Code','Category','Size','Area Code','Serial No','Series Code','Fluid Code','Piping Class','Qty','Motor Actuator','Pneumatic Actuator ','Solenoid','line','Sheet'],
+        ['MUK','-','GL','8','62','151000','-','G','AC-PP','1','-','-','-','8"-G-62151004-AC-PP','1'],
+        ['MUK','-','BV','2','62','151001','-','LO','AC','1','-','-','-','2"-LO-62151004-AC','3'],
+    ]
+    with path.open("w", newline="") as f:
+        csv.writer(f).writerows(rows)
+
+
+def test_emit_valves_with_sheet_column(tmp_path):
+    """valve_list.csv WITH a 'Sheet' column → entities carry the right sheet_number."""
+    job_dir = tmp_path / "50"
+    job_dir.mkdir()
+    _write_valve_csv_with_sheet(job_dir / "valve_list.csv")
+
+    result = write_canonical_for_job(job_dir=job_dir, job_id=50)
+    job = JobCanonical.model_validate(json.loads(result.canonical_path.read_text()))
+    sheets = {e.tag: e.sheet_number for e in job.entities}
+    assert sheets["62-GL-151000"] == 1
+    assert sheets["62-BV-151001"] == 3
+
+
+def test_emit_valves_without_sheet_column_defaults_to_1(tmp_path):
+    """Legacy valve_list.csv WITHOUT a 'Sheet' column → sheet_number defaults to 1."""
+    job_dir = tmp_path / "51"
+    job_dir.mkdir()
+    _write_valve_csv(job_dir / "valve_list.csv")  # no Sheet column
+
+    result = write_canonical_for_job(job_dir=job_dir, job_id=51)
+    job = JobCanonical.model_validate(json.loads(result.canonical_path.read_text()))
+    assert job.entities  # sanity
+    for e in job.entities:
+        assert e.sheet_number == 1
+
+
+def _write_instrument_csv_with_sheet(path: Path, sheet: str) -> None:
+    """instrumentation_index.csv (emitter schema) WITH a 'Sheet' column."""
+    headers = ['TAG NUMBER','INSTRUMENT TYPE DESCRIPTION','P&ID','Sheet']
+    rows = [headers, ['422-11-PT-006A','PT','VEN-M5BC-6-50-0002', sheet]]
+    with path.open("w", newline="") as f:
+        csv.writer(f).writerows(rows)
+
+
+def test_emit_instruments_with_sheet_column(tmp_path):
+    """instrumentation_index.csv WITH a 'Sheet' column → sheet_number honoured."""
+    job_dir = tmp_path / "52"
+    job_dir.mkdir()
+    _write_instrument_csv_with_sheet(job_dir / "instrumentation_index.csv", "4")
+
+    result = write_canonical_for_job(job_dir=job_dir, job_id=52)
+    job = JobCanonical.model_validate(json.loads(result.canonical_path.read_text()))
+    instruments = [e for e in job.entities if e.entity_class == "instrument"]
+    assert instruments
+    assert all(e.sheet_number == 4 for e in instruments)
+
+
+def test_emit_instruments_without_sheet_column_defaults_to_1(tmp_path):
+    """Legacy instrumentation_index.csv WITHOUT 'Sheet' → sheet_number defaults to 1."""
+    job_dir = tmp_path / "53"
+    job_dir.mkdir()
+    _write_instrument_csv(job_dir / "instrumentation_index.csv")  # no Sheet column
+
+    result = write_canonical_for_job(job_dir=job_dir, job_id=53)
+    job = JobCanonical.model_validate(json.loads(result.canonical_path.read_text()))
+    instruments = [e for e in job.entities if e.entity_class == "instrument"]
+    assert instruments
+    for e in instruments:
+        assert e.sheet_number == 1
+
+
 def test_emit_valves_only(tmp_path):
     """If only valve_list.csv exists, canonical.json has only valve entities."""
     job_dir = tmp_path / "42"

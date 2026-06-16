@@ -169,6 +169,7 @@ def pass1_tile(tile: dict, client: OpenAI, model: str) -> list:
     for v in valves:
         v["tile_row"] = tile["row"]
         v["tile_col"] = tile["col"]
+        v["page"] = tile.get("page", 0)
     return valves
 
 
@@ -461,6 +462,7 @@ def extract_instruments(tiles: list, drawing_description: str = "", model: str =
             for inst in instruments:
                 inst["tile_row"] = tile["row"]
                 inst["tile_col"] = tile["col"]
+                inst["page"] = page
                 # Stamp the page-specific contractor pid_no on every detection
                 # so the parser uses the correct per-page value (deliverable expects
                 # 05011-CPP-...-0002 for page 1's instruments, ...-0003 for page 2, etc.).

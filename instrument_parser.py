@@ -206,6 +206,7 @@ class InstrumentRow:
     model: str = "TBD"
     status: str = "TBD"
     remarks: str = ""
+    page: int = 0  # 0-based source page index; CSV "Sheet" column = page + 1
 
     def to_csv_dict(self) -> dict:
         return {
@@ -230,6 +231,7 @@ class InstrumentRow:
             "MODEL":                            self.model,
             "STATUS":                           self.status,
             "REMARKS":                          self.remarks,
+            "Sheet":                            (self.page or 0) + 1,  # 1-based sheet number for multi-page jobs
         }
 
 
@@ -370,6 +372,7 @@ def build_instrument_row(raw: dict, pid_no: str = "") -> Optional[InstrumentRow]
         location=_norm(raw.get("location"), "FIELD" if power_default != "TBD" else "TBD"),
         # Per-page pid_no from raw dict wins over the function-level fallback
         pid_no=_norm(raw.get("pid_no"), pid_no),
+        page=int(raw.get("page", 0) or 0),
     )
 
 
