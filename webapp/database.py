@@ -138,32 +138,38 @@ def run_migrations():
             """))
             conn.commit()
 
-    # Ensure default admin account exists with fixed credentials (admin / admin)
-    with engine.connect() as conn:
-        # Guard on BOTH email and username: the unique constraint is on
-        # `username`, so an env that already has an `admin` user (different
-        # email — e.g. dev/qa restored from a pg_dump) would hit a
-        # UniqueViolation and crash-loop the web container if we only checked
-        # email. ON CONFLICT DO NOTHING is belt-and-braces against a race.
-        row = conn.execute(
-            text("SELECT id FROM users WHERE email = 'admin@qong.local' OR username = 'admin'")
-        ).fetchone()
-        if not row:
-            from webapp.auth import pwd_context
-            conn.execute(text("""
-                INSERT INTO users (username, email, password_hash, role, is_active, credits_remaining)
-                VALUES ('admin', 'admin@qong.local', :ph, 'super_admin', TRUE, 999)
-                ON CONFLICT (username) DO NOTHING
-            """), {"ph": pwd_context.hash("admin")})
-            conn.commit()
-            print("[startup] Created default admin user (admin@qong.local / admin)")
-        else:
-            # Always keep password in sync so restarting the container resets it
-            from webapp.auth import pwd_context
-            conn.execute(text(
-                "UPDATE users SET password_hash = :ph WHERE email = 'admin@qong.local'"
-            ), {"ph": pwd_context.hash("admin")})
-            conn.commit()
+    # Optional initial-admin bootstrap. SECURITY (CRITICAL finding): never
+    # hard-code credentials and never reset a password on restart. The previous
+    # code seeded admin/admin as super_admin and re-applied "admin" on every
+    # boot — exploitable on any reachable env. We now ONLY create an admin when
+    # both INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD are set AND no
+    # super_admin exists yet, and we never overwrite an existing user. Existing
+    # envs (dev/qa/prod/local with a persisted volume) already have an admin, so
+    # this is a no-op there; a brand-new DB sets the env vars to bootstrap.
+    import os
+
+    boot_email = os.environ.get("INITIAL_ADMIN_EMAIL")
+    boot_pw = os.environ.get("INITIAL_ADMIN_PASSWORD")
+    if boot_email and boot_pw:
+        with engine.connect() as conn:
+            has_admin = conn.execute(
+                text("SELECT id FROM users WHERE role = 'super_admin' LIMIT 1")
+            ).fetchone()
+            if not has_admin:
+                from webapp.auth import pwd_context
+
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO users (username, email, password_hash, role, is_active, credits_remaining)
+                        VALUES (:u, :e, :ph, 'super_admin', TRUE, 999)
+                        ON CONFLICT (username) DO NOTHING
+                        """
+                    ),
+                    {"u": boot_email.split("@")[0], "e": boot_email, "ph": pwd_context.hash(boot_pw)},
+                )
+                conn.commit()
+                print(f"[startup] Bootstrapped initial super_admin {boot_email} from INITIAL_ADMIN_* env")
 
 
 def get_db():
