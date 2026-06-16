@@ -24,6 +24,46 @@
 
 ---
 
+## [2026-06-16] #49 — Unified symbol taxonomy + label triage (Phases 1–4)
+
+**Type:** architecture, feature
+**Stage:** symbols, webapp, infra
+**Status:** experimental (branch `feat/taxonomy-foundation`, NOT merged — PR review pending)
+
+**Why:** The same symbol classes were defined in ~7 places (inference `CLASS_NAMES`,
+`api_v1._yolo_class_to_canonical`, `paletteColors.ts`, `labelMap.ts`,
+`PidSymbol.subClassToSymKind`, `ls_label_config.xml`, instrument codes) with no
+single source of truth, and a newly-annotated LS label never flowed back into the
+app. Spec: `docs/superpowers/specs/2026-06-16-unified-taxonomy-design.md`.
+
+**What (7 commits, built via a 7-agent sequential workflow + parity gates):**
+- **P1** `webapp/taxonomy.json` (source of truth) + `webapp/taxonomy.py`
+  (`load_taxonomy`/`class_names`/`yolo_to_canonical`/`display_name`/`color`/`glyph_kind`).
+- **P2** `inference.CLASS_NAMES = class_names()`; `_yolo_class_to_canonical` delegates
+  to `taxonomy.yolo_to_canonical`. Parity test pins both consumers against frozen
+  literals (non-tautological gate).
+- **P3** `taxonomy.json` expanded with 19 palette-only canonical classes
+  (yolo_label=null); `scripts/gen_taxonomy_ts.py` → `taxonomy.generated.ts`;
+  `paletteColors`/`labelMap`/`PidSymbol` source from it. vitest parity snapshot.
+- **P4a** `LabelTaxonomy` + `LabelTriage` tables + idempotent `taxonomy_db.sync_taxonomy_to_db`
+  (startup, non-fatal). **P4b** admin API `/api/v1/admin/taxonomy` + `/label-triage` +
+  `/label-triage/{id}/classify` (super_admin). **P4c** `/admin/label-triage` UI.
+  **P4d** unknown-label discovery hook in `api_job_detections` + `scripts/gen_ls_label_config.py`.
+
+**Result (verified independently):** backend 279 pass / 6 fail (all 6 PRE-EXISTING:
+5 in `deliverables/` — untouched by this branch — + `test_sheets_empty_when_no_tiles`
+stale-tile env artifact); frontend `tsc` clean, 112/112 vitest. `webapp/deliverables/`
+untouched by the diff.
+
+**Notes:** Behavior preserved via FRONTEND override maps where my Phase-1 seed
+diverged from the live frontend values — **must reconcile** (pick canonical side,
+remove overrides): `DB` display "Double Block"(json) vs "Diaphragm Valve"(FE);
+`RELIEF_SAFETY` spacing; `PNEUCTRL` FE-only; `NCBV`/`DB` glyph kinds. `LabelTaxonomy.order`
+mapped to DB column `display_order` (SQL reserved word). `classify` rewrites
+`taxonomy.json` with `json.dump(indent=2)` (reformats the compact hand-format on append).
+
+---
+
 ## [2026-06-16] #48 — Local Docker build no longer requires a model PAT (model-bake skip)
 
 **Type:** infra, bugfix
