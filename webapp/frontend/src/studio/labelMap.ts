@@ -36,7 +36,7 @@ export const MODEL_LABEL_NAMES: Record<string, string> = {
   valve_bv: "Ball Valve",
   valve_ck: "Check Valve",
   valve_cv: "Control Valve",
-  valve_db: "Diaphragm Valve",
+  valve_db: "Double Block",
   valve_gen: "Valve",
   valve_gl: "Globe Valve",
   valve_gt: "Gate Valve",
