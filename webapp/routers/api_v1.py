@@ -28,6 +28,7 @@ from webapp.config import JOB_OUTPUT_DIR, get_job_dir, get_user_upload_dir
 from webapp.database import get_db
 from webapp.queue import get_cpu_queue
 from webapp.routers.jobs import RQ_JOB_TIMEOUT_SECONDS
+from webapp.taxonomy import yolo_to_canonical
 
 router = APIRouter(prefix="/api/v1", tags=["api_v1"])
 
@@ -267,19 +268,12 @@ def _yolo_class_to_canonical(label: Optional[str]) -> tuple:
     Returns ``(None, None)`` for labels that don't correspond to a canonical
     entity (direction arrows, unknown classes). Detection of those labels
     will not be paired with any entity.
+
+    Thin delegator to the taxonomy module (single source of truth, FEATURES
+    taxonomy phase 2) — the routing rules now live in webapp/taxonomy.json.
+    Name + signature kept stable for the two call sites in this module.
     """
-    if not label:
-        return None, None
-    if label.startswith("valve_"):
-        return "valve", label[len("valve_"):].upper()
-    if label.startswith("inst_") or label in {"interlock", "SIS-R"}:
-        return "instrument", None
-    # v1-9 used "Pump_Dwg_Pump" (underscore); v1-10 uses "Pump/Dwg Pump" — handle both
-    if label in {"Motor", "Pump/Dwg Pump", "Pump_Dwg_Pump"}:
-        return "equipment", None
-    if label.startswith("arrow_") or label.startswith("connector_"):
-        return None, None  # direction labels are not editable entities
-    return None, None
+    return yolo_to_canonical(label)
 
 
 def _normalize_detection_shape(detections: list) -> None:

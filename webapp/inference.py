@@ -27,6 +27,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from webapp.taxonomy import class_names
+
 # Pillow is required for tile reading; it's already a base dep.
 try:
     from PIL import Image
@@ -62,34 +64,13 @@ IOU_THRESH = 0.45
 #            labels (arrow_*, connector_in/out)
 #   dropped: valve_cv, valve_gen, DCS, PLC, interlock-R, inst_field-R,
 #            valve_pnuectrl typo (all had <100 LS annotations — too thin)
-CLASS_NAMES: List[str] = [
-    # Valves (9)
-    "valve_bv",            # 0
-    "valve_ncbv",          # 1
-    "valve_gt",            # 2
-    "valve_bf",            # 3
-    "valve_ck",            # 4
-    "valve_db",            # 5
-    "valve_relief_safety", # 6
-    "valve_gl",            # 7
-    "valve_3way_relief",   # 8
-    # Instruments / signals (8)
-    "inst_field",          # 9
-    "inst_bpcs",           # 10
-    "Motor",               # 11
-    "Pump/Dwg Pump",       # 12  (note: contains slash + space — was Pump_Dwg_Pump in v1-9)
-    "inst_sis",            # 13
-    "SIS-R",               # 14
-    "interlock",           # 15
-    "inst_local_panel",    # 16
-    # Direction (6 — new in v1-10)
-    "arrow_up",            # 17
-    "arrow_left",          # 18
-    "arrow_right",         # 19
-    "arrow_down",          # 20
-    "connector_out",       # 21
-    "connector_in",        # 22
-]
+#
+# The list itself is now sourced from webapp/taxonomy.json via
+# taxonomy.class_names() (single source of truth, FEATURES taxonomy phase 2).
+# The label strings and their ONNX channel order are unchanged — the
+# `len(CLASS_NAMES) == 23` head-shape check in `_decode` still holds. The
+# comment above is retained as documentation of the v1-10 class set.
+CLASS_NAMES: List[str] = class_names()
 
 
 class InferenceError(RuntimeError):
