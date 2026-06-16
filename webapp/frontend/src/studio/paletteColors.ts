@@ -22,38 +22,47 @@ export interface PaletteEntry {
   color: string;
 }
 
-// MOVED from PalettePanel.tsx — exact sub codes + hex + hotkeys preserved.
+// MOVED from PalettePanel.tsx — exact sub codes + hex preserved.
 // Grouped by entity_class. Valve labels are resolved in PalettePanel via
 // VALVE_SUB_CLASS_LABELS, so they intentionally carry no `label` here.
+//
+// HOTKEY HINTS: intentionally NOT defined here. The palette badge is sourced
+// from the live merged-with-defaults shortcut map (PalettePanel's
+// buildClassKeyIndex over GET /users/me/shortcuts). Hard-coding `key` here
+// caused a stale-hint bug: digits 1/2/3 are reserved for mode switching
+// (select / mark-symbol / draw-edge, see routers/shortcuts.py DEFAULT_SHORTCUTS),
+// so an unbound class like "DB" fell back to the static "3" and pressing it
+// triggered draw-edge instead of selecting the class. Unbound classes now show
+// no badge until the user assigns one at /account/shortcuts.
 export const PALETTE: Record<string, PaletteEntry[]> = {
   valve: [
-    { sub: "BV", key: "2", color: "#86D8C4" },
-    { sub: "BF", key: "1", color: "#FF6B6B" },
-    { sub: "GT", key: "s", color: "#7EC9C2" },
-    { sub: "CK", key: "4", color: "#D8C794" },
-    { sub: "DB", key: "3", color: "#7FD4D2" },
-    { sub: "GL", key: "5", color: "#A8DD92" },
-    { sub: "CV", key: "6", color: "#C49AE2" },
-    { sub: "NCBV", key: "g", color: "#86A8E8" },
+    { sub: "BV", color: "#86D8C4" },
+    { sub: "BF", color: "#FF6B6B" },
+    { sub: "GT", color: "#7EC9C2" },
+    { sub: "CK", color: "#D8C794" },
+    { sub: "DB", color: "#7FD4D2" },
+    { sub: "GL", color: "#A8DD92" },
+    { sub: "CV", color: "#C49AE2" },
+    { sub: "NCBV", color: "#86A8E8" },
     { sub: "VB", color: "#8EE0CE" },
     { sub: "VF", color: "#92B4E8" },
     { sub: "VD", color: "#EBA6C6" },
-    { sub: "PV", key: "z", color: "#EB8070" },
-    { sub: "SB", key: "d", color: "#C3B4EC" },
+    { sub: "PV", color: "#EB8070" },
+    { sub: "SB", color: "#C3B4EC" },
   ],
   instrument: [
-    { sub: "FT", label: "Flow Tx", key: "8", color: "#E5CBA0" },
+    { sub: "FT", label: "Flow Tx", color: "#E5CBA0" },
     { sub: "PT", label: "Pressure Tx", color: "#C5BCEC" },
     { sub: "TT", label: "Temp Tx", color: "#8585D6" },
     { sub: "LT", label: "Level Tx", color: "#B4ACE6" },
     { sub: "AT", label: "Analytic Tx", color: "#EC9696" },
-    { sub: "PIC", label: "Pressure Controller", key: "x", color: "#C6C6CE" },
-    { sub: "FIC", label: "Flow Controller", key: "c", color: "#ACDC90" },
+    { sub: "PIC", label: "Pressure Controller", color: "#C6C6CE" },
+    { sub: "FIC", label: "Flow Controller", color: "#ACDC90" },
     { sub: "TIC", label: "Temp Controller", color: "#ECA666" },
     { sub: "LIC", label: "Level Controller", color: "#EC8698" },
   ],
   equipment: [
-    { sub: "Pump", label: "Pump", key: "e", color: "#8CCC76" },
+    { sub: "Pump", label: "Pump", color: "#8CCC76" },
     { sub: "Vessel", label: "Vessel", color: "#B496DC" },
     { sub: "Exchanger", label: "Exchanger", color: "#DCD486" },
     { sub: "Tank", label: "Tank", color: "#DCC68C" },

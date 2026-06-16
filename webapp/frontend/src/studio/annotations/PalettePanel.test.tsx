@@ -115,12 +115,22 @@ describe("PalettePanel", () => {
     expect(ftKbd?.textContent).toBe("F");
   });
 
-  test("falls back to the static design hint when no binding exists", () => {
-    // Empty keymap (default from beforeEach) → BV shows its static "2" hint.
+  test("shows no hotkey badge when a class has no binding", () => {
+    // Empty keymap (default from beforeEach) → no live binding for BV. The
+    // palette no longer carries static design-time digit hints (those collided
+    // with the 1/2/3 mode-switch keys — e.g. BV used to falsely show "2", the
+    // mark-symbol mode key). With no binding, the row renders no <kbd> badge.
     render(<PalettePanel activeMarkClass={null} onChange={() => {}} dark={false} />);
     const bvKbd = screen
       .getByTestId("palette-item-valve-BV")
       .querySelector("kbd.palette-row-kbd");
-    expect(bvKbd?.textContent).toBe("2");
+    expect(bvKbd).toBeNull();
+
+    // And an unbound class like Double Block (which used to fall back to the
+    // stale "3" = draw-edge key) also shows nothing.
+    const dbKbd = screen
+      .getByTestId("palette-item-valve-DB")
+      .querySelector("kbd.palette-row-kbd");
+    expect(dbKbd).toBeNull();
   });
 });

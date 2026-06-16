@@ -209,7 +209,17 @@ export default function PropertiesPanel({
               <option value="equipment">{CATEGORY_LABELS.equipment} ({categoryCounts.equipment})</option>
               <option value="other">{CATEGORY_LABELS.other} ({categoryCounts.other})</option>
             </select>
-            <span className="props-sub">
+            <span
+              className="props-sub"
+              title={
+                `Stage shows every model detection on this sheet — ${total} total ` +
+                `(${categoryCounts.valve} valve, ${categoryCounts.instrument} instrument, ` +
+                `${categoryCounts.equipment} equipment, ${categoryCounts.other} other). ` +
+                `Bulk Review / exports list only deliverable entities (valves, instruments, ` +
+                `equipment) across all sheets, so its per-tab counts are expected to differ ` +
+                `from this stage total — "other" items (arrows, connectors) are never exported.`
+              }
+            >
               {filteredElements.length}{category !== "all" ? ` / ${total}` : ""} detected
             </span>
           </div>

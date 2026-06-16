@@ -71,11 +71,12 @@ RUN --mount=type=secret,id=github_pat,required=false \
     ASSET_NAME="v1-11.onnx" && \
     MODEL_SHA="34022c917ae3b5487b6a81d9cc9f12064efdd101ee96540a1c7dd0fec097f4e5" && \
     DEST=/app/models/v1-11.onnx && \
-    AUTH_HEADER="" && \
-    if [ -s /run/secrets/github_pat ]; then \
-        TOKEN=$(cat /run/secrets/github_pat) && \
-        AUTH_HEADER="Authorization: Bearer $TOKEN"; \
+    TOKEN=$(cat /run/secrets/github_pat 2>/dev/null | tr -d '[:space:]') && \
+    if [ -z "$TOKEN" ]; then \
+        echo "[model] No github_pat secret mounted (or placeholder is blank) — skipping model bake (local dev). The image builds without the YOLO model; in-process inference (webapp/inference.py) raises InferenceError at runtime until a model is provided. CI/deploy always mounts a real PAT and bakes+verifies the model." && \
+        exit 0; \
     fi && \
+    AUTH_HEADER="Authorization: Bearer $TOKEN" && \
     echo "[model] Looking up asset id via GitHub API..." && \
     ASSET_JSON=$(curl -sL -H "Accept: application/vnd.github+json" \
         -H "$AUTH_HEADER" \
