@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "classes": [
+    {"order": 0,  "yolo_label": "valve_bv",            "entity_class": "valve",      "sub_class": "BV",            "display_name": "Ball Valve",            "color": "#86D8C4", "glyph_kind": "valve_bv"},
+    {"order": 1,  "yolo_label": "valve_ncbv",          "entity_class": "valve",      "sub_class": "NCBV",          "display_name": "NC Ball Valve",         "color": "#86A8E8", "glyph_kind": "valve_bv"},
+    {"order": 2,  "yolo_label": "valve_gt",            "entity_class": "valve",      "sub_class": "GT",            "display_name": "Gate Valve",            "color": "#7EC9C2", "glyph_kind": "valve_gt"},
+    {"order": 3,  "yolo_label": "valve_bf",            "entity_class": "valve",      "sub_class": "BF",            "display_name": "Butterfly Valve",       "color": "#FF6B6B", "glyph_kind": "valve_bf"},
+    {"order": 4,  "yolo_label": "valve_ck",            "entity_class": "valve",      "sub_class": "CK",            "display_name": "Check Valve",           "color": "#D8C794", "glyph_kind": "valve_ck"},
+    {"order": 5,  "yolo_label": "valve_db",            "entity_class": "valve",      "sub_class": "DB",            "display_name": "Double Block",          "color": "#7FD4D2", "glyph_kind": "valve_gen"},
+    {"order": 6,  "yolo_label": "valve_relief_safety", "entity_class": "valve",      "sub_class": "RELIEF_SAFETY", "display_name": "Relief/Safety Valve",   "color": "#A8DD92", "glyph_kind": "valve_gen"},
+    {"order": 7,  "yolo_label": "valve_gl",            "entity_class": "valve",      "sub_class": "GL",            "display_name": "Globe Valve",           "color": "#A8DD92", "glyph_kind": "valve_gl"},
+    {"order": 8,  "yolo_label": "valve_3way_relief",   "entity_class": "valve",      "sub_class": "3WAY_RELIEF",   "display_name": "3-Way Relief Valve",    "color": "#C49AE2", "glyph_kind": "valve_gen"},
+    {"order": 9,  "yolo_label": "inst_field",          "entity_class": "instrument", "sub_class": null,            "display_name": "Field Instrument",      "color": "#E5CBA0", "glyph_kind": "inst_field"},
+    {"order": 10, "yolo_label": "inst_bpcs",           "entity_class": "instrument", "sub_class": null,            "display_name": "BPCS Instrument",       "color": "#C5BCEC", "glyph_kind": "inst_field"},
+    {"order": 11, "yolo_label": "Motor",               "entity_class": "equipment",  "sub_class": null,            "display_name": "Motor",                 "color": "#8CCC76", "glyph_kind": "valve_gen"},
+    {"order": 12, "yolo_label": "Pump/Dwg Pump",       "entity_class": "equipment",  "sub_class": null,            "display_name": "Pump",                  "color": "#8CCC76", "glyph_kind": "pump"},
+    {"order": 13, "yolo_label": "inst_sis",            "entity_class": "instrument", "sub_class": null,            "display_name": "SIS Instrument",        "color": "#8585D6", "glyph_kind": "inst_field"},
+    {"order": 14, "yolo_label": "SIS-R",               "entity_class": "instrument", "sub_class": null,            "display_name": "SIS Relay",             "color": "#B4ACE6", "glyph_kind": "inst_field"},
+    {"order": 15, "yolo_label": "interlock",           "entity_class": "instrument", "sub_class": null,            "display_name": "Interlock",             "color": "#EC9696", "glyph_kind": "inst_field"},
+    {"order": 16, "yolo_label": "inst_local_panel",    "entity_class": "instrument", "sub_class": null,            "display_name": "Local Panel",           "color": "#C6C6CE", "glyph_kind": "inst_field"},
+    {"order": 17, "yolo_label": "arrow_up",            "entity_class": null,         "sub_class": null,            "display_name": "Arrow Up",              "color": "#9498AE", "glyph_kind": "valve_gen"},
+    {"order": 18, "yolo_label": "arrow_left",          "entity_class": null,         "sub_class": null,            "display_name": "Arrow Left",            "color": "#9498AE", "glyph_kind": "valve_gen"},
+    {"order": 19, "yolo_label": "arrow_right",         "entity_class": null,         "sub_class": null,            "display_name": "Arrow Right",           "color": "#9498AE", "glyph_kind": "valve_gen"},
+    {"order": 20, "yolo_label": "arrow_down",          "entity_class": null,         "sub_class": null,            "display_name": "Arrow Down",            "color": "#9498AE", "glyph_kind": "valve_gen"},
+    {"order": 21, "yolo_label": "connector_out",       "entity_class": null,         "sub_class": null,            "display_name": "Connector Out",         "color": "#9498AE", "glyph_kind": "valve_gen"},
+    {"order": 22, "yolo_label": "connector_in",        "entity_class": null,         "sub_class": null,            "display_name": "Connector In",          "color": "#9498AE", "glyph_kind": "valve_gen"}
+  ],
+  "yolo_routing": [
+    {"match": "prefix", "value": "valve_",     "entity_class": "valve",      "sub_class": "suffix_upper"},
+    {"match": "prefix", "value": "inst_",      "entity_class": "instrument", "sub_class": null},
+    {"match": "exact",  "value": "interlock",  "entity_class": "instrument", "sub_class": null},
+    {"match": "exact",  "value": "SIS-R",      "entity_class": "instrument", "sub_class": null},
+    {"match": "exact",  "value": "Motor",          "entity_class": "equipment", "sub_class": null},
+    {"match": "exact",  "value": "Pump/Dwg Pump",  "entity_class": "equipment", "sub_class": null},
+    {"match": "exact",  "value": "Pump_Dwg_Pump",  "entity_class": "equipment", "sub_class": null},
+    {"match": "prefix", "value": "arrow_",     "entity_class": null, "sub_class": null},
+    {"match": "prefix", "value": "connector_", "entity_class": null, "sub_class": null}
+  ]
+}
