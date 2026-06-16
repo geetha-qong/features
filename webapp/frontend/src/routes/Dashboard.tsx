@@ -206,12 +206,12 @@ export default function Dashboard() {
             <div className="head">Status</div>
             <div className={`sidebar-item ${filter === "run" ? "active" : ""}`} onClick={() => setFilter("run")}>
               <Activity size={16} strokeWidth={1.6} />
-              <span>Extracting</span>
+              <span>Preparing</span>
               <span className="count">{counts.run}</span>
             </div>
             <div className={`sidebar-item ${filter === "ok" ? "active" : ""}`} onClick={() => setFilter("ok")}>
               <CheckCircle2 size={16} strokeWidth={1.6} />
-              <span>Synced</span>
+              <span>Done</span>
               <span className="count">{counts.ok}</span>
             </div>
             <div className={`sidebar-item ${filter === "draft" ? "active" : ""}`} onClick={() => setFilter("draft")}>
@@ -268,7 +268,7 @@ export default function Dashboard() {
           </div>
           <div className="stat">
             <div className="num">{counts.ok}</div>
-            <span className="lbl">Synced</span>
+            <span className="lbl">Done</span>
           </div>
         </div>
 
@@ -291,10 +291,10 @@ export default function Dashboard() {
                 All<span className="count">{counts.all}</span>
               </button>
               <button className={`chip ${filter === "run" ? "active" : ""}`} onClick={() => setFilter("run")}>
-                Extracting<span className="count">{counts.run}</span>
+                Preparing<span className="count">{counts.run}</span>
               </button>
               <button className={`chip ${filter === "ok" ? "active" : ""}`} onClick={() => setFilter("ok")}>
-                Synced<span className="count">{counts.ok}</span>
+                Done<span className="count">{counts.ok}</span>
               </button>
               <button className={`chip ${filter === "draft" ? "active" : ""}`} onClick={() => setFilter("draft")}>
                 Draft<span className="count">{counts.draft}</span>

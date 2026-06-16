@@ -9,8 +9,8 @@ import type { ProjectTile } from "./types";
  */
 export default function ProjectCard({ project, onOpen }: { project: ProjectTile; onOpen: () => void }) {
   const statusLabel =
-    project.status === "ok" ? "Synced" :
-    project.status === "run" ? "Extracting" :
+    project.status === "ok" ? "Done" :
+    project.status === "run" ? "Preparing" :
     project.status === "fail" ? "Failed" : "Draft";
   return (
     <div

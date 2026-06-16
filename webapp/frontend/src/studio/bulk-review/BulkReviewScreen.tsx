@@ -401,6 +401,12 @@ export default function BulkReviewScreen({
     setSaving((s) => ({ ...s, [k]: true }));
     try {
       await patchEntity(jobId, entity.entity_id, { [field]: coerced });
+      // If Rev. No is edited, apply the same value to all other rows so the
+      // entire deliverable shares one revision number.
+      if (field === "fields.rev_no") {
+        const others = rows.filter((r) => r.entity_id !== entity.entity_id);
+        await Promise.all(others.map((r) => patchEntity(jobId, r.entity_id, { [field]: coerced })));
+      }
       // Refresh just the active tab — keeps badges (is_override) accurate and
       // pulls in any concurrent edits from another tab. Cheap at current
       // entity counts; see open-question note on virtualization for the

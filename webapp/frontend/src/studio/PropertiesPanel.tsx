@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   ArrowUpRight,
   Check,
@@ -90,6 +90,13 @@ export default function PropertiesPanel({
   const sel = elements[selectedId] || Object.values(elements)[0];
   const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
   const [category, setCategory] = useState<Category>("all");
+  const listRef = useRef<HTMLDivElement>(null);
+  const selectedRowRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll the list to keep the selected element visible when selectedId changes
+  useEffect(() => {
+    selectedRowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedId]);
 
   const detected = Object.entries(elements);
   const total = detected.length;
@@ -207,13 +214,14 @@ export default function PropertiesPanel({
             </span>
           </div>
         </div>
-        <div className="elements-list">
+        <div className="elements-list" ref={listRef}>
           {filteredElements.map(([key, el]) => {
             const isSel = key === selectedId;
             const color = confColor(el.confidence);
             return (
               <div
                 key={key}
+                ref={isSel ? selectedRowRef : null}
                 className={`element-row ${isSel ? "selected" : ""}`}
                 onClick={() => onSelect(key, el.entityClass)}
                 data-comment-anchor={`element-row-${key}`}

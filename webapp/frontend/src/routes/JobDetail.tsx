@@ -196,7 +196,7 @@ export default function JobDetail() {
           <Activity size={28} strokeWidth={1.7} className="dashboard-toast-pulse" />
         </div>
         <h1 className="qs-display" style={{ fontSize: 28, lineHeight: 1.2 }}>
-          Extracting your P&amp;ID
+          Preparing your P&amp;ID
         </h1>
         <p style={{ color: "var(--fg-2)", marginTop: 12, fontSize: 14, lineHeight: 1.55 }}>
           <strong>{job.original_filename || `Job ${job.job_id}`}</strong> is being
