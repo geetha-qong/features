@@ -135,9 +135,20 @@ export default function Studio({ project, userName, onBack }: Props) {
           const [bx1, by1, bx2, by2] = det.bbox as number[];
           const cx = (bx1 + bx2) / 2 + off.x0;
           const cy = (by1 + by2) / 2 + off.y0;
-          // pan is in page-pixel coords: negative because we shift the canvas
-          // so the element centre lands at viewport centre
-          setPan({ x: -cx + naturalSize.w / 2, y: -cy + naturalSize.h / 2 });
+          // canvas-wrap uses place-items:center, so at pan={0,0} the image
+          // is centred. To place (cx,cy) at viewport centre we need to shift
+          // in CSS display pixels, not natural pixels.
+          const canvasWrap = document.querySelector(".canvas-wrap") as HTMLElement | null;
+          if (canvasWrap) {
+            const s = Math.min(
+              canvasWrap.clientWidth / naturalSize.w,
+              canvasWrap.clientHeight / naturalSize.h,
+            );
+            setPan({
+              x: (naturalSize.w / 2 - cx) * s * zoom,
+              y: (naturalSize.h / 2 - cy) * s * zoom,
+            });
+          }
         }
       }
     }
