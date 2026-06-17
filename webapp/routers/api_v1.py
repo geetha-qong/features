@@ -288,16 +288,24 @@ def _tiling_source_dims(job) -> Tuple[Optional[int], Optional[int]]:
     """
     try:
         from PIL import Image
+        from pathlib import Path as _Path
     except Exception:
         return (None, None)
+    # Prefer the exact on-disk dir from output_csv_path (org-scoped jobs ≥40 live
+    # at /{org_id}/{job_id}/, which get_job_dir's user_id-based path misses —
+    # CLAUDE.md: read the path from the DB, don't guess). Fall back to get_job_dir.
+    job_dirs = []
+    if getattr(job, "output_csv_path", None):
+        job_dirs.append(_Path(job.output_csv_path).parent)
     try:
-        job_dir = get_job_dir(job)
+        job_dirs.append(get_job_dir(job))
     except Exception:
-        return (None, None)
-    for cand in (
-        job_dir / "tmp" / "page_0_full.png",
-        job_dir / "page_0_full.png",
-    ):
+        pass
+    cands = []
+    for jd in job_dirs:
+        cands.append(jd / "tmp" / "page_0_full.png")
+        cands.append(jd / "page_0_full.png")
+    for cand in cands:
         try:
             if cand.exists():
                 with Image.open(str(cand)) as im:
