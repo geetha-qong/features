@@ -700,8 +700,17 @@ export default function Studio({ project, userName, onBack }: Props) {
                 <span className="num">{graph.stats.nodes}</span> nodes
                 <span className="sep">·</span>
                 <span className="num">{graph.stats.edges}</span> edges
-                <span className="sep">·</span>
-                <span className="num">{graph.orphan_lines.length}</span> orphans
+                {graph.orphan_lines.length > 0 && (
+                  <>
+                    <span className="sep">·</span>
+                    <span
+                      className="orphans"
+                      title={`${graph.orphan_lines.length} unconnected pipe segment${graph.orphan_lines.length === 1 ? "" : "s"} — turn the graph overlay on and draw an edge to connect each one`}
+                    >
+                      <span className="num">{graph.orphan_lines.length}</span> unconnected
+                    </span>
+                  </>
+                )}
               </span>
             )}
             <button

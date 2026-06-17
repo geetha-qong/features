@@ -3148,6 +3148,12 @@ input, textarea { font-family: inherit; }
 .graph-stats-chip .sep {
   opacity: 0.5;
 }
+/* Orphan count — amber, matching the dashed-amber orphan polylines on canvas.
+   Signals "extraction failed here, draw to fix" distinctly from the cyan chip. */
+.graph-stats-chip .orphans {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--warn);
+}
 
 /* ──────────────────────────────────────────────────────────────────────────
    All Data view — sibling of Bulk Review (.br-*). One searchable surface that
