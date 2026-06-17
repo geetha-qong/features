@@ -24,6 +24,7 @@ import AdminLabelStudio from "./admin/AdminLabelStudio";
 import AdminCustomColumns from "./admin/AdminCustomColumns";
 import AdminEntities from "./admin/AdminEntities";
 import AdminLabelTriage from "./admin/AdminLabelTriage";
+import AdminLearning from "./admin/AdminLearning";
 // FEATURES #38 Phase 5 + 6 — marking shortcuts + annotation metrics
 import AccountShortcuts from "./account/Shortcuts";
 import AdminAnnotationMetrics from "./admin/AdminAnnotationMetrics";
@@ -74,6 +75,7 @@ function AppRoutes() {
               <Route path="entities" element={<AdminEntities />} />
               <Route path="label-triage" element={<AdminLabelTriage />} />
               <Route path="annotation-metrics" element={<AdminAnnotationMetrics />} />
+              <Route path="learning" element={<AdminLearning />} />
               <Route path="custom-columns" element={<AdminCustomColumns />} />
             </Route>
           </Route>

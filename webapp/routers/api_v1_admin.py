@@ -11,10 +11,12 @@ routes continue to serve as fallback (data continuity for any bookmarked URL).
 from __future__ import annotations
 
 import re
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from webapp.datetime_utils import utc_iso
+from webapp.model_version import current_model_trained_at, current_version
+from webapp.taxonomy import yolo_to_canonical
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -940,3 +942,367 @@ def admin_annotations_metrics(
         "by_status": by_status,
         "per_day_last_30": per_day_last_30,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Self-learning summary — retrain-readiness + per-class weakness dashboard.
+# Single round-trip snapshot for the self-learning loop (FEATURES self-learning
+# Phase 1). Anchors "corrections since the current model" on
+# `webapp.model_version.current_model_trained_at()`. Reads correction signal
+# from `model_corrections`, `user_annotations`, `entity_overrides` (tag edits),
+# and `graph_corrections`. Per-class `deleted` bucketing needs the deleted
+# detection's class, recovered from `Job.gpu_detections[detection_index]`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Tunable Phase-1 retrain trigger: once this many *labeled* corrections have
+# accumulated since the current model was trained, the loop is "ready" to
+# retrain. Bumped deliberately (not auto) when we recalibrate the cadence.
+RETRAIN_READINESS_THRESHOLD = 200
+
+
+def _det_label(det: object) -> Optional[str]:
+    """Best-effort YOLO label from one gpu_detections item.
+
+    Accepts both stored shapes — in-process inference (`label`) and the legacy
+    Windows worker (`yolo_class`). Returns None when the shape is unexpected.
+    """
+    if not isinstance(det, dict):
+        return None
+    return det.get("label") or det.get("yolo_class")
+
+
+def _class_display_key(entity_class: Optional[str], sub_class: Optional[str], raw_label: Optional[str]) -> str:
+    """Display bucket key: `entity_class/sub_class` when known, else the raw
+    YOLO label, else "unknown"."""
+    if entity_class and sub_class:
+        return f"{entity_class}/{sub_class}"
+    if entity_class:
+        return entity_class
+    if raw_label:
+        return raw_label
+    return "unknown"
+
+
+class LearningTotals(BaseModel):
+    model_corrections: int
+    model_corrections_since_model: int
+    user_annotations: int
+    user_annotations_labeled: int
+    user_annotations_since_model: int
+    tag_edits: int
+    tag_edits_since_model: int
+    entity_overrides: int
+    graph_corrections: int
+    graph_corrections_since_model: int
+
+
+class RetrainReadiness(BaseModel):
+    labeled_corrections_since_model: int
+    threshold: int
+    ready: bool
+    current_model: str
+
+
+class ClassStat(BaseModel):
+    cls: str
+    entity_class: Optional[str] = None
+    sub_class: Optional[str] = None
+    added: int
+    reclassified: int
+    deleted: int
+    confirmed: int
+    rejected: int
+    total_corrections: int
+
+
+class JobStat(BaseModel):
+    job_id: int
+    pid_no: Optional[str] = None
+    corrections: int
+    annotations: int
+    tag_edits: int
+
+
+class LearningSummaryResponse(BaseModel):
+    model_version: str
+    model_trained_at: Optional[str] = None
+    generated_at: str
+    totals: LearningTotals
+    retrain_readiness: RetrainReadiness
+    by_action: Dict[str, int]
+    by_class: List[ClassStat]
+    by_job: List[JobStat]
+
+
+class _ClassBucket:
+    """Mutable per-class accumulator with the canonical (entity_class, sub_class)
+    captured once so the display key stays stable."""
+
+    __slots__ = ("entity_class", "sub_class", "raw_label", "added",
+                 "reclassified", "deleted", "confirmed", "rejected")
+
+    def __init__(self, entity_class=None, sub_class=None, raw_label=None):
+        self.entity_class = entity_class
+        self.sub_class = sub_class
+        self.raw_label = raw_label
+        self.added = 0
+        self.reclassified = 0
+        self.deleted = 0
+        self.confirmed = 0
+        self.rejected = 0
+
+
+@router.get("/learning/summary", response_model=LearningSummaryResponse)
+def admin_learning_summary(
+    current_user: models.User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    """Self-learning dashboard snapshot — retrain-readiness counter, all-time
+    correction volumes, per-class "weakness" breakdown, and per-job correction
+    counts. One round-trip; super-admin only.
+
+    `*_since_model` counters anchor on `current_model_trained_at()`; when that's
+    unknown (version not in the trained-at table) they're all 0 and `ready` is
+    False rather than crashing.
+    """
+    import json as _json
+
+    MC = models.ModelCorrection
+    UA = models.UserAnnotation
+    EO = models.EntityOverride
+    GC = models.GraphCorrection
+
+    trained_at = current_model_trained_at()
+    version = current_version()
+
+    # ── by_action (all-time ModelCorrection) ────────────────────────────────
+    by_action = {"add": 0, "delete": 0, "reclassify": 0}
+    for action, n in (
+        db.query(MC.action, func.count(MC.id)).group_by(MC.action).all()
+    ):
+        if action in by_action:
+            by_action[action] = int(n)
+
+    # ── Totals ───────────────────────────────────────────────────────────────
+    model_corrections_total = db.query(func.count(MC.id)).scalar() or 0
+    user_annotations_total = db.query(func.count(UA.id)).scalar() or 0
+    user_annotations_labeled = (
+        db.query(func.count(UA.id))
+        .filter(UA.status.in_(("user_added", "user_confirmed")))
+        .scalar()
+        or 0
+    )
+    tag_edits_total = (
+        db.query(func.count(EO.id)).filter(EO.field_name == "tag").scalar() or 0
+    )
+    entity_overrides_total = db.query(func.count(EO.id)).scalar() or 0
+    graph_corrections_total = db.query(func.count(GC.id)).scalar() or 0
+
+    if trained_at is not None:
+        model_corrections_since = (
+            db.query(func.count(MC.id)).filter(MC.created_at >= trained_at).scalar() or 0
+        )
+        user_annotations_since = (
+            db.query(func.count(UA.id)).filter(UA.created_at >= trained_at).scalar() or 0
+        )
+        tag_edits_since = (
+            db.query(func.count(EO.id))
+            .filter(EO.field_name == "tag", EO.edited_at >= trained_at)
+            .scalar()
+            or 0
+        )
+        graph_corrections_since = (
+            db.query(func.count(GC.id)).filter(GC.created_at >= trained_at).scalar() or 0
+        )
+        # Labeled corrections since model = UA(user_added|user_confirmed)
+        # + MC(add|reclassify), both with created_at >= trained_at.
+        ua_labeled_since = (
+            db.query(func.count(UA.id))
+            .filter(
+                UA.status.in_(("user_added", "user_confirmed")),
+                UA.created_at >= trained_at,
+            )
+            .scalar()
+            or 0
+        )
+        mc_labeled_since = (
+            db.query(func.count(MC.id))
+            .filter(MC.action.in_(("add", "reclassify")), MC.created_at >= trained_at)
+            .scalar()
+            or 0
+        )
+        labeled_since = int(ua_labeled_since) + int(mc_labeled_since)
+    else:
+        model_corrections_since = 0
+        user_annotations_since = 0
+        tag_edits_since = 0
+        graph_corrections_since = 0
+        labeled_since = 0
+
+    totals = LearningTotals(
+        model_corrections=int(model_corrections_total),
+        model_corrections_since_model=int(model_corrections_since),
+        user_annotations=int(user_annotations_total),
+        user_annotations_labeled=int(user_annotations_labeled),
+        user_annotations_since_model=int(user_annotations_since),
+        tag_edits=int(tag_edits_total),
+        tag_edits_since_model=int(tag_edits_since),
+        entity_overrides=int(entity_overrides_total),
+        graph_corrections=int(graph_corrections_total),
+        graph_corrections_since_model=int(graph_corrections_since),
+    )
+
+    readiness = RetrainReadiness(
+        labeled_corrections_since_model=labeled_since,
+        threshold=RETRAIN_READINESS_THRESHOLD,
+        ready=labeled_since >= RETRAIN_READINESS_THRESHOLD,
+        current_model=version,
+    )
+
+    # ── by_class ──────────────────────────────────────────────────────────────
+    buckets: Dict[str, _ClassBucket] = {}
+
+    def _bucket(entity_class, sub_class, raw_label) -> _ClassBucket:
+        key = _class_display_key(entity_class, sub_class, raw_label)
+        b = buckets.get(key)
+        if b is None:
+            b = _ClassBucket(entity_class, sub_class, raw_label)
+            buckets[key] = b
+        return b
+
+    # MC action=add / reclassify — bucket by new_label (the target class).
+    for action, new_label, n in (
+        db.query(MC.action, MC.new_label, func.count(MC.id))
+        .filter(MC.action.in_(("add", "reclassify")))
+        .group_by(MC.action, MC.new_label)
+        .all()
+    ):
+        ec, sc = yolo_to_canonical(new_label)
+        b = _bucket(ec, sc, new_label)
+        if action == "add":
+            b.added += int(n)
+        else:
+            b.reclassified += int(n)
+
+    # MC action=delete — bucket by the deleted detection's class via
+    # Job.gpu_detections[detection_index]. Load only the affected jobs once.
+    delete_rows = (
+        db.query(MC.job_id, MC.detection_index, func.count(MC.id))
+        .filter(MC.action == "delete")
+        .group_by(MC.job_id, MC.detection_index)
+        .all()
+    )
+    if delete_rows:
+        affected_job_ids = {jid for jid, _, _ in delete_rows}
+        gpu_by_job: Dict[int, list] = {}
+        for jid, gd_raw in (
+            db.query(models.Job.id, models.Job.gpu_detections)
+            .filter(models.Job.id.in_(affected_job_ids))
+            .all()
+        ):
+            parsed = None
+            if gd_raw:
+                try:
+                    parsed = _json.loads(gd_raw) if isinstance(gd_raw, str) else gd_raw
+                except (ValueError, TypeError):
+                    parsed = None
+            gpu_by_job[jid] = parsed if isinstance(parsed, list) else []
+
+        for jid, det_idx, n in delete_rows:
+            dets = gpu_by_job.get(jid, [])
+            raw_label = None
+            if det_idx is not None and 0 <= det_idx < len(dets):
+                raw_label = _det_label(dets[det_idx])
+            if raw_label:
+                ec, sc = yolo_to_canonical(raw_label)
+            else:
+                ec, sc = None, None
+            b = _bucket(ec, sc, raw_label)
+            b.deleted += int(n)
+
+    # UA status=user_added — bucket by (entity_class, sub_class).
+    for ec, sc, n in (
+        db.query(UA.entity_class, UA.sub_class, func.count(UA.id))
+        .filter(UA.status == "user_added")
+        .group_by(UA.entity_class, UA.sub_class)
+        .all()
+    ):
+        b = _bucket(ec, sc, None)
+        b.added += int(n)
+
+    # UA status=user_confirmed / user_rejected — bucket by (entity_class, sub_class).
+    for status, ec, sc, n in (
+        db.query(UA.status, UA.entity_class, UA.sub_class, func.count(UA.id))
+        .filter(UA.status.in_(("user_confirmed", "user_rejected")))
+        .group_by(UA.status, UA.entity_class, UA.sub_class)
+        .all()
+    ):
+        b = _bucket(ec, sc, None)
+        if status == "user_confirmed":
+            b.confirmed += int(n)
+        else:
+            b.rejected += int(n)
+
+    class_stats: List[ClassStat] = []
+    for key, b in buckets.items():
+        total_corr = b.added + b.reclassified + b.deleted + b.rejected
+        class_stats.append(ClassStat(
+            cls=key,
+            entity_class=b.entity_class,
+            sub_class=b.sub_class,
+            added=b.added,
+            reclassified=b.reclassified,
+            deleted=b.deleted,
+            confirmed=b.confirmed,
+            rejected=b.rejected,
+            total_corrections=total_corr,
+        ))
+    class_stats.sort(key=lambda c: c.total_corrections, reverse=True)
+    class_stats = class_stats[:50]
+
+    # ── by_job ─────────────────────────────────────────────────────────────────
+    mc_by_job = dict(
+        db.query(MC.job_id, func.count(MC.id)).group_by(MC.job_id).all()
+    )
+    ua_by_job = dict(
+        db.query(UA.job_id, func.count(UA.id)).group_by(UA.job_id).all()
+    )
+    tag_edits_by_job = dict(
+        db.query(EO.job_id, func.count(EO.id))
+        .filter(EO.field_name == "tag")
+        .group_by(EO.job_id)
+        .all()
+    )
+
+    all_job_ids = set(mc_by_job) | set(ua_by_job) | set(tag_edits_by_job)
+    pid_by_job: Dict[int, Optional[str]] = {}
+    if all_job_ids:
+        for jid, pid in (
+            db.query(models.Job.id, models.Job.pid_no)
+            .filter(models.Job.id.in_(all_job_ids))
+            .all()
+        ):
+            pid_by_job[jid] = pid
+
+    job_stats: List[JobStat] = []
+    for jid in all_job_ids:
+        job_stats.append(JobStat(
+            job_id=jid,
+            pid_no=pid_by_job.get(jid),
+            corrections=int(mc_by_job.get(jid, 0)),
+            annotations=int(ua_by_job.get(jid, 0)),
+            tag_edits=int(tag_edits_by_job.get(jid, 0)),
+        ))
+    job_stats.sort(key=lambda j: j.corrections, reverse=True)
+    job_stats = job_stats[:25]
+
+    return LearningSummaryResponse(
+        model_version=version,
+        model_trained_at=utc_iso(trained_at) if trained_at else None,
+        generated_at=utc_iso(datetime.now(timezone.utc)),
+        totals=totals,
+        retrain_readiness=readiness,
+        by_action=by_action,
+        by_class=class_stats,
+        by_job=job_stats,
+    )

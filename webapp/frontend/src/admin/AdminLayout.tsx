@@ -6,6 +6,7 @@ import {
   CreditCard,
   Database,
   GitBranch,
+  GraduationCap,
   Inbox,
   LayoutDashboard,
   ListChecks,
@@ -25,6 +26,7 @@ const NAV: Array<{ to: string; label: string; icon: typeof Users }> = [
   { to: "/admin/entities", label: "Entity Index", icon: Database },
   { to: "/admin/label-triage", label: "Label Triage", icon: ListChecks },
   { to: "/admin/annotation-metrics", label: "Annotation Metrics", icon: BarChart3 },
+  { to: "/admin/learning", label: "Self-Learning", icon: GraduationCap },
 ];
 
 export default function AdminLayout() {

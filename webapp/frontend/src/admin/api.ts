@@ -219,4 +219,51 @@ export const listLabelTriage = (status = "pending") =>
 export const classifyLabelTriage = (id: number, payload: ClassifyTriagePayload) =>
   call<LabelTriageItem>("POST", `/api/v1/admin/label-triage/${id}/classify`, payload);
 
+// Self-Learning (retrain readiness + correction telemetry)
+export interface LearningSummary {
+  model_version: string;
+  model_trained_at: string | null; // ISO Z
+  generated_at: string; // ISO Z
+  totals: {
+    model_corrections: number;
+    model_corrections_since_model: number;
+    user_annotations: number;
+    user_annotations_labeled: number;
+    user_annotations_since_model: number;
+    tag_edits: number;
+    tag_edits_since_model: number;
+    entity_overrides: number;
+    graph_corrections: number;
+    graph_corrections_since_model: number;
+  };
+  retrain_readiness: {
+    labeled_corrections_since_model: number;
+    threshold: number;
+    ready: boolean;
+    current_model: string;
+  };
+  by_action: { add?: number; delete?: number; reclassify?: number };
+  by_class: Array<{
+    cls: string;
+    entity_class: string | null;
+    sub_class: string | null;
+    added: number;
+    reclassified: number;
+    deleted: number;
+    confirmed: number;
+    rejected: number;
+    total_corrections: number;
+  }>;
+  by_job: Array<{
+    job_id: number;
+    pid_no: string | null;
+    corrections: number;
+    annotations: number;
+    tag_edits: number;
+  }>;
+}
+
+export const getLearningSummary = () =>
+  call<LearningSummary>("GET", "/api/v1/admin/learning/summary");
+
 export { HttpError };

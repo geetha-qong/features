@@ -24,6 +24,54 @@
 
 ---
 
+## [2026-06-17] #61 — Self-learning loop Phase 1: correction-rate surface + training-set builder
+
+**Type:** feature
+**Stage:** webapp / training
+**Status:** shipped (deployed to dev)
+
+**Why:** Close the human-in-the-loop → model-improvement loop. Per the design
+(`docs/superpowers/specs/2026-06-17-self-learning-loop-design.md`), capture is ~80%
+built; the missing links are MEASURE → AGGREGATE → RETRAIN → GATE → PROMOTE. Phase 1
+ships measurement + aggregation (high value, low risk) and doubles as the quantified
+answer to the recurring "how wrong are our tags/detections?" question. User: "we need
+to achieve [self-learning] at the earliest."
+
+**What:**
+- **Version anchor** `webapp/model_version.py` (NEW) — `current_version()` reads
+  `models/MODEL_VERSION.txt` (`current: v1-11`); `current_model_trained_at()` returns
+  the structured train date (v1-11 → 2026-06-15). The "since current model" anchor for
+  every metric. (Append a `_TRAINED_AT` row on each promotion.)
+- **MEASURE** — `GET /api/v1/admin/learning/summary` (`api_v1_admin.py`,
+  `require_super_admin`): all-time + since-model totals across `model_corrections`,
+  `user_annotations`, `entity_overrides` (tag edits = `field_name=="tag"`),
+  `graph_corrections`; `by_action`; per-class weakness table (`by_class`, the retrain
+  targeting signal — `delete` rows bucketed via `Job.gpu_detections[detection_index]`,
+  guarded → "unknown"); `by_job`. New `/admin/learning` SPA page (`AdminLearning.tsx`)
+  + nav link, mirrors AdminEntities.
+- **TRIGGER** — `retrain_readiness` block in the same response:
+  `labeled_corrections_since_model` (labeled UserAnnotations + add/reclassify
+  ModelCorrections since trained_at) vs `RETRAIN_READINESS_THRESHOLD=200` → `ready`.
+- **AGGREGATE** — `webapp/scripts/build_training_set.py` (NEW): `python -m
+  webapp.scripts.build_training_set [--since|--job-id|--dry-run]` → `datasets/learning/
+  <date>/{detection,graph,tags}/` + `manifest.json` (class_counts, job ids, since).
+  Reuses the two existing exporters' `run()` (no reimpl); `--since` defaults to the
+  current model's train date. Built by 3 parallel agents + a self-built keystone.
+
+**Result:** 26 backend tests (7 new builder + 19 exporter) pass; full suite 368 pass
+(1 pre-existing env failure in `test_sheets_*`, unrelated); `tsc` + `vite build` clean.
+Endpoint live-verified in-container (shape + v1-11 anchor); builder dry-run emits a
+valid manifest.
+
+**Notes:** Phase 2 (gated retrain: AWS burst → eval vs prod on frozen holdout, recall
+≥90% + graph isomorphism → promote/rollback) is the next step — NEVER auto-promote
+without the eval gate. Per-class tag-edit attribution is detection/annotation-based;
+canonical-entity tag edits (entity_overrides on pipeline entities not in
+user_annotations) count in totals but not per-class (class isn't in the DB for those —
+on-disk canonical.json). Threshold 200 is a guess; tune from the first real numbers.
+
+---
+
 ## [2026-06-17] #60 — Datasheet schema completed: remaining 7 instrument types added
 
 **Type:** feature
