@@ -55,6 +55,25 @@ def auto_tile_ls_task_rq(
     if not _is_pdf_task_image(image_path):
         return {"status": "skip", "reason": "not-a-pdf", "image": image_path}
 
+    # Idempotency guard (added 2026-06-17 after LS projects 25/26 accumulated
+    # ~2x duplicate tiles): if this project ALREADY has tile tasks, a prior PDF
+    # import was tiled here. Re-tiling on a repeated import would DUPLICATE every
+    # tile (the original PDF task gets deleted, but the previously-created tile
+    # tasks do not — so each re-import stacks another full tile set). Skip tiling
+    # and just remove the redundant PDF task.
+    # NOTE: assumes the 1-drawing-per-LS-project norm. A project intended to hold
+    # multiple distinct PDFs' tiles would only auto-tile the first; tile the rest
+    # manually if that workflow is ever needed.
+    if ls.project_has_tile_tasks(project_id):
+        deleted = ls.delete_task(task_id)
+        return {
+            "status": "skip",
+            "reason": "project-already-tiled",
+            "project_id": project_id,
+            "original_task_id": task_id,
+            "original_deleted": deleted,
+        }
+
     pdf_bytes = ls.download_task_image(image_path)
     if not pdf_bytes:
         return {"status": "fail", "reason": "download-failed", "image": image_path}

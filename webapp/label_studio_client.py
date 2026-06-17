@@ -453,6 +453,68 @@ def delete_task(task_id: int) -> bool:
         return False
 
 
+def get_project_tasks(project_id: int, page_size: int = 200) -> List[dict]:
+    """All tasks for a project (paginated). Each dict carries id + data +
+    total_annotations. Used by the dedupe tool + the tile-exists guard."""
+    if not is_configured():
+        return []
+    out: List[dict] = []
+    page = 1
+    while True:
+        try:
+            resp = requests.get(
+                f"{LS_URL}/api/projects/{project_id}/tasks",
+                headers=_headers(),
+                params={"page": page, "page_size": page_size},
+                timeout=30,
+            )
+        except Exception as e:
+            print(f"[label_studio] get_project_tasks error: {e}")
+            break
+        if resp.status_code != 200:
+            break
+        data = resp.json()
+        batch = data if isinstance(data, list) else data.get("tasks", [])
+        if not batch:
+            break
+        out.extend(batch)
+        if len(batch) < page_size:
+            break
+        page += 1
+    return out
+
+
+_TILE_IMG_RE = re.compile(r"tile_p\d+_r\d+_c\d+", re.IGNORECASE)
+
+
+def project_has_tile_tasks(project_id: int) -> bool:
+    """True if the project already contains auto-generated tile tasks (image
+    path matches ``tile_p{p}_r{r}_c{c}``). Cheap: checks only the first page —
+    a tiled project has many tile tasks, so one page suffices. Used by the
+    auto-tile worker to avoid re-tiling (and DOUBLING) on a repeated PDF import."""
+    if not is_configured():
+        return False
+    try:
+        resp = requests.get(
+            f"{LS_URL}/api/projects/{project_id}/tasks",
+            headers=_headers(),
+            params={"page": 1, "page_size": 100},
+            timeout=15,
+        )
+    except Exception as e:
+        print(f"[label_studio] project_has_tile_tasks error: {e}")
+        return False
+    if resp.status_code != 200:
+        return False
+    data = resp.json()
+    tasks = data if isinstance(data, list) else data.get("tasks", [])
+    for t in tasks:
+        img = ((t.get("data") or {}).get("image")) or ""
+        if _TILE_IMG_RE.search(str(img)):
+            return True
+    return False
+
+
 def sync_all_label_configs(source_project_id: int = 1) -> dict:
     """Copy the label config from source_project_id to every other project.
 
