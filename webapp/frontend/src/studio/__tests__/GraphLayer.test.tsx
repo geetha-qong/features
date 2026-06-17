@@ -80,6 +80,47 @@ describe("GraphLayer", () => {
     expect(onSelect).toHaveBeenCalledWith("ent-a", "valve_bv");
   });
 
+  test("renders a marker-end on a directed edge", () => {
+    const graph = makeGraph({
+      edges: [
+        { id: "e_dir", source: "n_000", target: "n_001", polyline: [[20, 20], [110, 110]], tile: "t0", method: "opencv", confidence: 0.7, directed: true },
+      ],
+    });
+    const { container } = renderLayer({ graph });
+    const edge = container.querySelector('[data-graph-edge="e_dir"]') as SVGElement;
+    expect(edge.getAttribute("marker-end")).toBe("url(#arrow-opencv)");
+  });
+
+  test("renders no marker-end on an undirected edge (directed false or undefined)", () => {
+    const graph = makeGraph({
+      edges: [
+        { id: "e_false", source: "n_000", target: "n_001", polyline: [[20, 20], [110, 110]], tile: "t0", method: "opencv", confidence: 0.7, directed: false },
+        { id: "e_undef", source: "n_001", target: "n_000", polyline: [[110, 110], [20, 20]], tile: "t0", method: "user_added", confidence: 1 },
+      ],
+    });
+    const { container } = renderLayer({ graph });
+    const eFalse = container.querySelector('[data-graph-edge="e_false"]') as SVGElement;
+    const eUndef = container.querySelector('[data-graph-edge="e_undef"]') as SVGElement;
+    expect(eFalse.getAttribute("marker-end")).toBeNull();
+    expect(eUndef.getAttribute("marker-end")).toBeNull();
+  });
+
+  test("arrowhead marker color matches the edge method", () => {
+    const graph = makeGraph({
+      edges: [
+        { id: "e_u", source: "n_000", target: "n_001", polyline: [[20, 20], [110, 110]], tile: "t0", method: "user_added", confidence: 1, directed: true },
+      ],
+    });
+    const { container } = renderLayer({ graph });
+    const edge = container.querySelector('[data-graph-edge="e_u"]') as SVGElement;
+    // The edge points at the user_added marker...
+    expect(edge.getAttribute("marker-end")).toBe("url(#arrow-user_added)");
+    // ...and that marker's arrowhead path is filled with the user_added color.
+    const marker = container.querySelector('[data-arrow-method="user_added"]') as SVGElement;
+    const path = marker.querySelector("path") as SVGElement;
+    expect(path.getAttribute("fill")).toBe("var(--scan-cyan)");
+  });
+
   test("renders nothing when not visible", () => {
     const { container } = renderLayer({ visible: false });
     expect(container.querySelector("[data-graph-layer]")).toBeNull();

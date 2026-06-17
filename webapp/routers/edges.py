@@ -50,6 +50,11 @@ router = APIRouter(prefix="/api/v1/jobs", tags=["edges"])
 
 # Line types accepted on create. Mirrors the GraphCorrection model docstring.
 VALID_LINE_TYPES = {"process_pipe", "instrument", "signal", "interlock"}
+# Allowed values for the other free-text-ish columns (mirror the model comments).
+# Validated so a typo can't silently change graph-merge visibility (graph.py
+# filters edges by status) or corrupt the relation taxonomy.
+VALID_RELATION_TYPES = {"carries", "measures", "controls", "interlocks_with", "loops_to"}
+VALID_STATUSES = {"model_found", "user_added", "user_confirmed", "user_rejected"}
 
 
 # --- pydantic models ---
@@ -58,7 +63,10 @@ VALID_LINE_TYPES = {"process_pipe", "instrument", "signal", "interlock"}
 PolylinePoint = conlist(float, min_length=2, max_length=2)
 # A polyline must have at least 2 points (a line). We don't cap the upper bound
 # — complex routes around equipment can need 10+ segments.
-Polyline = conlist(PolylinePoint, min_length=2)
+# Cap polyline length: a real pipe run is a handful of segments; 500 points is
+# far beyond any legitimate edge and bounds the JSON stored per row + re-served
+# on every /edges and /graph read (security: unbounded-row / DoS guard).
+Polyline = conlist(PolylinePoint, min_length=2, max_length=500)
 
 
 class EdgeCreate(BaseModel):
@@ -71,6 +79,10 @@ class EdgeCreate(BaseModel):
     group_id: Optional[str] = None
     target_sheet_number: Optional[int] = None
     metadata_json: Optional[Dict[str, Any]] = None
+    # User-drawn edges are directed source→target by construction (the user
+    # asserted the flow direction by click order). Defaults True; a caller may
+    # pass False to record an explicitly-undirected edge.
+    directed: bool = True
 
 
 class EdgePatch(BaseModel):
@@ -86,6 +98,7 @@ class EdgePatch(BaseModel):
     polyline: Optional[Polyline] = None  # type: ignore[valid-type]
     group_id: Optional[str] = None
     metadata_json: Optional[Dict[str, Any]] = None
+    directed: Optional[bool] = None
 
 
 class EdgeRow(BaseModel):
@@ -103,6 +116,7 @@ class EdgeRow(BaseModel):
     sheet_number: int
     group_id: Optional[str] = None
     metadata_json: Optional[Dict[str, Any]] = None
+    directed: bool = True
 
 
 class EdgesResponse(BaseModel):
@@ -146,6 +160,8 @@ def _row_to_response(row: models.GraphCorrection) -> EdgeRow:
         sheet_number=row.sheet_number,
         group_id=row.group_id,
         metadata_json=row.metadata_json,
+        # NULL (legacy rows pre-migration) → True: user edges were always directed.
+        directed=True if row.directed is None else bool(row.directed),
     )
 
 
@@ -201,6 +217,14 @@ def create_edge(
                 f"Must be one of: {sorted(VALID_LINE_TYPES)}"
             ),
         )
+    if payload.relation_type is not None and payload.relation_type not in VALID_RELATION_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"invalid relation_type '{payload.relation_type}'. "
+                f"Must be one of: {sorted(VALID_RELATION_TYPES)}"
+            ),
+        )
     if payload.source_entity_id == payload.target_entity_id:
         # Self-loops aren't a real P&ID construct and complicate the graph
         # consumers (NetworkX is_isomorphic, BOM joins). Disallowed v1.
@@ -225,6 +249,7 @@ def create_edge(
         sheet_number=payload.sheet_number,
         group_id=payload.group_id,
         metadata_json=payload.metadata_json,
+        directed=payload.directed,
     )
     db.add(row)
     db.commit()
@@ -273,6 +298,28 @@ def patch_edge(
             detail=(
                 f"invalid line_type '{update_data['line_type']}'. "
                 f"Must be one of: {sorted(VALID_LINE_TYPES)}"
+            ),
+        )
+    if (
+        update_data.get("relation_type") is not None
+        and update_data["relation_type"] not in VALID_RELATION_TYPES
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"invalid relation_type '{update_data['relation_type']}'. "
+                f"Must be one of: {sorted(VALID_RELATION_TYPES)}"
+            ),
+        )
+    if (
+        update_data.get("status") is not None
+        and update_data["status"] not in VALID_STATUSES
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"invalid status '{update_data['status']}'. "
+                f"Must be one of: {sorted(VALID_STATUSES)}"
             ),
         )
 

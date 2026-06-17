@@ -72,6 +72,9 @@ def run_migrations():
         # Studio per-user shortcuts (FEATURES #38). Postgres JSONB; SQLite stores as TEXT.
         # Schemaless on purpose — frontend validates structure before PATCH.
         ("users", "shortcuts", "JSONB" if not _IS_SQLITE else "TEXT"),
+        # Edge flow-direction flag (graph-directions, 2026-06-17). Nullable so legacy
+        # rows survive; new user edges default directed=true. BOOLEAN on both dialects.
+        ("graph_corrections", "directed", "BOOLEAN DEFAULT TRUE"),
     ]
     for table, column, col_type in new_columns:
         try:

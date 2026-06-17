@@ -63,6 +63,13 @@ export interface GraphEdge {
   tile: string;
   method: GraphEdgeMethod;
   confidence: number;
+  /**
+   * Direction flag. `true` ⇒ edge is oriented source→target (rendered with an
+   * arrowhead). Missing/`false` ⇒ undirected (rendered as today, no arrowhead).
+   * User-drawn edges are always directed; auto edges are directed iff an arrow
+   * oriented them. See spec 2026-06-17-graph-directions-design.md.
+   */
+  directed?: boolean;
 }
 
 export interface GraphStats {

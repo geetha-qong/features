@@ -26,9 +26,16 @@ def _edge_id(i: int) -> str:
 def build_multigraph(
     nodes: Sequence[Dict[str, Any]],
     edges: Sequence[Edge],
+    directed: Optional[Sequence[bool]] = None,
 ) -> nx.MultiGraph:
     """Assemble a NetworkX MultiGraph. Node attrs carry the full node dict;
-    edge attrs carry method/polyline/tile/confidence."""
+    edge attrs carry method/polyline/tile/confidence/directed.
+
+    ``directed`` is an optional per-edge flag list (parallel to ``edges``).
+    Missing/short → the edge is treated as undirected (``directed=False``),
+    preserving v0 behaviour. The graph object itself stays an undirected
+    MultiGraph (NetworkX); flow direction is carried as an edge attribute so the
+    on-disk contract is the single source of truth, not the container type."""
     g = nx.MultiGraph()
     for node in nodes:
         nid = str(node["node_id"])
@@ -43,6 +50,7 @@ def build_multigraph(
             tile=e.tile,
             method=e.method,
             confidence=e.confidence,
+            directed=bool(directed[i]) if directed is not None and i < len(directed) else False,
         )
     return g
 
@@ -56,11 +64,17 @@ def assemble(
     page: int,
     generated_at: str,
     fallback_used: bool = False,
+    directed: Optional[Sequence[bool]] = None,
 ) -> Dict[str, Any]:
     """Build the ``canonical_graph.json`` dict (the JobGraph).
 
     Node order is preserved from input. ``floating_nodes`` are node_ids that
-    appear in no edge. The shape matches predecessor spec §3 exactly.
+    appear in no edge. The shape matches predecessor spec §3 exactly, plus the
+    per-edge ``directed`` flag (2026-06-17 graph-directions spec).
+
+    ``directed`` is an optional per-edge bool list parallel to ``edges``. A
+    missing/short entry → ``False`` (undirected). Legacy graphs that lack the
+    key on disk also read as ``False`` at the read layer.
     """
     node_dicts: List[Dict[str, Any]] = []
     connected: set = set()
@@ -78,6 +92,7 @@ def assemble(
                 "tile": e.tile,
                 "method": e.method,
                 "confidence": e.confidence,
+                "directed": bool(directed[i]) if directed is not None and i < len(directed) else False,
             }
         )
 

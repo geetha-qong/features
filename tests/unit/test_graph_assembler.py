@@ -50,14 +50,18 @@ def test_assemble_shape_and_attrs():
     n0 = graph["nodes"][0]
     assert set(n0.keys()) == {"id", "entity_id", "tag", "class", "bbox", "tile", "confidence"}
     assert n0["id"] == "n_001"
-    # Spec §3 edge keys
+    # Spec §3 edge keys (+ `directed` from the 2026-06-17 graph-directions spec)
     e0 = graph["edges"][0]
-    assert set(e0.keys()) == {"id", "source", "target", "polyline", "tile", "method", "confidence"}
+    assert set(e0.keys()) == {
+        "id", "source", "target", "polyline", "tile", "method", "confidence", "directed"
+    }
     assert e0["id"] == "e_000"
     assert e0["source"] == "n_001"
     assert e0["target"] == "n_002"
     assert e0["method"] == "opencv"
     assert e0["polyline"] == [[15, 10], [105, 10]]
+    # No `directed` arg passed → defaults to False (undirected).
+    assert e0["directed"] is False
     # No floating nodes (both connected)
     assert graph["floating_nodes"] == []
     assert graph["orphan_lines"] == []
@@ -103,3 +107,40 @@ def test_build_multigraph_structure():
         _edges() + [Edge("n_001", "n_002", [(1, 1)], "page", "llm_fallback", 0.5)],
     )
     assert g2.number_of_edges() == 2
+
+
+# ── directed flag (graph-directions, 2026-06-17) ──────────────────────────────
+
+def test_assemble_directed_flag_per_edge():
+    edges = _edges() + [
+        Edge("n_001", "n_002", [(15, 12), (105, 12)], "page", "opencv", 0.6),
+    ]
+    graph = assemble(
+        _nodes(), edges, [], job_id=1, page=1, generated_at=GEN_AT,
+        directed=[True, False],
+    )
+    assert graph["edges"][0]["directed"] is True
+    assert graph["edges"][1]["directed"] is False
+    # Round-trips byte-stable with the new key.
+    assert from_json(to_json(graph)) == graph
+
+
+def test_assemble_directed_short_list_defaults_false():
+    edges = _edges() + [Edge("n_001", "n_002", [(15, 12), (105, 12)], "page", "opencv", 0.6)]
+    # Only one flag supplied for two edges → second falls back to False.
+    graph = assemble(
+        _nodes(), edges, [], job_id=1, page=1, generated_at=GEN_AT, directed=[True],
+    )
+    assert graph["edges"][0]["directed"] is True
+    assert graph["edges"][1]["directed"] is False
+
+
+def test_build_multigraph_carries_directed():
+    g = build_multigraph(_nodes(), _edges(), directed=[True])
+    # MultiGraph edge attr carries the flag.
+    _u, _v, data = list(g.edges(data=True))[0]
+    assert data["directed"] is True
+    # No directed list → defaults False.
+    g2 = build_multigraph(_nodes(), _edges())
+    _u, _v, data2 = list(g2.edges(data=True))[0]
+    assert data2["directed"] is False
