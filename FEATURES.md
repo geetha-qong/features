@@ -24,6 +24,46 @@
 
 ---
 
+## [2026-06-17] #55 — Mark-Symbol → exports sync; label hover-toggle; Re-process button; job-56 scatter diagnosed
+
+**Type:** feature, bugfix
+**Stage:** webapp
+**Status:** shipped (3 features deployed to dev); job-56 detection-scatter DIAGNOSED, fix not yet built
+
+**Why:** Batch of user-reported gaps. (1) "Mark Symbol" canvas adds/deletes didn't
+show in exports/drawer/bulk-review (two unsynced stores). (2) Element labels were
+always on, overlapping the small symbols on dense drawings. (3) Old/empty jobs
+(20/21) had no in-Studio way to re-detect with the new model. (4) Job 56's
+detections look "scattered" / off the symbols.
+
+**What (shipped):**
+- **Annotation→canonical sync** (`annotations.py`): a TAGGED user_annotation is
+  mirrored into canonical.json (so exports/DatasheetDrawer/BulkReview see it);
+  untagged/rejected/deleted/cleared-tag removes it. Rule: reaches deliverables
+  only once tagged. uuid4 (annotation) vs uuid5 (pipeline) ids don't collide.
+  Tests: `test_annotation_canonical_sync.py` (5).
+- **Label hover-toggle** (`PidCanvas.tsx`/`Studio.tsx`): labels render only for
+  hovered/selected element by default; toolbar "Labels" toggle shows all (with
+  collision filter). De-clutters dense canvases.
+- **"Re-process" button** (`StudioTopBar.tsx`): POSTs the existing prefix-less
+  `/jobs/{id}/rerun` (full pipeline: current-model YOLO + graph), confirm-gated,
+  reloads to progress panel. User-initiated only; entity_overrides preserved.
+
+**Result:** 15 backend annotation tests pass; frontend tsc clean + 121 vitest.
+
+**Notes — JOB-56 SCATTER ROOT CAUSE (fix pending):** detections are stored
+**tile-local in the tiling source resolution** (~7146px page render), but the
+canvas renders the page UPSCALED (`?w=8000` at fit, **`?w=12000` when zoomed** —
+hi-DPI re-render FEATURES #43) and adds the tile bbox WITHOUT rescaling. Net: each
+detection is pulled toward its tile corner by `(1 − 7146/render_width)` — ~11% at
+fit, **~40% at w=12000** (worse as you zoom; obvious on job 56's 580 dense dets).
+Playwright: glyphs cover only 6–78% of page width. **Fix:** rescale tile bboxes by
+`render_width / tiling_source_width` in the detection-render path (the graph layer
+ALREADY does this via `natural/page_width` — mirror it; persist the tiling source
+width). Detection coords themselves are fine — purely a render-scale bug.
+
+---
+
 ## [2026-06-17] #54 — Fix graph canvas coords (top-left blob) + graph failure overlay
 
 **Type:** bugfix, feature
