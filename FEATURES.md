@@ -24,6 +24,54 @@
 
 ---
 
+## [2026-06-17] #54 — Fix graph canvas coords (top-left blob) + graph failure overlay
+
+**Type:** bugfix, feature
+**Stage:** graph, webapp
+**Status:** shipped (deployed to dev; jobs 1, 44 re-extracted)
+
+**Why:** User reported the "Graph" overlay drew all nodes/edges as a blob in the
+top-left corner of the P&ID, not on the symbols. Two bugs: (1) the graph pipeline
+got **raw** `gpu_detections` (legacy shape: `bbox_tile` + `tile_row/col/page`, no
+`bbox`/`tile`), but `loader.to_page_pixel_detections` keyed on `bbox`/`tile` — so
+NO tile→page translation happened and every node collapsed into tile-local coords;
+(2) graph coords live in the traced page-image space (e.g. 7152×5052) while the
+canvas renders the page at a different resolution (8000×5652) with no scaling.
+Also: the resolver's `orphan_lines` (failed-to-connect pipe segments) were never
+drawn, so users couldn't SEE where extraction failed.
+
+**What:**
+- `loader.to_page_pixel_detections`: normalize the legacy detection shape
+  (`bbox_tile` + `tile_row/col/page` → `bbox` + `tile_p{p}_r{r}_c{c}.png`),
+  mirroring `api_v1._normalize_detection_shape`. Core coord fix.
+- `assembler.assemble` + `pipeline`: emit `page_width`/`page_height` (traced
+  page-image dims) in `canonical_graph.json`.
+- `GraphLayer.tsx`: wrap graph geometry in `<g transform="scale(natural/page)">`
+  so nodes/edges/orphans land on the canvas; absent dims (legacy) → no scaling.
+- **Failure overlay:** render `orphan_lines` as faint dashed-amber polylines +
+  floating/unlinked nodes (in `floating_nodes` or `entity_id==null`) as amber
+  rings; footer chip shows "N unconnected". Lets users see failures and draw the
+  missing edges (human-in-the-loop training signal).
+
+**Result (Playwright-verified on dev, job 1):** node-center span went from
+top-left X 102–3135 to **X 1183–5762 / Y 1428–3165** (distributed across the
+page); `scale(1.1186,1.1188)` applied; 96 nodes / 110 edges / 100 orphans render
+on the symbols (screenshots confirm). graph/edge suite 121 pass; GraphLayer 14
+vitest (added scale + no-scale); tsc clean.
+
+**Notes:**
+- **Graph extraction is still LLM-fallback-heavy and orphan-heavy** on real
+  drawings (job 44: 32 nodes, ~27 edges, 150 orphans, fallback=True) — detected
+  pipe geometry mostly doesn't link. The tracer/resolver TUNING explored this
+  session (wider snap, node-segment arrow orientation) was **REJECTED**: it did
+  NOT drop orphans (they're tracer noise, not near-misses) and regressed job 51
+  (14→4 edges). Right next lever is this failure overlay + a real
+  tracer-quality/eval pass, NOT blind threshold widening.
+- **`extract_graph(write_file=True)` overwrites `canonical_graph.json` on disk** —
+  measuring on real jobs mutates dev data; re-extract with deployed code to restore.
+
+---
+
 ## [2026-06-17] #53 — Directed process graph (flow direction) — model arrows + user edges
 
 **Type:** feature
