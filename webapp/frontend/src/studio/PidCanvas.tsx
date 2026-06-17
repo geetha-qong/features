@@ -194,6 +194,11 @@ interface Props {
   /** Show ALL element labels at once. Default (false) = labels only on the
    *  hovered/selected element, so dense drawings stay readable. */
   showAllLabels?: boolean;
+  /** Resolution the detection tile-coords are in (page_0_full.png). The canvas
+   *  renders the page at a different (zoom-dependent) width, so detection coords
+   *  must be rescaled by render_w/tilingWidth. Null → no rescale (legacy). */
+  tilingWidth?: number | null;
+  tilingHeight?: number | null;
   /** Called once when the full-page image loads, providing its natural dimensions.
    *  Studio uses this to compute pan-to coordinates for sidebar → canvas sync. */
   onNaturalSize?: (w: number, h: number) => void;
@@ -224,6 +229,8 @@ export default function PidCanvas({
   graph,
   showGraph,
   showAllLabels,
+  tilingWidth,
+  tilingHeight,
   onNaturalSize,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -336,6 +343,8 @@ export default function PidCanvas({
             graph={graph ?? null}
             showGraph={!!showGraph}
             showAllLabels={!!showAllLabels}
+            tilingWidth={tilingWidth ?? null}
+            tilingHeight={tilingHeight ?? null}
             onNaturalSize={onNaturalSize}
           />
         )}
@@ -485,6 +494,8 @@ function PageWithOverlays({
   graph,
   showGraph,
   showAllLabels,
+  tilingWidth,
+  tilingHeight,
   onNaturalSize,
 }: {
   pageFullUrl: string;
@@ -510,6 +521,8 @@ function PageWithOverlays({
   graph: JobGraph | null;
   showGraph: boolean;
   showAllLabels: boolean;
+  tilingWidth: number | null;
+  tilingHeight: number | null;
   onNaturalSize?: (w: number, h: number) => void;
 }) {
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
@@ -546,25 +559,43 @@ function PageWithOverlays({
     x0: number; y0: number; x1: number; y1: number;
   } | null>(null);
 
+  // Tile offsets are computed in the TILING SOURCE resolution (the page_0_full
+  // .png the tiles were cut from), because detection bboxes are tile-local in
+  // THAT space. The canvas renders the page at a different, zoom-dependent width
+  // (`natural`), so we scale the resulting page coord by natural/source below.
+  // When tilingWidth is absent (legacy jobs), fall back to `natural` → scale 1,
+  // i.e. the previous behavior (no regression).
+  const tilingSource = useMemo(() => {
+    if (tilingWidth && tilingHeight) return { w: tilingWidth, h: tilingHeight };
+    return natural;
+  }, [tilingWidth, tilingHeight, natural]);
+
   const offsets = useMemo(() => {
-    if (!natural) return new Map<string, TileBox>();
-    return computeTileOffsets(natural, pageIndex);
-  }, [natural, pageIndex]);
+    if (!tilingSource) return new Map<string, TileBox>();
+    return computeTileOffsets(tilingSource, pageIndex);
+  }, [tilingSource, pageIndex]);
 
   // Translate detections to page-pixel coords. Drop those whose tile filename
   // doesn't match any computed offset (would indicate a multi-page mismatch).
   const pageDetections = useMemo(() => {
-    if (!natural) return [];
+    if (!natural || !tilingSource) return [];
+    // Scale source-space page coords → the canvas viewBox (`natural`). 1 when
+    // tilingSource === natural (legacy fallback).
+    const sx = natural.w / tilingSource.w;
+    const sy = natural.h / tilingSource.h;
     // map first (preserves global index), then filter — _origIdx lets the
     // render loop compute the same key that buildElementsForTile assigned.
     return detections
       .map((d, origIdx) => {
         if (!Array.isArray(d.bbox) || d.bbox.length !== 4 || !d.tile) return null;
-        const pb = tileBboxToPage(d.bbox as number[], d.tile as string, offsets);
+        const pbSrc = tileBboxToPage(d.bbox as number[], d.tile as string, offsets);
+        const pb = pbSrc
+          ? ([pbSrc[0] * sx, pbSrc[1] * sy, pbSrc[2] * sx, pbSrc[3] * sy] as [number, number, number, number])
+          : null;
         return pb ? { ...d, pageBbox: pb, _origIdx: origIdx } : null;
       })
       .filter((d): d is NonNullable<typeof d> => d !== null);
-  }, [detections, offsets, natural]);
+  }, [detections, offsets, natural, tilingSource]);
 
   // Map screen click → page-pixel coords (inverse of SVG viewBox transform).
   function clientToPagePixel(clientX: number, clientY: number): [number, number] | null {

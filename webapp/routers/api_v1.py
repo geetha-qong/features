@@ -8,7 +8,7 @@ import secrets as _secrets
 import shutil
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 from webapp.datetime_utils import utc_iso
@@ -274,6 +274,37 @@ def _yolo_class_to_canonical(label: Optional[str]) -> tuple:
     Name + signature kept stable for the two call sites in this module.
     """
     return yolo_to_canonical(label)
+
+
+def _tiling_source_dims(job) -> Tuple[Optional[int], Optional[int]]:
+    """(width, height) of the page-image the detection tiles were cut from.
+
+    Detection `bbox`/`bbox_tile` coords are tile-local in this resolution (the
+    pdf_to_tiles zoom=6 render, page_0_full.png). The Studio canvas renders the
+    page at a DIFFERENT, zoom-dependent width (?w=8000..12000), so the frontend
+    must rescale detection coords by render_width / this_width — otherwise they
+    pull toward each tile's top-left corner (worse as you zoom). Returns
+    (None, None) when the source PNG isn't on disk (frontend then skips scaling).
+    """
+    try:
+        from PIL import Image
+    except Exception:
+        return (None, None)
+    try:
+        job_dir = get_job_dir(job)
+    except Exception:
+        return (None, None)
+    for cand in (
+        job_dir / "tmp" / "page_0_full.png",
+        job_dir / "page_0_full.png",
+    ):
+        try:
+            if cand.exists():
+                with Image.open(str(cand)) as im:
+                    return (int(im.size[0]), int(im.size[1]))
+        except Exception:
+            continue
+    return (None, None)
 
 
 def _normalize_detection_shape(detections: list) -> None:
@@ -543,6 +574,8 @@ async def api_job_detections(
         for v in valve_rows
     ]
 
+    tiling_w, tiling_h = _tiling_source_dims(job)
+
     return {
         "job_id": job_id,
         "status": job.status,
@@ -550,6 +583,10 @@ async def api_job_detections(
         "detections": detections,
         "detection_count": len(detections),
         "valves": valves,
+        # Resolution the detection tile-coords live in (page_0_full.png). The
+        # canvas renders at a different width and rescales by render_w/tiling_w.
+        "tiling_width": tiling_w,
+        "tiling_height": tiling_h,
     }
 
 

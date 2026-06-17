@@ -782,6 +782,8 @@ export default function Studio({ project, userName, onBack }: Props) {
             tileImageUrl={activeTileUrl}
             tileFilename={activeTileFilename}
             detections={detResp?.detections}
+            tilingWidth={detResp?.tiling_width ?? null}
+            tilingHeight={detResp?.tiling_height ?? null}
             valveCount={detResp?.valves.length ?? 0}
             valveCountTotal={detResp?.valve_count ?? 0}
             mode={canvasMode}

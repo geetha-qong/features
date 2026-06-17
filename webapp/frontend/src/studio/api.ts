@@ -61,6 +61,11 @@ export interface JobDetectionsResp {
   detections: DetectionItem[];
   detection_count: number;
   valves: ValveRow[];
+  /** Resolution the detection tile-coords live in (page_0_full.png). The canvas
+   *  renders the page at a different (zoom-dependent) width, so detection coords
+   *  are rescaled by render_w/tiling_width. Null on legacy jobs → no rescale. */
+  tiling_width?: number | null;
+  tiling_height?: number | null;
 }
 
 // HttpError is declared before `call<T>` so reads can also throw it; the
