@@ -20,6 +20,10 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from webapp.deliverables.base import Generator
 from webapp.deliverables.canonical import CanonicalEntity, JobCanonical
 from webapp.deliverables.field_resolver import resolve_field
+from webapp.deliverables.ids_schema import (
+    get_ids_sections_for_type,
+    normalize_subclass,
+)
 from webapp.deliverables.registry import REGISTRY
 from webapp.deliverables.template import TemplateConfig
 
@@ -88,8 +92,22 @@ IDS_SECTIONS: List[Tuple[str, List[Tuple[str, str]]]] = [
 SECTION_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
 
 
-def _filter_instruments(entities: List[CanonicalEntity]) -> List[CanonicalEntity]:
-    return [e for e in entities if e.entity_class == "instrument"]
+def _filter_datasheet_entities(entities: List[CanonicalEntity]) -> List[CanonicalEntity]:
+    """Entities that get a datasheet sheet.
+
+    Includes every instrument plus the datasheet-bearing valves — control
+    valves and relief/safety valves (entity_class == "valve" with a sub_class
+    that normalizes to a known IDS type: CV / PT / PSV).
+    """
+    return [
+        e
+        for e in entities
+        if normalize_subclass(e.sub_class) is not None or e.entity_class == "instrument"
+    ]
+
+
+# Backwards-compat alias — older callers/tests import the previous name.
+_filter_instruments = _filter_datasheet_entities
 
 
 def _sheet_name_for(entity: CanonicalEntity) -> str:
@@ -104,43 +122,46 @@ class DatasheetXLSXGenerator(Generator):
     file_format: ClassVar[str] = "xlsx"
 
     def generate(self, canonical: JobCanonical, template: TemplateConfig) -> bytes:
-        instruments = _filter_instruments(canonical.entities)
+        entities = _filter_datasheet_entities(canonical.entities)
         deliv = template.deliverables.get("datasheet")
         font_name = (deliv.font if deliv else None) or "Calibri"
 
         wb = Workbook()
         wb.remove(wb.active)  # remove default empty sheet
 
-        if not instruments:
-            wb.create_sheet("Datasheet")  # empty placeholder if no instruments
+        if not entities:
+            wb.create_sheet("Datasheet")  # empty placeholder if no entities
 
-        for instr in instruments:
-            ws = wb.create_sheet(_sheet_name_for(instr))
+        for entity in entities:
+            ws = wb.create_sheet(_sheet_name_for(entity))
             ws.column_dimensions["A"].width = 6
             ws.column_dimensions["B"].width = 32
             ws.column_dimensions["C"].width = 40
 
             row = 1
             # Title row (merged A:C)
-            ws.cell(row=row, column=1, value=f"Instrument Datasheet — {instr.tag or ''}")
+            ws.cell(row=row, column=1, value=f"Instrument Datasheet — {entity.tag or ''}")
             ws.cell(row=row, column=1).font = Font(name=font_name, bold=True, size=14)
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
             row += 2  # blank gap after title
 
+            # Per-entity section set, dispatched on its sub_class.
+            sections = get_ids_sections_for_type(entity.sub_class)
+
             field_num = 1
-            for section_idx, (section_name, fields) in enumerate(IDS_SECTIONS):
+            for section in sections:
                 # Section header row (merged A:C, bold, grey fill)
-                ws.cell(row=row, column=1, value=section_name)
+                ws.cell(row=row, column=1, value=section.name)
                 ws.cell(row=row, column=1).font = Font(name=font_name, bold=True)
                 ws.cell(row=row, column=1).fill = SECTION_FILL
                 ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
                 row += 1
 
-                for label, path in fields:
+                for field in section.fields:
                     ws.cell(row=row, column=1, value=field_num)
-                    ws.cell(row=row, column=2, value=label)
+                    ws.cell(row=row, column=2, value=field.header)
                     ws.cell(row=row, column=2).font = Font(name=font_name)
-                    ws.cell(row=row, column=3, value=resolve_field(instr, path))
+                    ws.cell(row=row, column=3, value=resolve_field(entity, field.path))
                     ws.cell(row=row, column=3).font = Font(name=font_name)
                     ws.cell(row=row, column=3).alignment = Alignment(wrap_text=True)
                     row += 1

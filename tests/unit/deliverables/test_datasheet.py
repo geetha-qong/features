@@ -5,7 +5,8 @@ from pathlib import Path
 import openpyxl
 
 from webapp.deliverables.canonical import JobCanonical
-from webapp.deliverables.datasheet import DatasheetXLSXGenerator, IDS_SECTIONS
+from webapp.deliverables.datasheet import DatasheetXLSXGenerator
+from webapp.deliverables.ids_schema import get_ids_sections_for_type
 from webapp.deliverables.template_loader import TemplateLoader
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
@@ -37,21 +38,24 @@ def test_datasheet_xlsx_sheet_named_after_tag():
     assert "422-11-PT-006A" in wb.sheetnames
 
 
-def test_datasheet_xlsx_has_all_11_sections():
+def test_datasheet_xlsx_has_per_type_sections():
+    """Sample entity is a PT, so the sheet now carries the PT (+common) section
+    set from ids_schema — not the old hardcoded 11 CV-shaped sections."""
     job = load_sample()
     tpl = TemplateLoader().load("default")
     out = DatasheetXLSXGenerator().generate(job, tpl)
     wb = open_workbook(out)
     ws = wb["422-11-PT-006A"]
-    # All section labels should appear in column A
     column_a_values = [ws.cell(row=r, column=1).value for r in range(1, ws.max_row + 1)]
-    section_names = [name for name, _fields in IDS_SECTIONS]
-    assert len(section_names) == 11
+    section_names = [s.name for s in get_ids_sections_for_type("PT")]
+    assert len(section_names) > 5
     for section in section_names:
         assert section in column_a_values, f"section '{section}' missing"
 
 
-def test_datasheet_xlsx_contains_vendor_data_in_purchase_section():
+def test_datasheet_xlsx_contains_vendor_identity_data():
+    """Vendor identity (manufacturer / model / part no) lands in the common
+    Commercial section, resolved from vendor_match.{vendor_name,product_name,part_number}."""
     job = load_sample()
     tpl = TemplateLoader().load("default")
     out = DatasheetXLSXGenerator().generate(job, tpl)
@@ -90,12 +94,13 @@ def test_datasheet_xlsx_section_headers_are_merged_a_to_c():
     wb = open_workbook(out)
     ws = wb["422-11-PT-006A"]
     merged_ranges = {str(r) for r in ws.merged_cells.ranges}
-    # Find the row where "General Data" appears in column A; expect A:C merge there
+    # The first section header for a PT (common Identity) must be merged A:C.
+    first_section = get_ids_sections_for_type("PT")[0].name
     for r in range(1, ws.max_row + 1):
-        if ws.cell(row=r, column=1).value == "General Data":
+        if ws.cell(row=r, column=1).value == first_section:
             assert f"A{r}:C{r}" in merged_ranges
             return
-    raise AssertionError("General Data section header row not found")
+    raise AssertionError(f"section header '{first_section}' row not found")
 
 
 def test_datasheet_xlsx_class_attrs():

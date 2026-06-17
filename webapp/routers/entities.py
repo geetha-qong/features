@@ -32,6 +32,11 @@ from webapp.auth import get_current_user
 from webapp.database import get_db
 from webapp.deliverables.canonical import CanonicalEntity
 from webapp.deliverables.field_resolver import resolve_field
+from webapp.deliverables.ids_schema import (
+    TYPE_LABELS,
+    get_ids_sections_for_type,
+    normalize_subclass,
+)
 from webapp.deliverables.job_loader import JobCanonicalNotFound, load_canonical_for_job
 from webapp.deliverables.overrides import (
     capture_prior_value,
@@ -121,6 +126,31 @@ class CreateEntityBody(BaseModel):
     """Flat field values using the same dot-notation as PATCH:
        "tag" → entity.tag, "fields.instrument_type" → entity.fields["instrument_type"], etc.
     """
+
+
+class DatasheetFieldOut(BaseModel):
+    field: str
+    header: str
+    source: str
+    editable: bool
+    value: Any
+    is_override: bool = False
+
+
+class DatasheetSectionOut(BaseModel):
+    name: str
+    fields: List[DatasheetFieldOut]
+
+
+class EntityDatasheetResponse(BaseModel):
+    entity_id: str
+    sub_class: str
+    type_label: str
+    type_supported: bool
+    tag: Optional[str]
+    pid_number: str
+    sheet_number: int
+    sections: List[DatasheetSectionOut]
 
 
 # --- helpers ---
@@ -439,3 +469,82 @@ def create_entity(
     db.commit()
 
     return {"entity_id": new_id, "applied": len(payload.fields)}
+
+
+@router.get(
+    "/{job_id}/entities/{entity_id}/datasheet",
+    response_model=EntityDatasheetResponse,
+    responses={
+        200: {"description": "Per-type datasheet (sectioned field metadata) for one entity"},
+        404: {"description": "Job, entity, or canonical not found / not owned by caller"},
+    },
+)
+def get_entity_datasheet(
+    job_id: int,
+    entity_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> EntityDatasheetResponse:
+    """Return the IDS (instrument datasheet) view for a single entity.
+
+    Sections come from the entity's sub_class via the IDS schema: a Common
+    section plus any type-specific section (CV / PT / PSV). Unknown sub_classes
+    get the Common section only and `type_supported=False`. Each field carries
+    its merged value (canonical + overrides) and whether the user has edited it.
+    """
+    job = _load_job_or_404(job_id, db, current_user)
+
+    try:
+        canonical = load_canonical_with_overrides(job.output_csv_path, job.id, db)
+    except JobCanonicalNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail=f"canonical.json missing for job {job_id}",
+        )
+
+    entity = next(
+        (e for e in canonical.entities if str(e.entity_id) == entity_id),
+        None,
+    )
+    if entity is None:
+        raise HTTPException(status_code=404, detail=f"entity {entity_id} not in job {job_id}")
+
+    # Which field paths has this caller overridden for this entity?
+    overridden = {
+        ov.field_name
+        for ov in db.query(EntityOverride.field_name)
+        .filter(
+            EntityOverride.job_id == job_id,
+            EntityOverride.entity_id == entity_id,
+        )
+        .all()
+    }
+
+    sections_out: List[DatasheetSectionOut] = []
+    for section in get_ids_sections_for_type(entity.sub_class):
+        fields_out = [
+            DatasheetFieldOut(
+                field=f.path,
+                header=f.header,
+                source=f.source,
+                editable=f.editable,
+                value=resolve_field_raw(entity, f.path),
+                is_override=f.path in overridden,
+            )
+            for f in section.fields
+        ]
+        sections_out.append(DatasheetSectionOut(name=section.name, fields=fields_out))
+
+    type_key = normalize_subclass(entity.sub_class)
+    type_label = TYPE_LABELS.get(type_key, entity.sub_class or "Generic")
+
+    return EntityDatasheetResponse(
+        entity_id=str(entity.entity_id),
+        sub_class=entity.sub_class,
+        type_label=type_label,
+        type_supported=type_key is not None,
+        tag=entity.tag,
+        pid_number=entity.pid_number,
+        sheet_number=entity.sheet_number,
+        sections=sections_out,
+    )

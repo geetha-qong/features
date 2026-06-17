@@ -24,6 +24,46 @@
 
 ---
 
+## [2026-06-17] #59 — Per-instrument-type datasheet: full field sets in the Studio drawer + vendor-portal manifest
+
+**Type:** feature
+**Stage:** webapp / export
+**Status:** shipped (deployed to dev — CV/PT/PSV wired; 8 types pending)
+
+**Why:** The datasheet drawer showed a thin flat 6-field grid for every instrument
+(the columns "that went missing"). User wants the FULL datasheet field set per type
+visible when an element is clicked, and a build-ready column reference to create the
+vendor-portal DB. Origin: vendor-portal field-capture thread (datasheets provided:
+ASV_IDS.xlsx, Main Skid IDS.pdf, TNB-2 PT_FT_TT.pdf, Block-5 PSV).
+
+**What:** New single source of truth `webapp/deliverables/ids_schema.py`
+(`get_ids_sections_for_type(sub_class)` → sectioned `IdsField`s; path rules:
+process/user→`fields.ids_*` editable, vendor→`vendor_match.catalog_fields.*`
+read-only; identity→existing canonical paths; `normalize_subclass` maps FT→PT,
+RELIEF_SAFETY/RV/PRV→PSV). Consumed by BOTH the XLSX generator (`datasheet.py`,
+now per-type + includes control/relief valves, not instruments-only) and a new
+per-entity API `GET /api/v1/jobs/{id}/entities/{eid}/datasheet`
+(`routers/entities.py`). Drawer (`DatasheetDrawer.tsx` + `api.ts`) renders sectioned
+fields for the datasheet doc-type (vendor fields read-only, process/user editable via
+existing `entity_overrides` PATCH); other doc-types unchanged. Built by 4 parallel
+agents. New doc `docs/instrument-fields-manifest.md` — ~430 build-ready columns
+(snake_case + source + SQL type) across 11 types; the matched machine-readable pair
+to `instrument-datasheet-fields.md`.
+
+**Result:** CV 170 / PT 128 / PSV 132 fields (incl. 56 common); 0 duplicate paths
+(uniqueness test caught a PSV `molecular_weight` collision — fixed). 15 datasheet+schema
+tests pass; full suite 359 pass (1 pre-existing env failure in `test_sheets_*`, tile
+state, unrelated); `tsc --noEmit` + `vite build` clean; endpoint live-verified on a
+real entity.
+
+**Notes:** Only CV/PT/PSV have per-type schemas; the other 8 (TT, PG, TG, TW, TE, FE,
+RO) return common-only until transcribed (TODO in `ids_schema.py`). Vendor fields are
+read-only by design (filled by the vendor-match API); they show blank until the portal
+exists. PSV/CV are `entity_class=valve`, so the datasheet view is now class-agnostic
+(keyed on `entity_id`, not the instrument-only deliverable filter).
+
+---
+
 ## [2026-06-17] #58 — Mark-time AI tag read (OCR the user-drawn box)
 
 **Type:** feature

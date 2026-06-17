@@ -189,6 +189,45 @@ export const getEntities = (jobId: number, deliverableType: string) =>
   );
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Per-instrument-type datasheet (sectioned field set)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** One field in a sectioned instrument datasheet. `field` is the dot-notation
+ *  canonical path used as the PATCH key. `editable` is false for vendor fields
+ *  (filled via the vendor portal, read-only here). */
+export interface DatasheetFieldOut {
+  field: string;        // dot-notation canonical path (use as the patch key)
+  header: string;
+  source: "process" | "user" | "vendor";
+  editable: boolean;    // false for vendor fields (read-only, filled by vendor portal)
+  value: unknown;
+  is_override: boolean;
+}
+
+export interface DatasheetSectionOut {
+  name: string;
+  fields: DatasheetFieldOut[];
+}
+
+export interface EntityDatasheetResponse {
+  entity_id: string;
+  sub_class: string;
+  type_label: string;       // e.g. "Pressure Transmitter"; "Generic" if no per-type schema
+  type_supported: boolean;  // false -> only common fields returned
+  tag: string | null;
+  pid_number: string;
+  sheet_number: number;
+  sections: DatasheetSectionOut[];
+}
+
+/** Fetch the full per-instrument-type datasheet (grouped into sections) for a
+ *  single entity. 404 → job has no canonical.json (legacy). */
+export const getEntityDatasheet = (jobId: number, entityId: string) =>
+  call<EntityDatasheetResponse>(
+    `/api/v1/jobs/${jobId}/entities/${encodeURIComponent(entityId)}/datasheet`,
+  );
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Process-graph visualization (Stream 3)
 // ──────────────────────────────────────────────────────────────────────────────
 

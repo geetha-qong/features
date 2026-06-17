@@ -17,10 +17,13 @@ import {
   HttpError,
   createEntity,
   getEntities,
+  getEntityDatasheet,
   ocrBbox,
   patchEntity,
+  type DatasheetFieldOut,
   type EntitiesResponse,
   type EntityColumn,
+  type EntityDatasheetResponse,
   type EntityFieldValue,
   type EntityRow,
 } from "../api";
@@ -134,6 +137,10 @@ export default function DatasheetDrawer({
   // editable working copy. `originalEntity` powers the diff that drives Save
   // Draft + the per-field Reset button.
   const [resp, setResp] = useState<EntitiesResponse | null>(null);
+  // Sectioned per-instrument-type datasheet. Populated ONLY when
+  // docType === "datasheet"; null for all other doc types so the existing
+  // EntityFieldList path renders for index / valves / equip.
+  const [dsSections, setDsSections] = useState<EntityDatasheetResponse | null>(null);
   const [originalEntity, setOriginalEntity] = useState<EntityRow | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [unlocked, setUnlocked] = useState<Record<string, boolean>>({});
@@ -166,6 +173,9 @@ export default function DatasheetDrawer({
   const DISCOVERY_ORDER = ["valve_list", "instrument_index", "datasheet", "equipment_list"];
 
   const fetchEntity = useCallback(async () => {
+    // Datasheet has its own sectioned fetch path (fetchDatasheet) — do NOT
+    // route it through the getEntities flow.
+    if (docType === "datasheet") return;
     if (!entityId || !deliverableType || !open) return;
     const myReq = ++reqIdRef.current;
     setLoading(true);
@@ -251,11 +261,56 @@ export default function DatasheetDrawer({
       if (myReq === reqIdRef.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId, entityId, deliverableType, open, fallbackTag]);
+  }, [jobId, entityId, deliverableType, open, fallbackTag, docType]);
+
+  // Sectioned datasheet fetch — parallel to fetchEntity, used only when the
+  // user is viewing the "Instrument Datasheet" doc type. Shares the reqIdRef
+  // stale-guard so a fast docType/entity switch can't write stale state.
+  const fetchDatasheet = useCallback(async () => {
+    if (docType !== "datasheet" || !entityId || !open) return;
+    const myReq = ++reqIdRef.current;
+    setLoading(true);
+    setNotFound(false);
+    setLegacyJobNoCanonical(false);
+    setFetchError(null);
+    try {
+      const ds = await getEntityDatasheet(jobId, entityId);
+      if (myReq !== reqIdRef.current) return;
+      setDsSections(ds);
+      // Seed editValues from each editable field's value.
+      const init: Record<string, string> = {};
+      for (const sec of ds.sections) {
+        for (const f of sec.fields) {
+          if (f.editable) init[f.field] = valueToString(f.value);
+        }
+      }
+      setEditValues(init);
+      setUnlocked({});
+    } catch (e) {
+      if (myReq !== reqIdRef.current) return;
+      const msg = e instanceof Error ? e.message : "Failed to load datasheet";
+      if (e instanceof HttpError && e.status === 404) {
+        setLegacyJobNoCanonical(true);
+      } else {
+        setFetchError(msg);
+      }
+    } finally {
+      if (myReq === reqIdRef.current) setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId, entityId, docType, open]);
 
   useEffect(() => {
-    if (open) void fetchEntity();
-  }, [fetchEntity, open]);
+    if (!open) return;
+    if (docType === "datasheet") {
+      void fetchDatasheet();
+    } else {
+      // Clear sectioned state so the existing EntityFieldList path renders
+      // for index / valves / equip.
+      setDsSections(null);
+      void fetchEntity();
+    }
+  }, [fetchEntity, fetchDatasheet, docType, open]);
 
   // Esc to close, same UX as before.
   useEffect(() => {
@@ -278,6 +333,24 @@ export default function DatasheetDrawer({
   // value differs from the original. Read-only fields are filtered out
   // upstream by the schema's `editable` flag.
   const dirtyFields = useMemo(() => {
+    // Datasheet path: diff editable fields across all sections (path -> value
+    // where the working copy differs from the field's original value).
+    if (docType === "datasheet") {
+      if (!dsSections) return {};
+      const out: Record<string, unknown> = {};
+      for (const sec of dsSections.sections) {
+        for (const f of sec.fields) {
+          if (!f.editable) continue;
+          const cur = editValues[f.field] ?? "";
+          const origStr = valueToString(f.value);
+          if (cur !== origStr) {
+            const origType = typeof f.value === "number" ? "number" : "string";
+            out[f.field] = stringToValue(cur, origType);
+          }
+        }
+      }
+      return out;
+    }
     if (!resp) return {};
     const out: Record<string, unknown> = {};
     for (const col of resp.schema) {
@@ -296,24 +369,33 @@ export default function DatasheetDrawer({
       }
     }
     return out;
-  }, [resp, originalEntity, editValues]);
+  }, [resp, originalEntity, editValues, docType, dsSections]);
 
   const dirtyCount = Object.keys(dirtyFields).length;
 
   if (!open) return null;
 
   const currentDoc = DOC_TYPES.find((d) => d.key === docType) || DOC_TYPES[0];
-  const headerTag = originalEntity?.tag ?? fallbackTag ?? entityId ?? "—";
-  const headerType = originalEntity?.sub_class ?? fallbackType ?? "Entity";
+  const isDatasheet = docType === "datasheet";
+  const headerTag =
+    (isDatasheet ? dsSections?.tag : originalEntity?.tag) ?? fallbackTag ?? entityId ?? "—";
+  const headerType =
+    (isDatasheet ? dsSections?.type_label : originalEntity?.sub_class) ??
+    fallbackType ??
+    "Entity";
 
-  // For the progress bar: filled = non-empty values across editable columns.
+  // For the progress bar: filled = non-empty values across editable fields.
   // We count from `editValues` (the working copy) so the count reflects what
   // the user is actually staging, not the persisted state.
-  const editableCols = resp?.schema.filter((c) => c.editable) ?? [];
-  const filled = editableCols.filter(
-    (c) => (editValues[c.field] ?? "").trim() !== "",
+  const editableFieldPaths: string[] = isDatasheet
+    ? (dsSections?.sections.flatMap((s) =>
+        s.fields.filter((f) => f.editable).map((f) => f.field),
+      ) ?? [])
+    : (resp?.schema.filter((c) => c.editable).map((c) => c.field) ?? []);
+  const filled = editableFieldPaths.filter(
+    (p) => (editValues[p] ?? "").trim() !== "",
   ).length;
-  const totalFields = editableCols.length;
+  const totalFields = editableFieldPaths.length;
   const completion = totalFields === 0 ? 0 : Math.round((filled / totalFields) * 100);
 
   function update(key: string, val: string) {
@@ -368,7 +450,11 @@ export default function DatasheetDrawer({
       setToast({ kind: "ok", msg: `Saved (${dirtyCount} field${dirtyCount === 1 ? "" : "s"})` });
       // Refresh from server so `is_override` flips on the just-saved fields
       // and we have a fresh snapshot for the next diff.
-      await fetchEntity();
+      if (docType === "datasheet") {
+        await fetchDatasheet();
+      } else {
+        await fetchEntity();
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Save failed";
       setToast({ kind: "error", msg });
@@ -560,7 +646,17 @@ export default function DatasheetDrawer({
             </div>
           )}
 
-          {isDeliverableSupported && !loading && !fetchError && notFound && !legacyJobNoCanonical && resp && (
+          {isDatasheet && !loading && !fetchError && !legacyJobNoCanonical && dsSections && (
+            <SectionedDatasheet
+              response={dsSections}
+              editValues={editValues}
+              unlocked={unlocked}
+              onChange={update}
+              onUnlock={(k) => setUnlocked((u) => ({ ...u, [k]: true }))}
+            />
+          )}
+
+          {!isDatasheet && isDeliverableSupported && !loading && !fetchError && notFound && !legacyJobNoCanonical && resp && (
             <EntityFieldList
               schema={resp.schema}
               entity={null}
@@ -572,7 +668,7 @@ export default function DatasheetDrawer({
             />
           )}
 
-          {isDeliverableSupported && !loading && !fetchError && !notFound && resp && originalEntity && (
+          {!isDatasheet && isDeliverableSupported && !loading && !fetchError && !notFound && resp && originalEntity && (
             <EntityFieldList
               schema={resp.schema}
               entity={originalEntity}
@@ -718,6 +814,97 @@ function EntityFieldList({
           })}
         </div>
       </section>
+    </div>
+  );
+}
+
+/** Render the full per-instrument-type datasheet grouped into sections.
+ *  Each backend field is adapted into the synthetic `EntityColumn` +
+ *  `EntityFieldValue` shapes the existing cells expect, so we reuse
+ *  `EditableCell` / `ReadOnlyCell` verbatim. Vendor (`editable === false`)
+ *  fields render read-only; everything else is editable. */
+function SectionedDatasheet({
+  response,
+  editValues,
+  unlocked,
+  onChange,
+  onUnlock,
+}: {
+  response: EntityDatasheetResponse;
+  editValues: Record<string, string>;
+  unlocked: Record<string, boolean>;
+  onChange: (k: string, v: string) => void;
+  onUnlock: (k: string) => void;
+}) {
+  // Map a backend field to the synthetic shapes the existing cells consume.
+  // `source` collapses to the cell's "pid" | "manual" axis: vendor + overridden
+  // values both read as "pid" (pipeline/vendor-sourced); user-blank reads as
+  // "manual".
+  function toCellShapes(
+    f: DatasheetFieldOut,
+    i: number,
+  ): { col: EntityColumn; fv: EntityFieldValue } {
+    const col: EntityColumn = {
+      field: f.field,
+      header: f.header,
+      order: i,
+      editable: f.editable,
+    };
+    const fv: EntityFieldValue = {
+      value: f.value,
+      source: f.source === "vendor" ? "pid" : f.is_override ? "pid" : "manual",
+      is_override: f.is_override,
+    };
+    return { col, fv };
+  }
+
+  return (
+    <div className="ds-fields-flat" style={{ padding: "12px 16px" }}>
+      {!response.type_supported && (
+        <p style={{ fontSize: 12, color: "var(--fg-3)", marginBottom: 12 }}>
+          Generic datasheet — no type-specific fields for this sub-class yet.
+        </p>
+      )}
+      {response.sections.map((section, si) => (
+        <section key={`${section.name}-${si}`} className="ds-section open" style={{ marginBottom: 16 }}>
+          <div
+            className="ds-section-head"
+            style={{ pointerEvents: "none", padding: "8px 0", display: "flex", alignItems: "center", gap: 8 }}
+          >
+            <span className="num">{String(si + 1).padStart(2, "0")}</span>
+            <h3 style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{section.name}</h3>
+            <span className="ds-section-meta">{section.fields.length}</span>
+          </div>
+          <div
+            className="ds-fields"
+            style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}
+          >
+            {section.fields.map((f, fi) => {
+              const { col, fv } = toCellShapes(f, fi);
+              if (!f.editable) {
+                return <ReadOnlyCell key={f.field} col={col} fv={fv} />;
+              }
+              const isOverridden = !!fv.is_override;
+              const pidBadge = isPidSourced(fv) && !isOverridden;
+              const locked = pidBadge && !unlocked[f.field];
+              return (
+                <EditableCell
+                  key={f.field}
+                  col={col}
+                  fv={fv}
+                  value={editValues[f.field] ?? ""}
+                  locked={locked}
+                  isOverridden={isOverridden}
+                  showPidBadge={pidBadge}
+                  onChange={(v) => onChange(f.field, v)}
+                  onUnlock={() => onUnlock(f.field)}
+                  onReset={() => onChange(f.field, valueToString(f.value))}
+                />
+              );
+            })}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
