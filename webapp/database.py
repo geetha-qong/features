@@ -75,6 +75,10 @@ def run_migrations():
         # Edge flow-direction flag (graph-directions, 2026-06-17). Nullable so legacy
         # rows survive; new user edges default directed=true. BOOLEAN on both dialects.
         ("graph_corrections", "directed", "BOOLEAN DEFAULT TRUE"),
+        # graph_edges (auto-edge DB read-index): mirror the file's `directed`
+        # flag so cross-job DB queries can filter directed edges. Legacy rows
+        # default false (their canonical_graph.json predates orientation).
+        ("graph_edges", "directed", "BOOLEAN DEFAULT FALSE"),
     ]
     for table, column, col_type in new_columns:
         try:

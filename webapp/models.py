@@ -521,6 +521,7 @@ class GraphEdgeRow(Base):
     source_node = Column(String, nullable=False)                  # GraphNodeRow.node_id
     target_node = Column(String, nullable=False)
     method = Column(String, nullable=False, index=True)           # 'opencv' | 'llm_fallback'
+    directed = Column(Boolean, nullable=True, default=False)      # flow direction known (source->target oriented by an arrow)
     confidence = Column(Float, nullable=True)
     polyline = Column(JSON, nullable=False)                       # [[x,y],...] page-pixel
     tile = Column(String, nullable=True)

@@ -112,6 +112,17 @@ def test_sync_inserts_nodes_and_edges(db_session, job):
     assert db_session.query(models.GraphNodeRow).filter_by(job_id=job.id).count() == 2
     row = db_session.query(models.GraphEdgeRow).filter_by(job_id=job.id).one()
     assert row.method == "opencv" and row.source_node == "n_000"
+    assert row.directed is False  # no `directed` key in edge dict → stored false
+
+
+def test_sync_persists_directed_flag(db_session, job):
+    """A directed edge from canonical_graph.json stores directed=True in graph_edges."""
+    edges = [{"id": "e_dir", "source": "n_000", "target": "n_001",
+              "polyline": [[0, 0], [1, 1]], "method": "opencv",
+              "confidence": 0.9, "directed": True}]
+    sync_graph_to_db(_graph(job.id, edges), db_session)
+    row = db_session.query(models.GraphEdgeRow).filter_by(job_id=job.id, edge_id="e_dir").one()
+    assert row.directed is True
 
 
 def test_sync_is_idempotent_and_prunes_stale(db_session, job):

@@ -97,8 +97,9 @@ def _sync_edges(edges, job_id: int, sheet_number: int, db: Session) -> int:
             "source_node": str(edge["source"]),
             "target_node": str(edge["target"]),
             "method": edge.get("method") or "opencv",
-            "confidence": edge.get("confidence"),
+            "directed": bool(edge.get("directed", False)),
             "polyline": [list(p) for p in edge.get("polyline", [])],
+            "confidence": edge.get("confidence"),
             "tile": edge.get("tile"),
             "sheet_number": sheet_number,
         }
