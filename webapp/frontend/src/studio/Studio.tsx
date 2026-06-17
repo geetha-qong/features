@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, CheckCheck, Maximize, Minus, Network, PanelRightOpen, Plus } from "lucide-react";
+import { Check, CheckCheck, Maximize, Minus, Network, PanelRightOpen, Plus, Tag } from "lucide-react";
 import { useTheme } from "../theme/ThemeContext";
 import BulkReviewScreen from "./bulk-review/BulkReviewScreen";
 import DatasheetDrawer from "./datasheet/DatasheetDrawer";
@@ -196,6 +196,9 @@ export default function Studio({ project, userName, onBack }: Props) {
   // the canvas + chip + toggle quietly disable in that case.
   const [graph, setGraph] = useState<JobGraph | null>(null);
   const [showGraph, setShowGraph] = useState(false);
+  // Labels off by default: glyphs only, label on hover/select — keeps dense
+  // drawings readable. Toggle shows every element's label at once.
+  const [showAllLabels, setShowAllLabels] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -731,6 +734,21 @@ export default function Studio({ project, userName, onBack }: Props) {
               <Network size={15} strokeWidth={1.8} />
               Graph
             </button>
+            <button
+              type="button"
+              className={`graph-toggle ${showAllLabels ? "active" : ""}`}
+              onClick={() => setShowAllLabels((v) => !v)}
+              aria-pressed={showAllLabels}
+              data-active={showAllLabels}
+              title={
+                showAllLabels
+                  ? "Hide labels (show only on hover/select)"
+                  : "Show all element labels"
+              }
+            >
+              <Tag size={15} strokeWidth={1.8} />
+              Labels
+            </button>
             {totalIssues > 0 && (
               <span className="canvas-toolbar-issues" title={`${totalIssues} issues across this project`}>
                 <span className="num">{totalIssues}</span> issues
@@ -775,6 +793,7 @@ export default function Studio({ project, userName, onBack }: Props) {
             activeMarkClass={activeMarkClass}
             graph={graph}
             showGraph={showGraph}
+            showAllLabels={showAllLabels}
             onNaturalSize={(w, h) => setNaturalSize({ w, h })}
           />
           <div className="zoom-ctl">

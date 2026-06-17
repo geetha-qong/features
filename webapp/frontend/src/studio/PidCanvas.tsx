@@ -191,6 +191,9 @@ interface Props {
   graph?: JobGraph | null;
   /** Whether the graph overlay layer is toggled on. */
   showGraph?: boolean;
+  /** Show ALL element labels at once. Default (false) = labels only on the
+   *  hovered/selected element, so dense drawings stay readable. */
+  showAllLabels?: boolean;
   /** Called once when the full-page image loads, providing its natural dimensions.
    *  Studio uses this to compute pan-to coordinates for sidebar → canvas sync. */
   onNaturalSize?: (w: number, h: number) => void;
@@ -220,6 +223,7 @@ export default function PidCanvas({
   activeMarkClass,
   graph,
   showGraph,
+  showAllLabels,
   onNaturalSize,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -331,6 +335,7 @@ export default function PidCanvas({
             dark={dark}
             graph={graph ?? null}
             showGraph={!!showGraph}
+            showAllLabels={!!showAllLabels}
             onNaturalSize={onNaturalSize}
           />
         )}
@@ -479,6 +484,7 @@ function PageWithOverlays({
   dark,
   graph,
   showGraph,
+  showAllLabels,
   onNaturalSize,
 }: {
   pageFullUrl: string;
@@ -503,9 +509,12 @@ function PageWithOverlays({
   dark: boolean;
   graph: JobGraph | null;
   showGraph: boolean;
+  showAllLabels: boolean;
   onNaturalSize?: (w: number, h: number) => void;
 }) {
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  // Which element's label to show on hover (when not showing all labels).
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -764,11 +773,13 @@ function PageWithOverlays({
               const kind = labelToSymKind(d.label);       // YOLO label -> glyph
               const klass = colorForKind(kind);            // per-class palette color (LS-style)
               const human = displayNameForModelLabel(d.label);
-              // Always keep labels for selected; otherwise skip if too close to
-              // any earlier label that survived. Cheap O(n²) — fine because n
-              // is bounded by # bboxes on one P&ID page (~100s at worst).
-              let showLabel = !!human;
-              if (showLabel && !isSelected) {
+              const isHovered = hoveredKey === detKey;
+              // Default: labels only for the selected/hovered element, so dense
+              // drawings stay readable and labels don't overlap the symbols.
+              // "Show all labels" mode renders every label, suppressing ones too
+              // close to an already-placed label (deterministic collision filter).
+              let showLabel = !!human && (isSelected || isHovered || !!showAllLabels);
+              if (showLabel && showAllLabels && !isSelected && !isHovered) {
                 for (const p of placed) {
                   if (Math.abs(p.x - x1) < labelMinGap && Math.abs(p.y - y1) < labelMinGap) {
                     showLabel = false;
@@ -776,7 +787,7 @@ function PageWithOverlays({
                   }
                 }
               }
-              if (showLabel) placed.push({ x: x1, y: y1 });
+              if (showLabel && showAllLabels) placed.push({ x: x1, y: y1 });
               const w = x2 - x1;
               const h = y2 - y1;
               return (
@@ -807,6 +818,8 @@ function PageWithOverlays({
                       pointerEvents: clickable ? "auto" : "none",
                       cursor: clickable ? "pointer" : cursor,
                     }}
+                    onMouseEnter={() => setHoveredKey(detKey)}
+                    onMouseLeave={() => setHoveredKey((h) => (h === detKey ? null : h))}
                     onClick={
                       clickable
                         ? (ev) => {
@@ -891,6 +904,8 @@ function PageWithOverlays({
                     pointerEvents: mode === "select" ? "auto" : "none",
                     cursor: mode === "select" ? "pointer" : cursor,
                   }}
+                  onMouseEnter={() => setHoveredKey(a.entity_id)}
+                  onMouseLeave={() => setHoveredKey((h) => (h === a.entity_id ? null : h))}
                   onClick={
                     mode === "select"
                       ? (ev) => {
@@ -918,24 +933,26 @@ function PageWithOverlays({
                     style={{ pointerEvents: "none" }}
                   />
                 )}
-                <text
-                  x={x1}
-                  y={y1 - sw * 2}
-                  fontSize={Math.max(8, natural.w / 140)}
-                  fontFamily="Outfit, sans-serif"
-                  fontWeight="600"
-                  fill={klass}
-                  style={{ pointerEvents: "none", paintOrder: "stroke" }}
-                  stroke="#ffffff"
-                  strokeWidth={sw * 0.8}
-                  strokeOpacity={0.85}
-                >
-                  {canvasDisplayLabel({
-                    tag: a.tag,
-                    placeholder_tag: a.placeholder_tag,
-                    sub_class: a.sub_class,
-                  })}
-                </text>
+                {(isSelected || hoveredKey === a.entity_id || showAllLabels) && (
+                  <text
+                    x={x1}
+                    y={y1 - sw * 2}
+                    fontSize={Math.max(8, natural.w / 140)}
+                    fontFamily="Outfit, sans-serif"
+                    fontWeight="600"
+                    fill={klass}
+                    style={{ pointerEvents: "none", paintOrder: "stroke" }}
+                    stroke="#ffffff"
+                    strokeWidth={sw * 0.8}
+                    strokeOpacity={0.85}
+                  >
+                    {canvasDisplayLabel({
+                      tag: a.tag,
+                      placeholder_tag: a.placeholder_tag,
+                      sub_class: a.sub_class,
+                    })}
+                  </text>
+                )}
               </g>
             );
           })}
