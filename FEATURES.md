@@ -24,6 +24,28 @@
 
 ---
 
+## [2026-06-17] #58 — Mark-time AI tag read (OCR the user-drawn box)
+
+**Type:** feature
+**Stage:** webapp
+**Status:** shipped (deployed to dev, live-verified)
+
+**Why:** #57's re-read is most accurate when the crop comes from a box the USER
+draws AROUND the tag (the auto symbol-box misses the tag ~half the time, since the
+tag sits outside the symbol). Wire OCR into the Mark-Symbol flow.
+
+**What:** PidCanvas passes the normalized drawn box (computed at mark-time, where
+the render viewBox is known) as a 4th `onDropMark` arg. `Studio.onDropMark` awaits
+`createAnnotation` → `ocrBbox(drawnBox)` → `patchAnnotation(tag)`. The tag appears
+on the canvas label and syncs to exports via #55. Best-effort + editable; OCR
+failure never breaks the mark (try/catch, non-blocking).
+
+**Result:** tsc clean; 121 vitest; `POST /ocr-bbox` live 200 (returned correct
+`62-BV-151109`). Force-recreated web post-deploy (the recurring stale-container
+gotcha) so the fresh SPA bundle serves.
+
+---
+
 ## [2026-06-17] #57 — "Re-read tag (AI)" button (per-element vision re-OCR) + OCR/matching investigation
 
 **Type:** feature, investigation
