@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -163,6 +164,91 @@ def _row_to_response(row: UserAnnotation) -> AnnotationRow:
         created_at=row.created_at.isoformat() if row.created_at else None,
         updated_at=row.updated_at.isoformat() if row.updated_at else None,
     )
+
+
+# ── Annotation → canonical (deliverable) sync ────────────────────────────────
+#
+# Mark-Symbol annotations live in `user_annotations` (training signal). Exports,
+# the DatasheetDrawer, and Bulk Review all read canonical.json + entity_overrides.
+# To make a user-added symbol appear in those (and a deleted/rejected one
+# disappear), we mirror a TAGGED annotation into canonical.json. Product rule
+# (chosen 2026-06-17): a mark only reaches deliverables ONCE IT HAS A TAG; an
+# untagged or user_rejected mark is removed from canonical.
+#
+# canonical.json (file) is the source of truth the deliverable path reads; the
+# canonical_entities DB index is refreshed best-effort (admin cross-job queries).
+# Annotation entity_ids are uuid4 and pipeline canonical ids are uuid5 — the id
+# spaces don't collide, so upsert/remove by entity_id can't touch a pipeline row.
+
+_EXPORTABLE_STATUSES = {"user_added", "user_confirmed"}
+
+
+def _canonical_path(job: Job) -> Optional[Path]:
+    if not job.output_csv_path:
+        return None
+    return Path(job.output_csv_path).parent / "canonical.json"
+
+
+def _entity_dict_from_annotation(row: UserAnnotation) -> Dict[str, Any]:
+    """Build a canonical entity dict matching entities.create_entity's shape."""
+    fields: Dict[str, Any] = dict(row.fields_json or {})
+    pid_number = str(fields.pop("pid_number", "") or "")
+    return {
+        "entity_id": row.entity_id,
+        "entity_class": row.entity_class,
+        "sub_class": row.sub_class or "",
+        "tag": row.tag,
+        "pid_number": pid_number,
+        "sheet_number": row.sheet_number or 1,
+        "bbox": list(row.bbox) if row.bbox else [0.0, 0.0, 0.0, 0.0],
+        "fields": fields,
+        "vendor_match": None,
+    }
+
+
+def _refresh_canonical_db_index(job: Job, db: Session) -> None:
+    """Best-effort refresh of the canonical_entities read-index (admin queries).
+    Non-fatal: the deliverable path reads the file, not this index."""
+    try:
+        from webapp.deliverables.job_loader import load_canonical_for_job
+        from webapp.deliverables.canonical_db_index import sync_canonical_to_db
+
+        canonical = load_canonical_for_job(job.output_csv_path)
+        sync_canonical_to_db(canonical, db)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+def _sync_annotation_to_canonical(job: Job, row: UserAnnotation, db: Session) -> None:
+    """Upsert (tagged + exportable) or remove (untagged / rejected) the
+    annotation's entity in canonical.json so deliverables/drawer/bulk-review
+    reflect it. Idempotent; safe no-op when canonical.json is absent."""
+    path = _canonical_path(job)
+    if path is None or not path.exists():
+        return
+    raw = json.loads(path.read_text())
+    ents = [e for e in raw.get("entities", []) if e.get("entity_id") != row.entity_id]
+    should_export = bool(row.tag and row.tag.strip()) and row.status in _EXPORTABLE_STATUSES
+    if should_export:
+        ents.append(_entity_dict_from_annotation(row))
+    raw["entities"] = ents
+    path.write_text(json.dumps(raw, ensure_ascii=False, indent=2))
+    _refresh_canonical_db_index(job, db)
+
+
+def _remove_annotation_from_canonical(job: Job, entity_id: str, db: Session) -> None:
+    """Drop the annotation's entity from canonical.json (delete flow)."""
+    path = _canonical_path(job)
+    if path is None or not path.exists():
+        return
+    raw = json.loads(path.read_text())
+    ents = raw.get("entities", [])
+    kept = [e for e in ents if e.get("entity_id") != entity_id]
+    if len(kept) != len(ents):
+        raw["entities"] = kept
+        path.write_text(json.dumps(raw, ensure_ascii=False, indent=2))
+        _refresh_canonical_db_index(job, db)
 
 
 def _detection_label_to_class(
@@ -407,6 +493,9 @@ def patch_annotation(
 
     db.commit()
     db.refresh(row)
+    # Mirror into canonical.json so a now-tagged mark appears in exports/drawer/
+    # bulk-review (or is removed if it was untagged / rejected).
+    _sync_annotation_to_canonical(job, row, db)
     return _row_to_response(row)
 
 
@@ -447,4 +536,7 @@ def delete_annotation(
         )
     db.delete(row)
     db.commit()
+    # Remove from canonical.json so a deleted mark disappears from exports/
+    # drawer/bulk-review (training corrections were already recorded).
+    _remove_annotation_from_canonical(job, entity_id, db)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
