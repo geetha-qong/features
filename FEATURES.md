@@ -24,6 +24,46 @@
 
 ---
 
+## [2026-06-17] #52 — Instrument loop_name/signal fixes + taxonomy loose-ends close-out
+
+**Type:** bugfix, test
+**Stage:** export, symbols, webapp
+**Status:** shipped (deployed to dev; dev re-backfilled)
+
+**Why:** Two follow-ups after #51. (1) The deliverables test suite had 4
+long-standing failures; (2) taxonomy #49/#50 left two loose ends — a reported
+`sync_taxonomy_to_db` counter bug and an unexercised Label Triage loop. Built via
+two parallel agents, but both died at launch on transient API-529s, so done
+inline (with systematic-debugging verification per item).
+
+**What:**
+- `pipeline_emitter.py`: **loop_name** kept the trailing instance letter
+  ("422-11-PT-006A" → "...P-006A"); now stripped to "...P-006" (PT-006A/B share
+  loop 006). Pure-digit segments unchanged. Also **captured the "Signal Type"
+  CSV column** the emitter was silently dropping (added `signal_type` to the
+  dual-schema alias map). The emitter test + canonical fixture already encoded
+  the correct values — the code (and its comment) were wrong.
+- Stale instrument-index tests: default template legitimately grew **32 → 35
+  columns** (vendor-match enrichment) and is loop-centric (no raw tag column) —
+  updated the count test, regenerated the expected CSV fixture, switched the
+  filter test to loop-number + service assertions.
+- Taxonomy: the "counter mis-reports inserts as updated" note (from #50) was a
+  **non-issue** — fresh sync returns (43 inserted, 0 updated), re-run (0, 43),
+  already asserted in `test_taxonomy_db.py`. No code change. Added an end-to-end
+  `test_discover_then_classify_closes_the_loop` linking discovery → classify on
+  one row (the halves were covered separately).
+
+**Result:** deliverables suite 4 failing → 0 (78 pass); taxonomy/label suite 31
+pass. Dev re-backfilled (`backfill_canonical --from-db --force` +
+`index_canonical_to_db`) so loop_name/signal_type land in canonical.json.
+
+**Notes:** Full-app tests (import `webapp.main`) need py3.10+ (PEP-604 `X|None`
+in a transitive import) — run in the container, not host py3.9. The emitter's
+deliverables modules are 3.9-safe and run on host. #49/#50 status corrected to
+shipped below.
+
+---
+
 ## [2026-06-17] #51 — Repair empty instrument indexes on dev (dual-schema emitter + backfill --force)
 
 **Type:** bugfix, infra
@@ -65,7 +105,7 @@ pre-existing bug remains: instrument `loop_name` keeps the tag's trailing char
 
 **Type:** refactor
 **Stage:** symbols, webapp
-**Status:** experimental (branch `feat/taxonomy-foundation`, with #49)
+**Status:** shipped — merged to `dev` 2026-06-16 (was: experimental, branch `feat/taxonomy-foundation`). Loop exercised end-to-end in #52.
 
 **Why:** #49 preserved behavior via frontend override maps where my Phase-1 seed
 diverged from live values, and investigation found the codebase had **three**
@@ -99,7 +139,7 @@ truth for class display names + glyph kinds — no override maps remain.
 
 **Type:** architecture, feature
 **Stage:** symbols, webapp, infra
-**Status:** experimental (branch `feat/taxonomy-foundation`, NOT merged — PR review pending)
+**Status:** shipped — merged to `dev` 2026-06-16 (was: experimental, NOT merged — PR review pending). Counter "bug" in notes was a non-issue; loop exercised end-to-end — see #52.
 
 **Why:** The same symbol classes were defined in ~7 places (inference `CLASS_NAMES`,
 `api_v1._yolo_class_to_canonical`, `paletteColors.ts`, `labelMap.ts`,
