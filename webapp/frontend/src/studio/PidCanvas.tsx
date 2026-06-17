@@ -175,7 +175,7 @@ interface Props {
   /** Edges to overlay (Phase 4). Polylines in page-pixel coords. */
   edges?: EdgeLite[];
   /** Mark drop callback (Phase 3). Bbox is in page-pixel coords. */
-  onDropMark?: (bbox: [number, number, number, number], sub_class: string, entity_class: string) => void;
+  onDropMark?: (bbox: [number, number, number, number], sub_class: string, entity_class: string, bboxNorm?: [number, number, number, number]) => void;
   /** Edge-drawn callback (Phase 4). Polyline in page-pixel coords. */
   onEdgeDrawn?: (
     source_entity_id: string,
@@ -508,7 +508,7 @@ function PageWithOverlays({
   onSelect: (id: string, entityClass?: string) => void;
   selectedId: string;
   mode: CanvasMode;
-  onDropMark?: (bbox: [number, number, number, number], sub_class: string, entity_class: string) => void;
+  onDropMark?: (bbox: [number, number, number, number], sub_class: string, entity_class: string, bboxNorm?: [number, number, number, number]) => void;
   onEdgeDrawn?: (
     source_entity_id: string,
     target_entity_id: string,
@@ -639,10 +639,17 @@ function PageWithOverlays({
       if (bx1 - bx0 < 5 && by1 - by0 < 5) {
         bx0 = pt[0] - 30; by0 = pt[1] - 20; bx1 = pt[0] + 30; by1 = pt[1] + 20;
       }
+      // Normalized drawn box (0..1 of the source page) for at-mark-time OCR —
+      // the user frames the tag, so this crop reads far better than the auto
+      // symbol box. natural is the render viewBox; normalize against it.
+      const nb: [number, number, number, number] | undefined = natural
+        ? [bx0 / natural.w, by0 / natural.h, bx1 / natural.w, by1 / natural.h]
+        : undefined;
       onDropMark(
         [bx0, by0, bx1, by1],
         activeMarkClass.sub_class,
         activeMarkClass.entity_class,
+        nb,
       );
     };
     window.addEventListener("mousemove", onMove);

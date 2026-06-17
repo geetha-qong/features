@@ -16,6 +16,7 @@ import {
   getJobDetections,
   getJobGraph,
   getJobSheets,
+  ocrBbox,
   type EntitiesResponse,
   type JobDetectionsResp,
   type JobSheetsResp,
@@ -326,7 +327,7 @@ export default function Studio({ project, userName, onBack }: Props) {
   const [activeLineType, setActiveLineType] = useState<LineType>("process_pipe");
   const [pendingEdgeForMetadata, setPendingEdgeForMetadata] = useState<EdgeLite | null>(null);
 
-  const { annotations, create: createAnnotation, remove: removeAnnotation } = useAnnotations(project.id);
+  const { annotations, create: createAnnotation, patch: patchAnnotation, remove: removeAnnotation } = useAnnotations(project.id);
   const { edges, create: createEdge, patch: patchEdge } = useEdges(project.id);
   const { shortcuts } = useShortcuts();
 
@@ -341,22 +342,37 @@ export default function Studio({ project, userName, onBack }: Props) {
     [edges, activeSheetNumber],
   );
 
-  function onDropMark(
+  async function onDropMark(
     bbox: [number, number, number, number],
     sub_class: string,
     entity_class: string,
+    bboxNorm?: [number, number, number, number],
   ) {
     // entity_class comes from PalettePanel (string-typed at the canvas boundary)
     // but the backend only accepts the EntityClass union. Reject anything else
     // up-front rather than narrow with `as`.
     if (entity_class !== "valve" && entity_class !== "instrument" && entity_class !== "equipment") return;
-    void createAnnotation({
+    const row = await createAnnotation({
       entity_class,
       sub_class,
       bbox,
       sheet_number: activeSheetNumber,
       linked_detection_index: null,
     });
+    // At-mark-time AI tag read: the user framed the tag in their box, so OCR that
+    // exact region and pre-fill the tag (visible on the canvas label + flows to
+    // exports via the annotation→canonical sync). Best-effort + editable — if the
+    // read is wrong the user fixes it in the drawer. Non-blocking on failure.
+    if (row && bboxNorm) {
+      try {
+        const r = await ocrBbox(project.id, bboxNorm);
+        if (r.found && r.text) {
+          await patchAnnotation(row.entity_id, { tag: r.text });
+        }
+      } catch {
+        /* OCR is a bonus — never break the mark flow */
+      }
+    }
     // Stay armed for rapid placement; press Esc or click the palette button
     // again to disarm.
   }
