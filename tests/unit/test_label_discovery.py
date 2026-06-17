@@ -18,7 +18,8 @@ from sqlalchemy.pool import StaticPool
 
 from webapp.database import Base, get_db
 from webapp import models
-from webapp.auth import pwd_context
+from webapp import taxonomy as taxonomy_module
+from webapp.auth import create_access_token, pwd_context
 from webapp.main import app
 
 
@@ -164,3 +165,95 @@ def test_rediscovery_does_not_duplicate(client, db_session, user, api_key_pair):
         models.LabelTriage.label_value == "mystery_glyph"
     ).all()
     assert len(rows) == 1
+
+
+# ── End-to-end: discover → classify → taxonomy (Phase-4 loop) ──────────────────
+
+@pytest.fixture()
+def admin_user(db_session):
+    u = models.User(
+        username="triage_admin",
+        password_hash=pwd_context.hash("x"),
+        role="super_admin",
+        is_active=True,
+    )
+    db_session.add(u)
+    db_session.commit()
+    db_session.refresh(u)
+    return u
+
+
+@pytest.fixture()
+def restore_taxonomy_file():
+    """Snapshot taxonomy.json + reset cache; restore after (classify mutates it)."""
+    path = taxonomy_module._TAXONOMY_PATH
+    original = path.read_bytes()
+    taxonomy_module._cache = None
+    yield
+    path.write_bytes(original)
+    taxonomy_module._cache = None
+
+
+def test_discover_then_classify_closes_the_loop(
+    client, db_session, user, api_key_pair, admin_user, restore_taxonomy_file
+):
+    """The full Phase-4 loop on a SINGLE row: an unknown label discovered on the
+    detections endpoint becomes a pending triage row, which an admin then
+    classifies — promoting it to a real taxonomy class queryable from
+    taxonomy.json and the LabelTaxonomy read-index. (The per-step behaviours are
+    covered above and in test_taxonomy_admin.py; this proves they are wired
+    together.)"""
+    full_key, _ = api_key_pair
+
+    # 1) Discover: an unknown label files a pending triage row (source=detection).
+    job = _make_job(
+        db_session, user,
+        [{"bbox": [1, 2, 3, 4], "label": "mystery_glyph_e2e", "confidence": 0.95}],
+    )
+    assert _fetch(client, job.id, full_key).status_code == 200
+    row = (
+        db_session.query(models.LabelTriage)
+        .filter(models.LabelTriage.label_value == "mystery_glyph_e2e")
+        .one()
+    )
+    assert row.status == "pending"
+    assert row.source == "detection"
+
+    # 2) Classify (admin): approve THAT row → promote to a real taxonomy class.
+    client.cookies.set("access_token", create_access_token({"sub": admin_user.username}))
+    resp = client.post(
+        f"/api/v1/admin/label-triage/{row.id}/classify",
+        json={
+            "action": "approve",
+            "entity_class": "valve",
+            "sub_class": "E2E",
+            "display_name": "E2E Test Valve",
+            "color": "#0A0B0C",
+            "glyph_kind": "valve_gen",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "approved"
+
+    # 3) The discovered+classified label is now a real, queryable taxonomy class.
+    db_session.refresh(row)
+    assert row.status == "approved"
+    assert row.assigned_entity_class == "valve"
+    assert row.assigned_sub_class == "E2E"
+
+    taxonomy_module._cache = None  # force a fresh read of the mutated file
+    tax = taxonomy_module.load_taxonomy()
+    match = [
+        c for c in tax["classes"]
+        if c.get("entity_class") == "valve" and c.get("sub_class") == "E2E"
+    ]
+    assert len(match) == 1
+    assert match[0]["display_name"] == "E2E Test Valve"
+
+    tax_row = (
+        db_session.query(models.LabelTaxonomy)
+        .filter_by(entity_class="valve", sub_class="E2E")
+        .first()
+    )
+    assert tax_row is not None
+    assert tax_row.display_name == "E2E Test Valve"
