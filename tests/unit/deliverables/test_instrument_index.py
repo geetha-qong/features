@@ -27,20 +27,28 @@ def test_instrumentindex_csv_default():
     assert out == expected
 
 
-def test_instrumentindex_default_has_32_columns():
-    """Matches the TNB customer Instrument Index sample column count."""
+def test_instrumentindex_default_has_35_columns():
+    """Default Instrument Index column count.
+
+    Started at 32 (TNB customer sample); grew to 35 when the vendor-match
+    enrichment columns (Piping Class, CALB/Measuring Range, Certification,
+    Explosion Proof) were added to the default template.
+    """
     job = load_sample()
     tpl = TemplateLoader().load("default")
     out = InstrumentIndexCSVGenerator().generate(job, tpl).decode("utf-8")
     header = out.splitlines()[0]
-    assert len(header.split(",")) == 32
+    assert len(header.split(",")) == 35
 
 
 def test_instrumentindex_filters_to_instruments():
     job = load_sample()
     tpl = TemplateLoader().load("default")
     out = InstrumentIndexCSVGenerator().generate(job, tpl).decode("utf-8")
-    assert "422-11-PT-006A" in out
+    # Loop-centric format: no raw tag column — the PT-006A instrument is
+    # identified by its loop number (instance suffix dropped) + service.
+    assert "422-11-P-006" in out
+    assert "COMP SUCTION PRESS" in out
     assert "Yokogawa" in out  # vendor manufacturer appears
     assert "62-GL-151000" not in out
     assert "V-101" not in out

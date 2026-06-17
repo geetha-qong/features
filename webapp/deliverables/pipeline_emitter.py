@@ -11,6 +11,7 @@ Usage (later wired into pipeline_runner.py):
 
 import csv
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -191,6 +192,7 @@ _INSTRUMENT_FIELD_ALIASES: Dict[str, List[str]] = {
     "line_no":                 ["LINE NUMBER", "Line No"],
     "equipment_no":            ["EQUIP NO", "Equipment No"],
     "external_power_supply":   ["POWER SUPPLY", "External Power Supply"],
+    "signal_type":             ["SIGNAL TYPE", "Signal Type"],
     "signal_level":            ["SIGNAL VOLTAGE LEVEL", "Signal Level"],
     "location":                ["LOCATION", "Location"],
     "analog_range_low_scale":  ["RANGE MIN", "Analog Range Low"],
@@ -323,11 +325,16 @@ def _build_instrument_entities(instrument_csv: Path, job_id: int) -> List[Canoni
             type_code = next((p for p in tag_parts if p.isalpha()), "")
             fields["tag_type_code"] = type_code
 
-            # Loop Number: replace type code with its first letter only
-            # "62-FE-151002B" → "62-F-151002B"  |  "62-LIC-151006" → "62-L-151006"
+            # Loop Number: replace the type code with its first letter AND drop
+            # the trailing instance letter from the loop-number segment, so
+            # redundant instruments collapse to one loop (PT-006A and PT-006B
+            # are two transmitters in the SAME loop 006):
+            #   "422-11-PT-006A" → "422-11-P-006"  |  "62-FE-151002B" → "62-F-151002"
+            #   "62-LIC-151006"  → "62-L-151006"   (pure-digit segment unchanged)
             if type_code and type_code in tag_parts:
                 loop_parts = list(tag_parts)
                 loop_parts[loop_parts.index(type_code)] = type_code[0]
+                loop_parts[-1] = re.sub(r"([0-9]+)[A-Za-z]+$", r"\1", loop_parts[-1])
                 fields["loop_name"] = "-".join(loop_parts)
             else:
                 fields["loop_name"] = tag_str
