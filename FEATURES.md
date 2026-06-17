@@ -24,6 +24,44 @@
 
 ---
 
+## [2026-06-17] #56 — Fix detection scatter: rescale tile coords from tiling-source to render res
+
+**Type:** bugfix
+**Stage:** webapp
+**Status:** shipped (deployed to dev; Playwright-verified job 56 + job 1)
+
+**Why:** Job 56 (580 detections) showed badly scattered detection glyphs that drifted
+further off the symbols the more you zoomed — the #55-diagnosed render-scale bug.
+Detection bboxes are tile-local in the TILING SOURCE resolution (`page_0_full.png`,
+the pdf_to_tiles zoom=6 render ~7146px), but the canvas computed tile offsets at the
+RENDER width (`?w=8000` fit, `?w=12000` zoomed) and added the source-space bbox with
+no rescale → each detection pulled toward its tile's top-left by `(1 − source/render)`
+(~11% fit, ~40% at w=12000).
+
+**What:**
+- `api_v1.api_job_detections` returns `tiling_width/height` = `page_0_full.png` dims
+  (`_tiling_source_dims`; resolves dir via `output_csv_path` parent — get_job_dir's
+  user_id path misses org-scoped jobs ≥40; (None,None) when absent).
+- `PidCanvas` computes tile offsets in the SOURCE resolution, then scales the page
+  bbox by `natural/source` into the canvas viewBox (mirrors the #54 GraphLayer fix).
+  `tilingWidth` absent → scale 1 (legacy fallback, no regression). ONLY the detection
+  path changes — annotations/edges/graph untouched.
+
+**Result (Playwright on dev):** job 56 glyph X-spread **6–78% → 9–91%** (Y 6–72 → 9–80)
+— detections span the full drawing; at deep zoom (12000px re-render) glyphs sit ON the
+symbols (screenshots). Job 1 (sparse) no regression (17–81% / 21–63%). tiling dims
+verified live (job 56: 7146×5052, job 1: 7152×5052). tsc clean; 121 vitest pass.
+
+**Notes:**
+- **Post-deploy 502 recovered** mid-session via the documented force-recreate (web
+  container stuck `Created` on `up -d` name collision; `/healthz` 200 but `/` 502).
+- Latent, NOT fixed: user-ANNOTATION bboxes (Layer 2) are stored in the render space
+  at create-time, so they can drift if created at one zoom and viewed at another.
+  Out of scope (no reported issue, would need stored-data migration). Detections
+  (Layer 1) are consistently in source space, which is why this fix is clean.
+
+---
+
 ## [2026-06-17] #55 — Mark-Symbol → exports sync; label hover-toggle; Re-process button; job-56 scatter diagnosed
 
 **Type:** feature, bugfix
