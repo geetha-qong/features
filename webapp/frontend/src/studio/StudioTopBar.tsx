@@ -9,6 +9,7 @@ import {
   Table2,
   LogOut,
   MoreHorizontal,
+  RefreshCw,
   Settings,
   Share2,
 } from "lucide-react";
@@ -89,7 +90,40 @@ export default function StudioTopBar({
   const [showExport, setShowExport] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [rerunning, setRerunning] = useState(false);
   const reviewerSlug = userName.toLowerCase().replace(/\s+/g, ".");
+
+  // Re-process this job through the pipeline with the CURRENT model (re-detects
+  // symbols + rebuilds the graph). User-initiated only (never auto). The rerun
+  // endpoint is prefix-less (/jobs/{id}/rerun, NOT /api/v1), takes form-data, and
+  // 303-redirects on success — redirect:"manual" → opaqueredirect(status 0)=ok.
+  async function handleRerun() {
+    if (rerunning) return;
+    if (!window.confirm(
+      "Re-process this job with the latest model? Current detections and graph " +
+      "will be replaced (your saved tags/edits are preserved). This runs in the background."
+    )) return;
+    setRerunning(true);
+    try {
+      const body = new FormData();
+      body.append("include_control_valves", "off");
+      const res = await fetch(`/jobs/${jobId}/rerun`, {
+        method: "POST", credentials: "include", body, redirect: "manual",
+      });
+      const ok = res.ok || res.type === "opaqueredirect" || res.status === 0;
+      if (!ok) {
+        alert(`Re-run failed (HTTP ${res.status})`);
+        setRerunning(false);
+        return;
+      }
+      // Job is now pending/processing — reload the route so the progress panel
+      // shows (JobDetail re-evaluates status and polls to completion).
+      window.location.assign(`/jobs/${jobId}`);
+    } catch (e) {
+      alert(`Re-run error: ${e instanceof Error ? e.message : String(e)}`);
+      setRerunning(false);
+    }
+  }
 
   async function handleExport(type: string, format: string, ext: string) {
     const key = `${type}.${format}`;
@@ -147,6 +181,14 @@ export default function StudioTopBar({
       </button>
       <button className="btn btn-secondary btn-sm" onClick={onBulkReview} title="Open Bulk Review workbench">
         <LayoutGrid size={13} strokeWidth={1.6} /> Bulk Review
+      </button>
+      <button
+        className="btn btn-secondary btn-sm"
+        onClick={handleRerun}
+        disabled={rerunning}
+        title="Re-process this job with the latest detection model (re-detect symbols + rebuild graph)"
+      >
+        <RefreshCw size={13} strokeWidth={1.6} /> {rerunning ? "Re-processing…" : "Re-process"}
       </button>
       <button className="btn btn-primary btn-sm" onClick={onSave}>
         Save <Check size={13} strokeWidth={1.6} />
