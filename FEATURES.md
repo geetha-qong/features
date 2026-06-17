@@ -24,6 +24,51 @@
 
 ---
 
+## [2026-06-17] #57 — "Re-read tag (AI)" button (per-element vision re-OCR) + OCR/matching investigation
+
+**Type:** feature, investigation
+**Stage:** webapp, export
+**Status:** shipped (deployed to dev, live-verified); framed as a best-effort assist
+
+**Why:** User reports wrong tag NAMES in the bulk export. Diagnosis: export tags come
+from the whole-tile **vision** pass (extractor.py) which misreads dense tags — not
+classic OCR. Requested fix: a button to re-read a marked element's tag.
+
+**What:**
+- `POST /api/v1/jobs/{id}/ocr-bbox` (annotations.py): normalized bbox → crop the
+  hi-res source page → send ONLY that crop to the vision model
+  (`extractor.get_client`/`DEFAULT_MODEL`) → extract tag-shaped candidate
+  (`_tag_candidates`). Source dir resolved via `output_csv_path` parent (org-scoped).
+- Frontend "Re-read tag (AI)" button in DatasheetDrawer; Studio computes the
+  selected detection's normalized bbox (tile-local→source via computeTileOffsets at
+  tiling dims). Human-confirmed: fills the tag field; user reviews + Saves (flows to
+  exports via the #55 annotation→canonical sync).
+
+**Result / honest accuracy:** live end-to-end works (`POST ocr-bbox` → 200, returned
+correct `62-BV-151109` on a well-placed crop). Batch on auto-DETECTION bboxes: ~4/8
+return a tag, hard to score (the only baseline — stored tags — is unreliable). The
+tag sits OUTSIDE the symbol bbox, so auto-symbol crops miss it ~half the time; a
+USER-drawn box around the tag (the intended flow) frames it far better. **Tried
+rapidocr first (user's pick): 1/10 — rejected** (can't read the small/thin tag text);
+swapped to vision-on-crop.
+
+**Notes:**
+- **No matching/duplicate bug in the EXPORT** — job 56: 73 unique tags, job 1: 68
+  unique. The "same tag ×3" seen earlier was job 1's legacy GPU-worker *canvas*
+  detections (a separate, older source), NOT the export. So wrong export names are
+  per-character vision misreads, not mis-assignment.
+- **Canonical export entities have placeholder-zero bbox** — the real bbox lives in
+  detections/annotations; that's why the re-read button reads from the detection bbox
+  (or a user-marked box), not the canonical entity.
+- **DEPLOY GOTCHA (recurring):** the web container is sometimes NOT recreated by a
+  deploy (esp. after a manual force-recreate during a 502), leaving a STALE uvicorn
+  process — a newly-added route then 405s (SPA catch-all GET matches the path) even
+  though `docker exec python3` sees the route on disk. Fix: force-recreate web.
+- Possible next improvements: asymmetric/larger pad (tags sit above/beside); let the
+  re-read use a user-drawn box; confidence display.
+
+---
+
 ## [2026-06-17] #56 — Fix detection scatter: rescale tile coords from tiling-source to render res
 
 **Type:** bugfix
