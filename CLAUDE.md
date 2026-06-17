@@ -26,7 +26,7 @@ Evolving into a **human-in-the-loop digital twin platform** (multi-page graph + 
 Headline metric long-term: graph isomorphism (`networkx.is_isomorphic`) — measures topological correctness of the extracted graph vs human ground truth. Short-term (existing product): ≥90% recall on valve identification.
 
 **Current status:** Production webapp live at https://dev.qongsystems.com. v1-10 YOLO ONNX (23 classes incl. flow direction) deployed 2026-06-05 — FEATURES #30. Spec A (D1, D1.5, D2, D3-4, D5) functionally complete and verified. `canonical_entities` DB index live (FEATURES #34) with 1,304 rows across 49 jobs, cross-job query surface at `/admin/entities` (FEATURES #36).
-**Next phase:** Graph-extraction v0 (digital twin) — design + implementation plan at `docs/superpowers/{specs,plans}/2026-06-0{5,6}-graph-extraction-*.md`. Branch `dt/main` is the long-running track; mid-cycle merges into `dev` for team visibility have been done (2026-06-10) — see Experimental track section below.
+**Next phase:** Graph-extraction v0 (digital twin) — design + implementation plan at `docs/superpowers/{specs,plans}/2026-06-0{5,6}-graph-extraction-*.md`. All work is on `dev`/`main` (the old `dt/*` track is retired — see below).
 
 ## Detail Index (read on demand)
 
@@ -46,16 +46,18 @@ Headline metric long-term: graph isomorphism (`networkx.is_isomorphic`) — meas
 
 **Feature-branch policy:** branch off `dev`, merge back via PR. Stale branches `feature/digital-twin`, `feature/observability-job-runs`, `feature/instrument-index-improvements` were deleted locally on 2026-06-03; their `origin/*` refs are retained on GitHub for now but are reference-only — do **not** branch from them. `feature/multi-cloud-saas` was superseded by `dev` (all phases A1-A3, B1-B5 merged in).
 
-## Experimental track (`dt/*` branches, `experiments/digital_twin/`)
+## Experimental track (`dt/*` branches) — RETIRED 2026-06-17
 
-A parallel long-running track for fast-iteration R&D — currently graph-extraction v0 (FEATURES TBD, design doc at `docs/superpowers/specs/2026-06-05-graph-extraction-design.md`). Created 2026-06-05.
+**There are no `dt/*` branches anymore. All work happens on `main`/`dev`** via the
+normal feature-branch policy (branch off `dev`, PR back). Ignore any older
+reference to `dt/main` / `dt/<topic>` / "merge at handover" / `[DT]` FEATURES
+prefixes — that parallel-track model is no longer used.
 
-- **Why it exists:** team interns ramp up on `dev` at their own pace; lead works with Claude Code on `dt/*` to ship the next-gen tool faster, then merges back for handover once the team's basics are solid.
-- **Location:** `experiments/digital_twin/` — own `pyproject.toml`, own notebooks, own backend (planned). Reads parent repo data via `../../job_outputs/`, `../../models/`. **Never writes back** into team artefacts; if shared code needs to change, that change lands on `dev` with its own FEATURES.md entry.
-- **Branch policy:** `dt/main` is the long-running base off `dev`; `dt/<topic>` for short-lived feature work. Don't merge into `dev` until handoff is intended — one PR at the end, not a stream of partial merges.
-- **Deploys:** silent. `deploy-dev.yml` only fires on `branches: [dev]`; `dt/*` pushes never touch dev.qongsystems.com.
-- **Memory stays unified:** `CLAUDE.md` (this file), `FEATURES.md`, and `SESSION_STATE.md` all remain at repo root. FEATURES.md entries originating from this track use a `[DT]` prefix in the title for filtering. SESSION_STATE.md should always note which track ("team / experimental") the previous session was on.
-- **Stack freedom:** the experimental track can pick its own stack (Jupyter-first, OpenCV → CV-CUDA later, NetworkX, etc.) without aligning to the parent repo's FastAPI+React shape. When code is ready to merge, it gets re-aligned during the handover PR.
+- The graph-extraction / digital-twin code that was prototyped in
+  `experiments/digital_twin/` is folded into the normal codebase; new graph work
+  lands on `dev` (then `main`) like any other feature, with a standard FEATURES.md
+  entry (no `[DT]` prefix).
+- SESSION_STATE.md no longer needs a "team / experimental" track label.
 
 ## Docker-First Rule
 
