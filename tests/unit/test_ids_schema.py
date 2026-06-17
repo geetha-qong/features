@@ -19,6 +19,10 @@ normalize_subclass = ids_schema.normalize_subclass
 
 VALID_SOURCES = {"process", "user", "vendor"}
 
+# Every type with a per-type schema. Kept as a tuple so the uniqueness /
+# editability invariants run across ALL implemented types, not just the first 3.
+ALL_TYPES = tuple(sorted(ids_schema.SUPPORTED_SUBCLASSES))
+
 
 def _all_fields(sub_class):
     fields = []
@@ -78,8 +82,21 @@ def test_normalize_subclass():
     assert normalize_subclass("nonsense") is None
 
 
+def test_all_types_well_formed():
+    """Every implemented type resolves to Common + type sections, every field
+    well-formed. Guards the 7 types added after the initial CV/PT/PSV cut."""
+    assert {"CV", "PT", "TT", "PG", "TG", "TW", "TE", "FE", "RO", "PSV"} <= set(ALL_TYPES)
+    for sub_class in ALL_TYPES:
+        fields = _all_fields(sub_class)
+        assert len(fields) > len(_all_fields(None)), f"{sub_class}: no type-specific fields"
+        for f in fields:
+            assert f.header and isinstance(f.header, str)
+            assert f.path and isinstance(f.path, str)
+            assert f.source in VALID_SOURCES, f"{sub_class}: bad source {f.source!r}"
+
+
 def test_vendor_fields_readonly_others_editable():
-    for sub_class in ("CV", "PT", "PSV"):
+    for sub_class in ALL_TYPES:
         for f in _all_fields(sub_class):
             if f.source == "vendor":
                 assert f.editable is False, (
@@ -92,8 +109,19 @@ def test_vendor_fields_readonly_others_editable():
 
 
 def test_paths_unique_within_each_type():
-    for sub_class in ("CV", "PT", "PSV"):
+    for sub_class in ALL_TYPES:
         paths = [f.path for f in _all_fields(sub_class)]
+        dupes = sorted({p for p in paths if paths.count(p) > 1})
         assert len(paths) == len(set(paths)), (
-            f"{sub_class}: duplicate field paths detected"
+            f"{sub_class}: duplicate field paths detected: {dupes}"
         )
+
+
+def test_new_type_normalization():
+    assert normalize_subclass("TT") == "TT"
+    assert normalize_subclass("pg") == "PG"
+    assert normalize_subclass("PI") == "PG"
+    assert normalize_subclass("ti") == "TG"
+    assert normalize_subclass("RTD") == "TE"
+    assert normalize_subclass("fg") == "FE"
+    assert normalize_subclass("ro") == "RO"

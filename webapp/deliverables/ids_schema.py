@@ -48,10 +48,8 @@ Slash sources in the manifest (e.g. ``PROCESS/USER``, ``VENDOR/PROCESS``,
 (process/user => editable True; vendor => editable False).
 
 ------------------------------------------------------------------------------
-Currently implemented types: Common + CV + PT (shared by FT) + PSV.
-TODO (follow-up): add the remaining 8 datasheet types from the manifest —
-  TT (## 4), PG (## 5), TG (## 6), TW (## 7), TE (## 8), FE (## 9),
-  RO (## 10).  (FT already reuses PT.)
+Implemented types (all 11 from the manifest): Common + CV, PT (shared by FT),
+TT, PG, TG, TW, TE, FE, RO, PSV. Unknown sub_classes fall back to Common-only.
 ------------------------------------------------------------------------------
 """
 
@@ -80,11 +78,18 @@ class IdsSection:
 TYPE_LABELS: Dict[str, str] = {
     "CV": "Control Valve",
     "PT": "Pressure Transmitter",
+    "TT": "Temperature Transmitter",
+    "PG": "Pressure Gauge",
+    "TG": "Temperature Gauge",
+    "TW": "Thermowell",
+    "TE": "Temperature Element / RTD",
+    "FE": "Flow / Sight Glass",
+    "RO": "Restriction Orifice",
     "PSV": "Pressure Safety Valve",
 }
 
 # Type keys that currently have a per-type schema implemented here.
-SUPPORTED_SUBCLASSES = {"CV", "PT", "PSV"}
+SUPPORTED_SUBCLASSES = set(TYPE_LABELS.keys())
 
 
 # --------------------------------------------------------------------------- #
@@ -104,6 +109,28 @@ _SUBCLASS_ALIASES: Dict[str, str] = {
     "ft": "PT",
     "fit": "PT",
     "fzit": "PT",
+    # Temperature transmitter
+    "tt": "TT",
+    "tit": "TT",
+    "tzit": "TT",
+    # Pressure gauge (PG / PI)
+    "pg": "PG",
+    "pi": "PG",
+    # Temperature gauge (TG / TI)
+    "tg": "TG",
+    "ti": "TG",
+    # Thermowell
+    "tw": "TW",
+    "thermowell": "TW",
+    # Temperature element / RTD / thermocouple
+    "te": "TE",
+    "rtd": "TE",
+    "tc": "TE",
+    # Flow / sight glass + orifice element
+    "fe": "FE",
+    "fg": "FE",
+    # Restriction orifice
+    "ro": "RO",
     # Pressure Safety / Relief Valve
     "psv": "PSV",
     "rv": "PSV",
@@ -118,7 +145,8 @@ _SUBCLASS_ALIASES: Dict[str, str] = {
 def normalize_subclass(sub_class: Optional[str]) -> Optional[str]:
     """Map a canonical sub_class / ISA code to a datasheet type key.
 
-    Returns "CV", "PT", or "PSV", or None if unknown. Case-insensitive.
+    Returns one of the keys in ``TYPE_LABELS`` (CV/PT/TT/PG/TG/TW/TE/FE/RO/PSV),
+    or None if unknown. Case-insensitive. FT maps to PT (shared form).
     """
     if not sub_class:
         return None
@@ -587,9 +615,407 @@ _PSV_SECTIONS: List[IdsSection] = [
 ]
 
 
+# --------------------------------------------------------------------------- #
+# 4. Temperature Transmitter (manifest "## 4")
+# --------------------------------------------------------------------------- #
+_TT_SECTIONS: List[IdsSection] = [
+    IdsSection("Range", [
+        _f("Calibration Range Min", "tt_calibration_range_min", "USER"),
+        _f("Calibration Range Max", "tt_calibration_range_max", "USER"),
+        _f("Calibration Range Unit", "tt_calibration_range_unit", "USER"),
+        _f("Display (Scale) Range Min", "tt_display_range_min", "USER"),
+        _f("Display (Scale) Range Max", "tt_display_range_max", "USER"),
+        _f("Display (Scale) Range Unit", "tt_display_range_unit", "USER"),
+        _f("Instrument Range Min", "tt_instrument_range_min", "USER"),
+        _f("Instrument Range Max", "tt_instrument_range_max", "USER"),
+        _f("Instrument Range Unit", "tt_instrument_range_unit", "USER"),
+    ]),
+    IdsSection("Transmitter", [
+        _f("Housing Type", "housing_type", "VENDOR"),
+        _f("Input Sensor Type", "input_sensor_type", "VENDOR"),
+        _f("Input Sensor Quantity", "input_sensor_quantity", "VENDOR"),
+        _f("Output Signal Type", "output_signal_type", "VENDOR"),
+        _f("Temp Span Min", "temp_span_min", "VENDOR"),
+        _f("Temp Span Max", "temp_span_max", "VENDOR"),
+        _f("Temp Coef/Tolerance Class", "temp_coef_tolerance_class", "VENDOR"),
+        _f("Isolation Type", "isolation_type", "VENDOR"),
+        _f("Enclosure IP Rating", "enclosure_ip_rating", "VENDOR"),
+        _f("Characteristic Curve", "characteristic_curve", "VENDOR"),
+        _f("Digital Communication", "digital_communication", "VENDOR"),
+        _f("Signal Power Source", "signal_power_source", "VENDOR"),
+        _f("Configuration of Wires", "configuration_of_wires", "VENDOR"),
+        _f("Integral Indicator", "integral_indicator", "VENDOR"),
+        _f("Signal Termination Type", "signal_termination_type", "VENDOR"),
+        _f("Mounting Type", "mounting_type", "VENDOR"),
+        _f("Temp Compensation", "temp_compensation", "VENDOR"),
+        _f("Enclosure Material", "enclosure_material", "VENDOR"),
+        _f("Mounting Bracket", "mounting_bracket", "VENDOR"),
+        _f("Bolt Material", "bolt_material", "VENDOR"),
+        _f("Burnout Protection", "burnout_protection", "VENDOR"),
+        _f("Element Standard", "element_standard", "VENDOR"),
+        _f("Cable Entry Size", "cable_entry_size", "VENDOR"),
+        _f("Cable Quantity", "cable_quantity", "VENDOR"),
+        _f("Hot Backup Provided", "hot_backup_provided", "VENDOR"),
+        _f("End Conn Size", "end_conn_size", "VENDOR"),
+        _f("End Conn Type", "end_conn_type", "VENDOR"),
+        _f("End Conn Qty", "end_conn_qty", "VENDOR"),
+    ]),
+    IdsSection("Smart Device", [
+        _f("Smart Device Type", "smart_device_type", "VENDOR"),
+        _f("Hardware Device Rev", "hardware_device_rev", "VENDOR"),
+        _f("DD/EDD Rev", "dd_edd_rev", "VENDOR"),
+        _f("HART Version", "hart_version", "VENDOR"),
+        _f("ITK Version", "itk_version", "VENDOR"),
+        _f("CFF Rev", "cff_rev", "VENDOR"),
+    ]),
+    IdsSection("Performance", [
+        _f("Accuracy", "accuracy", "VENDOR"),
+    ]),
+]
+
+
+# --------------------------------------------------------------------------- #
+# 5. Pressure Gauge (manifest "## 5")
+# --------------------------------------------------------------------------- #
+_PG_SECTIONS: List[IdsSection] = [
+    IdsSection("Process", [
+        _f("Corrosive", "corrosive", "PROCESS"),
+        _f("Erosive", "erosive", "PROCESS"),
+        _f("Toxic", "toxic", "PROCESS"),
+        _f("Build-up", "build_up", "PROCESS"),
+        _f("Solidifying", "solidifying", "PROCESS"),
+        _f("Pulsation", "pulsation", "PROCESS"),
+        _f("Coagulation", "coagulation", "PROCESS"),
+        _f("Contains Particles", "contains_particles", "PROCESS"),
+    ]),
+    IdsSection("Range", [
+        _f("Instrument Range Min", "instrument_range_min", "PROCESS"),
+        _f("Instrument Range Max", "instrument_range_max", "PROCESS"),
+        _f("Instrument Range Unit", "instrument_range_unit", "PROCESS"),
+    ]),
+    IdsSection("Connection & Case", [
+        _f("Case Type", "case_type", "VENDOR"),
+        _f("Case Style", "case_style", "VENDOR"),
+        _f("Mounting Type", "mounting_type", "VENDOR"),
+        _f("Enclosure IP Rating", "enclosure_ip_rating", "VENDOR"),
+        _f("Liquid Fill Material", "liquid_fill_material", "VENDOR"),
+        _f("Process Conn Size", "proc_conn_size", "VENDOR"),
+        _f("Process Conn Type", "proc_conn_type", "VENDOR"),
+        _f("Process Conn Location", "proc_conn_location", "VENDOR"),
+        _f("Case Press Relief Type", "case_press_relief_type", "VENDOR"),
+        _f("Window Material", "window_material", "VENDOR"),
+        _f("Bolting Material", "bolting_material", "VENDOR"),
+        _f("Ring Material", "ring_material", "VENDOR"),
+        _f("Case Material", "case_material", "VENDOR"),
+        _f("Stem Material", "stem_material", "VENDOR"),
+        _f("Lower Housing Material", "lower_housing_material", "VENDOR"),
+    ]),
+    IdsSection("Element & Movement", [
+        _f("Elastic Element Type", "elastic_element_type", "VENDOR"),
+        _f("Movement Style", "movement_style", "VENDOR"),
+        _f("Nom Accuracy Grade", "nom_accuracy_grade", "VENDOR"),
+        _f("Element Material", "element_material", "VENDOR"),
+        _f("Movement Material", "movement_material", "VENDOR"),
+    ]),
+    IdsSection("Dial & Pointer", [
+        _f("Dial Scale Type", "dial_scale_type", "VENDOR"),
+        _f("Pointer Adjustment", "pointer_adjustment", "VENDOR"),
+        _f("Graduation & Color", "graduation_color", "VENDOR"),
+        _f("Scale Range Type", "scale_range_type", "VENDOR"),
+        _f("Dial Material", "dial_material", "VENDOR"),
+        _f("Dial Size", "dial_size", "VENDOR"),
+    ]),
+    IdsSection("Accessory", [
+        _f("Accessory", "accessory", "VENDOR"),
+        _f("Accessory Code", "accessory_code", "VENDOR"),
+        _f("Accessory Material", "accessory_material", "VENDOR"),
+    ]),
+    IdsSection("Diaphragm Seal", [
+        _f("Seal Type", "seal_type", "VENDOR"),
+        _f("Diaphragm Extn Length", "diaphragm_extn_length", "VENDOR"),
+        _f("Flush Conn Qty/Size", "flush_conn_qty_size", "VENDOR"),
+        _f("Flushing Ring Assembly", "flushing_ring_assembly", "VENDOR"),
+        _f("Capillary Fitting Dia", "capillary_fitting_dia", "VENDOR"),
+        _f("Seal Process Conn Size", "seal_proc_conn_size", "VENDOR"),
+        _f("Seal Process Conn Rating", "seal_proc_conn_rating", "VENDOR"),
+        _f("Seal Process Conn Type", "seal_proc_conn_type", "VENDOR"),
+        _f("Gasket/O-ring Material", "gasket_oring_material", "VENDOR"),
+        _f("Fill Fluid Material", "fill_fluid_material", "VENDOR"),
+        _f("Instr Conn nom Size", "instr_conn_nom_size", "VENDOR"),
+        _f("Diaphragm Material", "diaphragm_material", "VENDOR"),
+        _f("Capillary Material", "capillary_material", "VENDOR"),
+        _f("Seal Bolting Material", "bolting_material_seal", "VENDOR"),
+        _f("Upper Housing Material", "upper_housing_material", "VENDOR"),
+    ]),
+]
+
+
+# --------------------------------------------------------------------------- #
+# 6. Temperature Gauge (manifest "## 6")
+# --------------------------------------------------------------------------- #
+_TG_SECTIONS: List[IdsSection] = [
+    IdsSection("Pipe / Nozzle", [
+        _f("Nozzle/Stub Length", "nozzle_stub_length", "PROCESS"),
+        _f("Nozzle/Stub Sch.", "nozzle_stub_sch", "PROCESS"),
+    ]),
+    IdsSection("Process", [
+        _f("Corrosive", "corrosive", "PROCESS"),
+        _f("Erosive", "erosive", "PROCESS"),
+        _f("Toxic", "toxic", "PROCESS"),
+        _f("Vibration", "vibration", "PROCESS"),
+        _f("Solid in Stream", "solid_in_stream", "PROCESS"),
+    ]),
+    IdsSection("Operating", [
+        _f("Operating Flow", "op_flow", "PROCESS"),
+        _f("Velocity @ Max Flow", "velocity_at_max_flow", "PROCESS"),
+    ]),
+    IdsSection("Range", [
+        _f("Instrument Range Min", "instrument_range_min", "PROCESS"),
+        _f("Instrument Range Max", "instrument_range_max", "PROCESS"),
+        _f("Accuracy", "accuracy", "VENDOR"),
+    ]),
+    IdsSection("Dial & Pointer", [
+        _f("Case Size", "case_size", "VENDOR"),
+        _f("Dial Scale Type", "dial_scale_type", "VENDOR"),
+        _f("Pointer Adjustment", "pointer_adjustment", "VENDOR"),
+        _f("Graduations & Color", "graduations_color", "VENDOR"),
+        _f("Connection Location", "connection_location", "VENDOR"),
+        _f("Exterior Treatment Color", "exterior_treatment_color", "VENDOR"),
+        _f("Conn nom Size", "conn_nom_size", "VENDOR"),
+        _f("Conn nom Type/Style", "conn_nom_type_style", "VENDOR"),
+    ]),
+    IdsSection("Sensing Element", [
+        _f("Element Type", "element_type", "VENDOR"),
+    ]),
+    IdsSection("Case", [
+        _f("Case Type", "case_type", "VENDOR"),
+        _f("Case Style", "case_style", "VENDOR"),
+    ]),
+    IdsSection("Performance", [
+        _f("Max Fluid Vel @ Temp", "max_fluid_vel_at_temp", "VENDOR"),
+        _f("Min Insertion Length", "min_insertion_length", "VENDOR"),
+        _f("Allowable Length @ Max Flow", "allowable_length_at_max_flow", "VENDOR"),
+    ]),
+    IdsSection("Purchase", [
+        _f("Gauge Manufacturer", "gauge_manufacturer", "VENDOR"),
+        _f("Gauge Model", "gauge_model", "VENDOR"),
+    ]),
+]
+
+
+# --------------------------------------------------------------------------- #
+# 7. Thermowell (manifest "## 7")
+# --------------------------------------------------------------------------- #
+_TW_SECTIONS: List[IdsSection] = [
+    IdsSection("Construction", [
+        _f("Construction Type", "construction_type", "VENDOR"),
+        _f("Ring Style", "ring_style", "VENDOR"),
+        _f("Shank Style", "shank_style", "VENDOR"),
+    ]),
+    IdsSection("Dimensions", [
+        _f("Stem Outside Diameter", "stem_od", "VENDOR"),
+        _f("Bore Dia", "bore_dia", "VENDOR"),
+        _f("Stem Length", "stem_length", "VENDOR"),
+        _f("OD at Support", "od_at_support", "VENDOR"),
+        _f("OD at Tip", "od_at_tip", "VENDOR"),
+    ]),
+    IdsSection("Materials", [
+        _f("Stem/Bulb Material", "stem_bulb_material", "VENDOR"),
+        _f("Case Material", "case_material", "VENDOR"),
+        _f("Ring Material", "ring_material", "VENDOR"),
+        _f("Coating Material", "coating_material", "VENDOR"),
+        _f("Window Material", "window_material", "VENDOR"),
+        _f("Connection Material", "connection_material", "VENDOR"),
+        _f("Thermowell Material", "thermowell_material", "VENDOR"),
+        _f("Sheath Material Thickness", "sheath_material_thickness", "VENDOR"),
+    ]),
+    IdsSection("Connection", [
+        _f("End Size/Rating", "end_size_rating", "VENDOR"),
+        _f("Conn Type/Std", "conn_type_std", "VENDOR"),
+        _f("IP Rating", "ip_rating", "VENDOR"),
+        _f("Internal Conn nom Size", "internal_conn_nom_size", "VENDOR"),
+    ]),
+    IdsSection("Insertion", [
+        _f("Insertion Length (U)", "insertion_length_u", "VENDOR/PROCESS"),
+        _f("Length below collar (U1)", "length_below_collar_u1", "VENDOR/PROCESS"),
+        _f("Lagging Ext Length (T)", "lagging_ext_length_t", "VENDOR/PROCESS"),
+    ]),
+    IdsSection("Flange & Reference", [
+        _f("Flange Size", "flange_size", "VENDOR"),
+        _f("Flange Rating", "flange_rating", "VENDOR"),
+        _f("Flange Facing", "flange_facing", "VENDOR"),
+        _f("Flange Face Finish", "flange_face_finish", "VENDOR"),
+        _f("Well Dimension (mm)", "well_dimension_mm", "VENDOR"),
+        _f("Strength Calculation", "strength_calculation", "VENDOR"),
+        _f("Reference DWG No.", "reference_dwg_no", "VENDOR"),
+        _f("Standard Drawing", "standard_drawing", "VENDOR"),
+    ]),
+    IdsSection("Process & Tag", [
+        _f("Pipe Nozzle Length", "pipe_nozzle_length", "PROCESS"),
+        _f("Tag No. for Thermowell", "thermowell_tag_no", "PROCESS"),
+    ]),
+    IdsSection("Purchase", [
+        _f("Thermowell Manufacturer", "thermowell_manufacturer", "VENDOR"),
+        _f("Thermowell Model", "thermowell_model", "VENDOR"),
+    ]),
+]
+
+
+# --------------------------------------------------------------------------- #
+# 8. Temperature Element / RTD / Thermocouple (manifest "## 8")
+# --------------------------------------------------------------------------- #
+_TE_SECTIONS: List[IdsSection] = [
+    IdsSection("Process", [
+        _f("Operating Differential Pressure", "operating_differential_pressure", "PROCESS"),
+        _f("Pulsation/Vibration", "pulsation_vibration", "PROCESS"),
+    ]),
+    IdsSection("Element", [
+        _f("Element Type", "element_type", "VENDOR"),
+        _f("Single/Double", "single_double", "VENDOR"),
+        _f("Element Range", "element_range", "PROCESS"),
+        _f("Spec/Calibration", "spec_calibration", "VENDOR"),
+        _f("Tolerance Class", "tolerance_class", "VENDOR"),
+        _f("Sheath Material", "sheath_material", "VENDOR"),
+        _f("Insulator Material", "insulator_material", "VENDOR"),
+        _f("Wire Gauge/Insul", "wire_gauge_insul", "VENDOR"),
+        _f("Wire Configuration", "wire_configuration", "VENDOR"),
+        _f("Element Dia", "element_dia", "VENDOR"),
+        _f("Element Length", "element_length", "VENDOR"),
+    ]),
+    IdsSection("Connection", [
+        _f("Connection", "connection", "VENDOR"),
+        _f("Connection Size", "connection_size", "VENDOR"),
+        _f("Connection Material", "connection_material", "VENDOR"),
+        _f("Grounding Type", "grounding_type", "VENDOR"),
+    ]),
+    IdsSection("Enclosure / Ex", [
+        _f("Enclosure Class", "enclosure_class", "VENDOR"),
+        _f("Signal Cable Entry", "signal_cable_entry", "VENDOR"),
+        _f("Ex Protection", "ex_protection", "VENDOR"),
+        _f("Ex Approval", "ex_approval", "VENDOR"),
+    ]),
+    IdsSection("Head", [
+        _f("Transmitter Mount Type", "transmitter_mount_type", "VENDOR"),
+        _f("Head Material", "head_material", "VENDOR"),
+        _f("Head Extension", "head_extension", "VENDOR"),
+        _f("Terminal Block", "terminal_block", "VENDOR"),
+        _f("Extension Length", "extension_length", "VENDOR"),
+    ]),
+    IdsSection("Certification", [
+        _f("Special Certificate", "special_certificate", "USER"),
+        _f("Inspection for Welding Parts", "inspection_welding_parts", "USER"),
+    ]),
+    IdsSection("Purchase", [
+        _f("Manufacturer", "te_manufacturer", "VENDOR"),
+        _f("Model", "te_model", "VENDOR"),
+        _f("Option", "te_option", "VENDOR"),
+    ]),
+]
+
+
+# --------------------------------------------------------------------------- #
+# 9. Flow / Sight Glass + Orifice (manifest "## 9")
+# --------------------------------------------------------------------------- #
+_FE_SECTIONS: List[IdsSection] = [
+    IdsSection("Service", [
+        _f("Operating Differential Pressure", "operating_differential_pressure", "PROCESS"),
+        _f("Normal Flow", "normal_flow", "PROCESS"),
+    ]),
+    IdsSection("Body", [
+        _f("Body Type", "body_type", "VENDOR"),
+        _f("Body Material", "body_material", "VENDOR"),
+        _f("Body Size Inlet", "body_size_inlet", "PROCESS"),
+        _f("Body Size Outlet", "body_size_outlet", "PROCESS"),
+        _f("End Connections", "end_connections", "VENDOR"),
+        _f("Press & Temp Rating", "press_temp_rating", "VENDOR"),
+        _f("Equalizing Conn Size", "equalizing_conn_size", "VENDOR"),
+        _f("Conn Orientation", "conn_orientation", "VENDOR"),
+    ]),
+    IdsSection("Trim", [
+        _f("Trim Material", "trim_material", "VENDOR"),
+    ]),
+    IdsSection("Options", [
+        _f("Internal Check Valve", "internal_check_valve", "VENDOR"),
+        _f("Internal Bimetallic Vent", "internal_bimetallic_vent", "VENDOR"),
+        _f("Thermostatic Vent", "thermostatic_vent", "VENDOR"),
+        _f("Thermostatic Vent Material", "thermostatic_vent_material", "VENDOR"),
+        _f("Gage Glass", "gage_glass", "VENDOR"),
+    ]),
+    IdsSection("Strainer", [
+        _f("Strainer Internal/External", "strainer_internal_external", "VENDOR"),
+        _f("Strainer Type & Size", "strainer_type_size", "VENDOR"),
+        _f("Strainer Body Material", "strainer_body_material", "VENDOR"),
+        _f("Strainer Press & Temp Rating", "strainer_press_temp_rating", "VENDOR"),
+        _f("Strainer End Connections", "strainer_end_connections", "VENDOR"),
+        _f("Strainer Blowoff Connections", "strainer_blowoff_connections", "VENDOR"),
+        _f("Strainer Mesh Size & Material", "strainer_mesh_size_material", "VENDOR"),
+    ]),
+    IdsSection("Purchase", [
+        _f("Calc. Orifice Size", "calc_orifice_size", "VENDOR"),
+        _f("Selected Orifice Size", "selected_orifice_size", "VENDOR"),
+        _f("View Glass Size", "view_glass_size", "VENDOR"),
+        _f("Manufacturer", "fe_manufacturer", "VENDOR"),
+        _f("Model", "fe_model", "VENDOR"),
+    ]),
+]
+
+
+# --------------------------------------------------------------------------- #
+# 10. Restriction Orifice (manifest "## 10")
+# --------------------------------------------------------------------------- #
+_RO_SECTIONS: List[IdsSection] = [
+    IdsSection("Service", [
+        _f("Flow Rate", "flow_rate", "PROCESS"),
+        _f("Specific Heats Ratio Cp/Cv", "specific_heats_ratio_cp_cv", "PROCESS"),
+        _f("Compressibility Z", "compressibility_z", "PROCESS"),
+        _f("Velocity", "velocity", "PROCESS"),
+        _f("Quality%/Superheat", "quality_pct_superheat", "PROCESS"),
+        _f("Permanent Pressure Loss", "permanent_pressure_loss", "PROCESS"),
+        _f("Base Pressure", "base_pressure", "PROCESS"),
+        _f("Base Temperature", "base_temperature", "PROCESS"),
+    ]),
+    IdsSection("Basis", [
+        _f("Type", "ro_type", "VENDOR"),
+        _f("Bore Calculation", "bore_calculation", "VENDOR"),
+    ]),
+    IdsSection("Orifice Plate", [
+        _f("Mating Flange Size", "mating_flange_size", "VENDOR"),
+        _f("Mating Flange Rating", "mating_flange_rating", "VENDOR"),
+        _f("Mating Flange Facing", "mating_flange_facing", "VENDOR"),
+        _f("Bore Diameter (d)", "bore_diameter_d", "VENDOR"),
+        _f("Diameter Ratio (b=d/D)", "diameter_ratio_beta", "VENDOR"),
+        _f("Material", "plate_material", "VENDOR"),
+        _f("Thickness", "plate_thickness", "VENDOR"),
+        _f("Ring Material & Type", "ring_material_type", "VENDOR"),
+    ]),
+    IdsSection("Multistage Orifice", [
+        _f("Type", "ms_type", "VENDOR"),
+        _f("Number of Stages", "ms_number_of_stages", "VENDOR"),
+        _f("End Connection", "ms_end_connection", "VENDOR"),
+        _f("Flange Facing Finish", "ms_flange_facing_finish", "VENDOR"),
+        _f("Plate Material", "ms_plate_material", "VENDOR"),
+        _f("Body Material", "ms_body_material", "VENDOR"),
+        _f("Flange Material", "ms_flange_material", "VENDOR"),
+        _f("Bore Diameter", "ms_bore_diameter", "VENDOR"),
+        _f("Thickness", "ms_thickness", "VENDOR"),
+    ]),
+    IdsSection("Purchase", [
+        _f("Manufacturer", "ro_manufacturer", "VENDOR"),
+        _f("Model", "ro_model", "VENDOR"),
+    ]),
+]
+
+
 _TYPE_SECTIONS: Dict[str, List[IdsSection]] = {
     "CV": _CV_SECTIONS,
     "PT": _PT_SECTIONS,
+    "TT": _TT_SECTIONS,
+    "PG": _PG_SECTIONS,
+    "TG": _TG_SECTIONS,
+    "TW": _TW_SECTIONS,
+    "TE": _TE_SECTIONS,
+    "FE": _FE_SECTIONS,
+    "RO": _RO_SECTIONS,
     "PSV": _PSV_SECTIONS,
 }
 

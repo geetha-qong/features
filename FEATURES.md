@@ -24,6 +24,28 @@
 
 ---
 
+## [2026-06-17] #60 — Datasheet schema completed: remaining 7 instrument types added
+
+**Type:** feature
+**Stage:** webapp / export
+**Status:** shipped (deployed to dev)
+
+**Why:** #59 wired CV/PT/PSV; the other 7 manifest types returned common-only.
+User: "if we have all fields for other types, add other as well." We do (manifest).
+
+**What:** Added `_TT/_PG/_TG/_TW/_TE/_FE/_RO_SECTIONS` to `ids_schema.py` from
+`docs/instrument-fields-manifest.md`, extended `TYPE_LABELS`, `_SUBCLASS_ALIASES`
+(TT/TIT, PG/PI, TG/TI, TW, TE/RTD/TC, FE/FG, RO), and `_TYPE_SECTIONS`. No API,
+frontend, or XLSX code changed — they already dispatch on `get_ids_sections_for_type`,
+so all 11 types light up automatically. Extended `test_ids_schema.py` uniqueness +
+editability invariants to run across ALL types (data-driven on `SUPPORTED_SUBCLASSES`).
+
+**Result:** All 10 type keys, 0 duplicate paths each: CV 171 / PT 129 / TT 101 /
+PG 112 / TG 85 / TW 92 / TE 88 / FE 85 / RO 86 / PSV 133 fields (incl. 56 common).
+17 datasheet+schema tests pass in-container. FT still aliases to PT.
+
+---
+
 ## [2026-06-17] #59 — Per-instrument-type datasheet: full field sets in the Studio drawer + vendor-portal manifest
 
 **Type:** feature
