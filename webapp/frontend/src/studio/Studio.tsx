@@ -370,6 +370,31 @@ export default function Studio({ project, userName, onBack }: Props) {
   );
   const canDeleteSelected = selectedAnnotation?.source === "user";
 
+  // Normalized [x0,y0,x1,y1] (0..1 of source page) of the selected DETECTION,
+  // for the drawer's "Read tag (OCR)" button. Detection bboxes are tile-local in
+  // the tiling source resolution; map to source-page coords (computeTileOffsets
+  // at the tiling dims) then normalize. Null when the selection isn't a detection
+  // with a real bbox + tile (e.g. annotations, prototype tags).
+  const ocrBboxNorm = useMemo<[number, number, number, number] | null>(() => {
+    const tw = detResp?.tiling_width;
+    const th = detResp?.tiling_height;
+    if (!tw || !th) return null;
+    const d = detResp?.detections?.find(
+      (x) => (x.entity_id as string | undefined) === selectedId,
+    );
+    if (!d || !Array.isArray(d.bbox) || d.bbox.length !== 4 || !d.tile) return null;
+    const offs = computeTileOffsets({ w: tw, h: th }, activePageIndex);
+    const off = offs.get(d.tile as string);
+    if (!off) return null;
+    const [x1, y1, x2, y2] = d.bbox as number[];
+    return [
+      (x1 + off.x0) / tw,
+      (y1 + off.y0) / th,
+      (x2 + off.x0) / tw,
+      (y2 + off.y0) / th,
+    ];
+  }, [detResp, selectedId, activePageIndex]);
+
   async function handleDeleteAnnotation(entityId: string | null) {
     if (!entityId) return;
     const target = annotations.find((a) => a.entity_id === entityId);
@@ -882,6 +907,7 @@ export default function Studio({ project, userName, onBack }: Props) {
         fallbackType={sel.type}
         onBulkReview={onBulkReview}
         totalCount={detResp?.valves.length ?? 68}
+        ocrBboxNorm={ocrBboxNorm}
       />
     </div>
   );

@@ -240,3 +240,14 @@ export const createEntity = (
     `/api/v1/jobs/${jobId}/entities`,
     data,
   );
+
+export interface OcrBboxResponse {
+  text: string;
+  found: boolean;
+}
+
+/** Re-OCR a tight crop of the source page at the given NORMALIZED bbox
+ *  ([x0,y0,x1,y1] as 0..1 fractions) to recover an element's true tag — the
+ *  whole-tile vision pass often misreads dense tags. */
+export const ocrBbox = (jobId: number, bbox: [number, number, number, number]) =>
+  callJson<OcrBboxResponse>("POST", `/api/v1/jobs/${jobId}/ocr-bbox`, { bbox });

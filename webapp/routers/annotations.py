@@ -37,6 +37,7 @@ Auth: same IDOR pattern as entities.py — owner or super_admin, returns 404
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -82,6 +83,58 @@ class AnnotationCreate(BaseModel):
                 "entity_class must be one of 'valve', 'instrument', 'equipment'"
             )
         return v
+
+
+class OcrBboxRequest(BaseModel):
+    """Re-OCR a single element's bbox to recover its true tag.
+
+    bbox is NORMALIZED (fractions 0..1 of page width/height) so it's independent
+    of whatever zoom/render resolution the canvas is at — the server maps it onto
+    the source page image's pixel dims. pad_frac expands the crop slightly so a
+    tag sitting just outside the symbol bbox is still captured."""
+    bbox: List[float]
+    # P&ID tags sit OUTSIDE the symbol bbox (above/beside it), so the crop must
+    # expand well past the symbol to capture the tag text. ~1x each side works.
+    pad_frac: float = 1.0
+
+    @field_validator("bbox")
+    @classmethod
+    def _bbox_norm(cls, v: List[float]) -> List[float]:
+        if len(v) != 4:
+            raise ValueError("bbox must have 4 elements [x0,y0,x1,y1] (normalized 0..1)")
+        for c in v:
+            if c < -0.05 or c > 1.05:
+                raise ValueError("bbox coords must be normalized fractions in [0,1]")
+        return v
+
+
+class OcrBboxResponse(BaseModel):
+    text: str          # best single tag-shaped candidate (or raw text if none matched)
+    found: bool        # a tag-shaped candidate was found
+    candidates: List[str] = []  # all tag-shaped tokens, ranked (user disambiguates)
+    raw: str = ""      # full OCR output (debug / fallback)
+
+
+# Generic P&ID tag shape: "62-BV-151109", "62-FE-151010", "P-101", with optional
+# trailing instance letter. Tolerant of OCR spacing around the dashes.
+_TAG_TOKEN_RE = re.compile(r"\b\d{1,4}\s*-\s*[A-Z]{1,5}\s*-?\s*\d{2,7}[A-Z]?\b")
+
+
+def _tag_candidates(ocr_text: str) -> List[str]:
+    """Pull tag-shaped tokens from noisy OCR text, de-spaced + de-duped, ranked
+    by length (longer = more complete tag). Dense crops capture neighbouring
+    tags too, so we return all and let the user pick."""
+    if not ocr_text:
+        return []
+    norm = ocr_text.upper().replace("\n", " ")
+    seen, out = set(), []
+    for m in _TAG_TOKEN_RE.finditer(norm):
+        tok = re.sub(r"\s+", "", m.group(0))
+        if tok not in seen:
+            seen.add(tok)
+            out.append(tok)
+    out.sort(key=len, reverse=True)
+    return out
 
 
 class AnnotationPatch(BaseModel):
@@ -540,3 +593,122 @@ def delete_annotation(
     # drawer/bulk-review (training corrections were already recorded).
     _remove_annotation_from_canonical(job, entity_id, db)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _source_page_path(job: Job) -> Optional[Path]:
+    """Locate the hi-res source page image the bboxes/tiles came from."""
+    dirs = []
+    if job.output_csv_path:
+        dirs.append(Path(job.output_csv_path).parent)
+    for d in dirs:
+        for cand in (d / "tmp" / "page_0_full.png", d / "page_0_full.png"):
+            if cand.exists():
+                return cand
+    return None
+
+
+_VISION_TAG_PROMPT = (
+    "This image is a small crop from a P&ID engineering drawing, centered on ONE "
+    "component (a valve, instrument, or equipment item). Read its TAG — the "
+    "alphanumeric identifier printed next to the symbol, e.g. '62-BV-151109', "
+    "'62-FE-151010', 'P-101'. Return ONLY the single tag string for the component "
+    "nearest the centre of the image, with no other words. If you cannot read a "
+    "tag, return exactly: NONE"
+)
+
+
+def _vision_read_tag(crop_png_b64: str) -> str:
+    """Ask the OpenRouter vision model to read the tag from a tight crop. A
+    focused crop is far more accurate than the whole-tile pass (and than local
+    OCR, which can't read the small/rotated tag text). Returns the raw model
+    string ('' on NONE / empty)."""
+    from extractor import get_client, DEFAULT_MODEL
+
+    client = get_client()
+    resp = client.chat.completions.create(
+        model=DEFAULT_MODEL,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _VISION_TAG_PROMPT},
+                    {"type": "image_url",
+                     "image_url": {"url": f"data:image/png;base64,{crop_png_b64}"}},
+                ],
+            }
+        ],
+        max_tokens=30,
+        temperature=0,
+    )
+    text = (resp.choices[0].message.content or "").strip()
+    if text.upper() == "NONE":
+        return ""
+    return text
+
+
+@router.post(
+    "/{job_id}/ocr-bbox",
+    response_model=OcrBboxResponse,
+    responses={
+        200: {"description": "Best tag candidate read from the crop (may be empty)"},
+        404: {"description": "Job / page image not found, or not owned by caller"},
+        503: {"description": "Vision engine unavailable"},
+    },
+)
+def ocr_bbox(
+    job_id: int,
+    payload: OcrBboxRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> OcrBboxResponse:
+    """Re-read the tag for a single element by sending a tight crop of the source
+    page to the vision model. The whole-tile extraction pass misreads dense tags;
+    a focused crop recovers the true text. Returns the best-guess string for the
+    user to accept (they then save it via the normal tag-edit path)."""
+    job = _load_job_or_404(job_id, db, current_user)
+
+    page_path = _source_page_path(job)
+    if page_path is None:
+        raise HTTPException(status_code=404, detail="source page image not found for this job")
+
+    try:
+        import base64 as _b64
+        import io as _io
+        from PIL import Image
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"imaging stack unavailable: {type(e).__name__}")
+
+    try:
+        im = Image.open(str(page_path)).convert("RGB")
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"page image unreadable: {e}")
+
+    w, h = im.size
+    x0, y0, x1, y1 = payload.bbox
+    # normalized → source pixels; pad so the tag (which sits OUTSIDE the symbol
+    # bbox on a P&ID) is inside the crop.
+    px0, py0, px1, py1 = x0 * w, y0 * h, x1 * w, y1 * h
+    bw, bh = (px1 - px0), (py1 - py0)
+    pad_x, pad_y = bw * payload.pad_frac, bh * payload.pad_frac
+    cx0 = max(0, int(px0 - pad_x)); cy0 = max(0, int(py0 - pad_y))
+    cx1 = min(w, int(px1 + pad_x)); cy1 = min(h, int(py1 + pad_y))
+    if cx1 <= cx0 or cy1 <= cy0:
+        raise HTTPException(status_code=400, detail="degenerate bbox after padding")
+
+    buf = _io.BytesIO()
+    im.crop((cx0, cy0, cx1, cy1)).save(buf, format="PNG")
+    crop_b64 = _b64.standard_b64encode(buf.getvalue()).decode("utf-8")
+
+    try:
+        text = _vision_read_tag(crop_b64)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"vision read failed: {type(e).__name__}: {e}")
+
+    cands = _tag_candidates(text or "")
+    best = cands[0] if cands else (text or "")
+    return OcrBboxResponse(
+        text=best,
+        found=bool(best),
+        candidates=cands,
+        raw=text or "",
+    )

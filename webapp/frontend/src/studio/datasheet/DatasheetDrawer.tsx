@@ -17,12 +17,14 @@ import {
   HttpError,
   createEntity,
   getEntities,
+  ocrBbox,
   patchEntity,
   type EntitiesResponse,
   type EntityColumn,
   type EntityFieldValue,
   type EntityRow,
 } from "../api";
+import { ScanText } from "lucide-react";
 
 interface Props {
   open: boolean;
@@ -46,6 +48,10 @@ interface Props {
   fallbackType?: string;
   onBulkReview?: () => void;
   totalCount?: number;
+  /** Normalized [x0,y0,x1,y1] (0..1) of the selected element on the source page,
+   *  for the "Read tag (OCR)" button. Null when no real bbox is known (e.g. the
+   *  entity has placeholder-zero coords). */
+  ocrBboxNorm?: [number, number, number, number] | null;
 }
 
 /** deliverable_type → DocTypeKey inversion for auto-discovery docType switch. */
@@ -107,6 +113,7 @@ export default function DatasheetDrawer({
   fallbackType,
   onBulkReview,
   totalCount = 0,
+  ocrBboxNorm,
 }: Props) {
   // Default to Instrument Index. The drawer no longer auto-switches docType
   // based on entity_class — auto-discovery in fetchEntity finds the entity
@@ -143,6 +150,7 @@ export default function DatasheetDrawer({
   const [legacyJobNoCanonical, setLegacyJobNoCanonical] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: "ok" | "error"; msg: string } | null>(null);
 
   // Avoid stale state-setters when the user spam-switches docType or entity.
@@ -312,6 +320,27 @@ export default function DatasheetDrawer({
     setEditValues((v) => ({ ...v, [key]: val }));
   }
 
+  // Re-OCR the element's bbox to recover its true tag (the whole-tile vision
+  // pass often misreads dense tags). Fills the editable "tag" field with the
+  // result; the user reviews + Saves via the normal flow.
+  async function onReadTagOcr() {
+    if (!ocrBboxNorm || ocrBusy) return;
+    setOcrBusy(true);
+    try {
+      const r = await ocrBbox(jobId, ocrBboxNorm);
+      if (r.found && r.text) {
+        update("tag", r.text);
+        setToast({ kind: "ok", msg: `OCR read: "${r.text}" — review & Save` });
+      } else {
+        setToast({ kind: "error", msg: "OCR found no text in this region" });
+      }
+    } catch (e) {
+      setToast({ kind: "error", msg: e instanceof Error ? e.message : "OCR failed" });
+    } finally {
+      setOcrBusy(false);
+    }
+  }
+
   /** Reset a single field to its value at drawer-open. For overrides that
    *  predate this session there's no DELETE endpoint, so true revert-to-pid
    *  isn't possible — the button is only shown for fields the user edited
@@ -453,6 +482,18 @@ export default function DatasheetDrawer({
             <div className="ds-title-wrap">
               <span className="overline">{headerType}</span>
               <h2>{headerTag}</h2>
+              {ocrBboxNorm && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={onReadTagOcr}
+                  disabled={ocrBusy}
+                  title="Re-read this element's tag from the drawing with AI — suggests a tag for you to review before saving"
+                  style={{ marginTop: 6 }}
+                >
+                  <ScanText size={13} strokeWidth={1.6} /> {ocrBusy ? "Reading…" : "Re-read tag (AI)"}
+                </button>
+              )}
             </div>
             <div className="ds-progress">
               <div className="ds-progress-meta">
