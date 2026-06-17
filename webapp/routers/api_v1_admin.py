@@ -971,6 +971,29 @@ def _det_label(det: object) -> Optional[str]:
     return det.get("label") or det.get("yolo_class")
 
 
+def _canonical_pair(label: Optional[str]) -> tuple:
+    """(entity_class, sub_class) for a correction label, robust to two formats.
+
+    `ModelCorrection.new_label` and detection labels come in canonical
+    `<entity_class>_<sub_class>` form (e.g. "valve_bv", "instrument_lt").
+    `yolo_to_canonical` resolves the ones that are real YOLO labels (valves,
+    inst_field), but instrument SUB-classes (LT/TT/PT/…) have `yolo_label: null`
+    in the taxonomy, so it returns (None, None) for "instrument_lt" — which would
+    otherwise bucket separately from the annotation side's "instrument/LT".
+    Fall back to splitting the canonical form so both collapse to one class.
+    """
+    if not label:
+        return (None, None)
+    ec, sc = yolo_to_canonical(label)
+    if sc:
+        return (ec, sc)
+    if "_" in label:
+        head, tail = label.split("_", 1)
+        if head in ("valve", "instrument", "equipment") and tail:
+            return (head, tail.upper())
+    return (ec, sc)
+
+
 def _class_display_key(entity_class: Optional[str], sub_class: Optional[str], raw_label: Optional[str]) -> str:
     """Display bucket key: `entity_class/sub_class` when known, else the raw
     YOLO label, else "unknown"."""
@@ -1177,7 +1200,7 @@ def admin_learning_summary(
         .group_by(MC.action, MC.new_label)
         .all()
     ):
-        ec, sc = yolo_to_canonical(new_label)
+        ec, sc = _canonical_pair(new_label)
         b = _bucket(ec, sc, new_label)
         if action == "add":
             b.added += int(n)
@@ -1213,10 +1236,7 @@ def admin_learning_summary(
             raw_label = None
             if det_idx is not None and 0 <= det_idx < len(dets):
                 raw_label = _det_label(dets[det_idx])
-            if raw_label:
-                ec, sc = yolo_to_canonical(raw_label)
-            else:
-                ec, sc = None, None
+            ec, sc = _canonical_pair(raw_label)
             b = _bucket(ec, sc, raw_label)
             b.deleted += int(n)
 
