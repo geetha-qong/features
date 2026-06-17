@@ -24,6 +24,43 @@
 
 ---
 
+## [2026-06-17] #51 — Repair empty instrument indexes on dev (dual-schema emitter + backfill --force)
+
+**Type:** bugfix, infra
+**Stage:** export, webapp
+**Status:** shipped (deployed to dev; dev data repaired)
+
+**Why:** Audit of dev showed 17 jobs whose instrument-index entities existed but had
+all data fields empty. Two compounding causes: (1) jobs 2 & 39–55 were emitted
+before the ALL-CAPS instrument-field map fix landed; (2) **two CSV header schemas
+exist in production** — ALL-CAPS (current) and Title-Case (older MUK/Oman jobs 1,
+38) — and a prior session *swapped* the emitter map Title-Case→ALL-CAPS, fixing new
+jobs while silently breaking re-emit of legacy ones. `backfill_canonical` also
+*skipped* any job that already had a canonical.json, so it could not repair stale
+files at all.
+
+**What:**
+- `pipeline_emitter.py`: replaced the single-spelling `_INSTRUMENT_FIELD_MAP` with
+  `_INSTRUMENT_FIELD_ALIASES` (field → candidate columns) + `_first_col` helper;
+  tag/sub_class/pid/manufacturer/model now read both schemas (ALL-CAPS first, so
+  current jobs are byte-identical). Tests: `test_emitter_dual_schema.py`.
+- `scripts/backfill_canonical.py`: added gated `--force` to re-emit over an existing
+  canonical.json (override-safe — never touches `entity_overrides`; deterministic
+  entity_ids keep edits attached). Tests: `test_backfill_canonical_force.py`.
+- Ran `backfill_canonical --from-db --force` + `index_canonical_to_db` on dev.
+
+**Result:** dev instrument jobs populated **3/20 → 20/20** (0 empty). Job 1 34/34,
+job 38 37/37, job 40 286/286, etc. canonical_entities reindexed (55 synced, 0
+errors). deliverables test suite 5 failing → 4 (fixed `test_realistic_job_dir`).
+
+**Notes:** **The FS-walk mode of backfill mis-handles org-scoped jobs** — org_id dirs
+are numeric so `iter_jobs_from_fs` treats `/job_outputs/{org}/` as a flat job and
+never descends to `/{org}/{job}/`. Always use `--from-db` for jobs ≥40. A separate
+pre-existing bug remains: instrument `loop_name` keeps the tag's trailing char
+(`422-11-P-006A` vs expected `422-11-P-006`) — out of scope here.
+
+---
+
 ## [2026-06-16] #50 — Taxonomy reconciliation: taxonomy.json is now the sole display/glyph source
 
 **Type:** refactor

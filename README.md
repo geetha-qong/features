@@ -30,6 +30,7 @@ Plain-language summary of recently shipped features so the team can see what cha
 
 ### June 2026
 
+- **Instrument indexes repaired across all legacy jobs** (FEATURES #51). The emitter now reads both production CSV header schemas (ALL-CAPS and the older Title-Case format), and `backfill_canonical --force` re-emits stale files. Dev went from 3/20 to 20/20 jobs with populated instrument data — the Instrument Index / Datasheet views now fill in for older jobs.
 - **Unified symbol taxonomy + label triage** (FEATURES #49, #50). `webapp/taxonomy.json` is now the **single source of truth** for every label's display name, color, glyph, and YOLO routing — backend inference, the Studio palette/canvas, and exports all read from it (no more hand-maintained maps drifting apart). New labels the model emits but the taxonomy doesn't know about are auto-staged into a **Label Triage** queue at **Admin → Label Triage** (`/admin/label-triage`), where a super-admin classifies them; approving appends the new class straight back into `taxonomy.json`. Regenerate the frontend/LS configs after editing the taxonomy — see the *Annotation labels* section below.
 - **Studio canvas: P&ID symbol glyphs** (FEATURES #45). Detections now render as proper per-class P&ID symbol glyphs (LS-style colors) instead of plain rectangles, so reviewers recognise valves/instruments at a glance.
 - **Deep-zoom that stays sharp** (FEATURES #43, #44). The canvas re-renders the page on-demand at up to 6× and uses layout-based zoom, fixing the pixelation reviewers hit when zooming into dense drawings.
