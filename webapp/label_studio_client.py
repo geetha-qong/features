@@ -515,6 +515,44 @@ def project_has_tile_tasks(project_id: int) -> bool:
     return False
 
 
+def get_task(task_id: int) -> Optional[dict]:
+    """Full task detail incl. its `annotations` list (GET /api/tasks/{id})."""
+    if not is_configured():
+        return None
+    try:
+        resp = requests.get(f"{LS_URL}/api/tasks/{task_id}", headers=_headers(), timeout=20)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as e:
+        print(f"[label_studio] get_task {task_id} error: {e}")
+    return None
+
+
+def create_annotation(task_id: int, result: list, was_cancelled: bool = False,
+                      ground_truth: bool = False) -> bool:
+    """Create an annotation on a task (POST /api/tasks/{id}/annotations/).
+
+    Used by the dedupe merge path to move a duplicate task's labels onto the
+    keeper before the duplicate is deleted. LS recomputes task/project counters."""
+    if not is_configured():
+        return False
+    headers = _headers()
+    try:
+        resp = requests.post(
+            f"{LS_URL}/api/tasks/{task_id}/annotations/",
+            headers=headers,
+            json={"result": result, "was_cancelled": was_cancelled,
+                  "ground_truth": ground_truth},
+            timeout=20,
+        )
+        if resp.status_code in (200, 201):
+            return True
+        print(f"[label_studio] create_annotation task={task_id} → {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"[label_studio] create_annotation task={task_id} error: {e}")
+    return False
+
+
 def sync_all_label_configs(source_project_id: int = 1) -> dict:
     """Copy the label config from source_project_id to every other project.
 
