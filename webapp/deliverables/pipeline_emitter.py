@@ -178,22 +178,41 @@ def _classify_system(type_code: str, instrument_description: str) -> str:
 # Keys match the ALL-CAPS headers that instrument_validator.py writes via
 # InstrumentRow.to_csv_dict(). Previously used Title-Case names that never
 # matched, leaving all instrument fields empty in canonical.json.
-_INSTRUMENT_FIELD_MAP: Dict[str, str] = {
-    "INSTRUMENT TYPE DESCRIPTION": "instrument_type",
-    "TAG SERVICE":                  "service_description",
-    "LINE NUMBER":                  "line_no",
-    "EQUIP NO":                     "equipment_no",
-    "POWER SUPPLY":                 "external_power_supply",
-    "SIGNAL VOLTAGE LEVEL":         "signal_level",
-    "LOCATION":                     "location",
-    "RANGE MIN":                    "analog_range_low_scale",
-    "RANGE MAX":                    "analog_range_high_scale",
-    "RANGE UOM":                    "analog_range_eu",
-    "DATA SHEET / REQUISITION №":   "datasheet_ref",
-    "MANUFACTURER":                 "manufacturer",
-    "MODEL":                        "model_no",
-    "REMARKS":                      "remark",
+# Each canonical instrument field maps to the CSV column names that may carry it.
+# TWO export schemas exist in production and both must be read:
+#   * ALL-CAPS  (current pipeline output, e.g. "TAG SERVICE", "EQUIP NO")
+#   * Title-Case (older MUK/Oman jobs, e.g. "Service Description", "Equipment No")
+# Candidates are tried in order, so ALL-CAPS wins when both are present — this
+# preserves the exact behaviour for current jobs while letting legacy jobs
+# (whose only difference is the header spelling) re-emit correctly.
+_INSTRUMENT_FIELD_ALIASES: Dict[str, List[str]] = {
+    "instrument_type":         ["INSTRUMENT TYPE DESCRIPTION", "Instrument Type"],
+    "service_description":     ["TAG SERVICE", "Service Description"],
+    "line_no":                 ["LINE NUMBER", "Line No"],
+    "equipment_no":            ["EQUIP NO", "Equipment No"],
+    "external_power_supply":   ["POWER SUPPLY", "External Power Supply"],
+    "signal_level":            ["SIGNAL VOLTAGE LEVEL", "Signal Level"],
+    "location":                ["LOCATION", "Location"],
+    "analog_range_low_scale":  ["RANGE MIN", "Analog Range Low"],
+    "analog_range_high_scale": ["RANGE MAX", "Analog Range High"],
+    "analog_range_eu":         ["RANGE UOM", "Analog Range EU"],
+    "datasheet_ref":           ["DATA SHEET / REQUISITION №", "Inst. Datasheet"],
+    "manufacturer":            ["MANUFACTURER", "Manufacturer"],
+    "model_no":                ["MODEL", "Model No"],
+    "remark":                  ["REMARKS", "Remark"],
 }
+# Single-purpose columns read directly (also dual-schema).
+_INSTRUMENT_TAG_COLS = ["TAG NUMBER", "Tag Number"]
+_INSTRUMENT_SUBCLASS_COLS = ["INSTRUMENT TYPE DESCRIPTION", "Instrument Type"]
+_INSTRUMENT_PID_COLS = ["P&ID", "P&ID No"]
+
+
+def _first_col(row: dict, candidates: List[str], default: str = "") -> str:
+    """First present column value among candidates (handles both CSV schemas)."""
+    for col in candidates:
+        if col in row and row[col] is not None:
+            return row[col]
+    return default
 
 
 @dataclass
@@ -284,14 +303,14 @@ def _build_instrument_entities(instrument_csv: Path, job_id: int) -> List[Canoni
     with instrument_csv.open(newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for idx, row in enumerate(reader):
-            tag = row.get("TAG NUMBER") or None
+            tag = _first_col(row, _INSTRUMENT_TAG_COLS) or None
 
             entity_id = _make_entity_uuid(job_id, "instrument", tag, idx)
 
-            # Build fields dict using the canonical name mapping
+            # Build fields dict using the canonical name mapping (dual-schema)
             fields: Dict[str, str] = {}
-            for csv_col, field_name in _INSTRUMENT_FIELD_MAP.items():
-                fields[field_name] = row.get(csv_col, "")
+            for field_name, candidates in _INSTRUMENT_FIELD_ALIASES.items():
+                fields[field_name] = _first_col(row, candidates)
 
             # --- Derived fields computed from tag ---
             tag_str = tag or ""
@@ -350,8 +369,8 @@ def _build_instrument_entities(instrument_csv: Path, job_id: int) -> List[Canoni
                         fields[fld] = val
 
             # Build VendorMatch: prefer API data, fall back to CSV
-            manufacturer = (api_data or {}).get("_manufacturer") or (row.get("MANUFACTURER") or "").strip()
-            model_no = (api_data or {}).get("_model_number") or (row.get("MODEL") or "").strip()
+            manufacturer = (api_data or {}).get("_manufacturer") or _first_col(row, _INSTRUMENT_FIELD_ALIASES["manufacturer"]).strip()
+            model_no = (api_data or {}).get("_model_number") or _first_col(row, _INSTRUMENT_FIELD_ALIASES["model_no"]).strip()
             vendor_name = (api_data or {}).get("_vendor_name") or manufacturer
 
             vendor_match: Optional[VendorMatch] = None
@@ -369,9 +388,9 @@ def _build_instrument_entities(instrument_csv: Path, job_id: int) -> List[Canoni
                 CanonicalEntity(
                     entity_id=entity_id,
                     entity_class="instrument",
-                    sub_class=row.get("INSTRUMENT TYPE DESCRIPTION", ""),
+                    sub_class=_first_col(row, _INSTRUMENT_SUBCLASS_COLS),
                     tag=tag,
-                    pid_number=row.get("P&ID", ""),
+                    pid_number=_first_col(row, _INSTRUMENT_PID_COLS),
                     sheet_number=_sheet_from_row(row),
                     bbox=(0.0, 0.0, 0.0, 0.0),
                     fields=fields,
