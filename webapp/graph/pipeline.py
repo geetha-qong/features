@@ -150,6 +150,8 @@ def extract_graph(
         generated_at=generated_at,
         fallback_used=fallback_used,
         directed=directed_flags,
+        page_width=job_input.width or None,
+        page_height=job_input.height or None,
     )
     if warnings:
         graph["warnings"] = warnings

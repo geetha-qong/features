@@ -90,6 +90,12 @@ export interface JobGraph {
   version: string;
   job_id: number;
   page: number;
+  /** Page-image dimensions the node/edge/orphan coords live in (the full-page
+   *  PNG the pipeline traced). GraphLayer scales graph coords by
+   *  natural/page_{width,height} onto the canvas. Absent on legacy graphs →
+   *  no scaling (render unscaled). */
+  page_width?: number | null;
+  page_height?: number | null;
   generated_at: string;
   stats: GraphStats;
   nodes: GraphNode[];

@@ -121,10 +121,90 @@ describe("GraphLayer", () => {
     expect(path.getAttribute("fill")).toBe("var(--scan-cyan)");
   });
 
+  test("renders one dashed amber polyline per orphan line", () => {
+    const graph = makeGraph({
+      orphan_lines: [
+        { polyline: [[0, 0], [50, 50]], tile: "t0", reason: "no_endpoint_node" },
+        { polyline: [[200, 200], [260, 200], [260, 280]], tile: "t0", reason: "dead_end" },
+      ],
+    });
+    const { container } = renderLayer({ graph });
+    const orphans = container.querySelectorAll("[data-orphan]");
+    expect(orphans).toHaveLength(2);
+    // Distinguishing style: amber stroke + dashed + translucent + non-clickable.
+    const first = orphans[0] as SVGElement;
+    expect(first.getAttribute("stroke")).toBe("var(--warn)");
+    expect(first.getAttribute("stroke-dasharray")).toBeTruthy();
+    expect(first.getAttribute("stroke-opacity")).toBe("0.5");
+    // Drawn UNDER the connected edges (lower in document order).
+    const firstEdge = container.querySelector("[data-graph-edge]") as Element;
+    expect(first.compareDocumentPosition(firstEdge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("renders orphans even when there are 0 connected edges (job-44 case)", () => {
+    const graph = makeGraph({
+      edges: [],
+      orphan_lines: Array.from({ length: 5 }, (_, i) => ({
+        polyline: [[i * 10, 0], [i * 10, 100]],
+        tile: "t0",
+        reason: "unconnected",
+      })),
+    });
+    const { container } = renderLayer({ graph });
+    expect(container.querySelectorAll("[data-graph-edge]")).toHaveLength(0);
+    expect(container.querySelectorAll("[data-orphan]")).toHaveLength(5);
+  });
+
+  test("renders unmatched/floating nodes with the amber warning style", () => {
+    const graph = makeGraph({
+      // n_000 is linked (cyan); n_001 is listed floating → amber ring.
+      floating_nodes: ["n_001"],
+    });
+    const { container } = renderLayer({ graph });
+    const linked = container.querySelector('[data-graph-node="n_000"]') as SVGElement;
+    const floating = container.querySelector('[data-graph-node="n_001"]') as SVGElement;
+    expect(linked.getAttribute("data-unmatched")).toBeNull();
+    expect(linked.getAttribute("fill")).toBe("var(--scan-cyan)");
+    expect(floating.getAttribute("data-unmatched")).toBe("true");
+    expect(floating.getAttribute("fill")).toBe("none");
+    expect(floating.getAttribute("stroke")).toBe("var(--warn)");
+  });
+
+  test("a node with null entity_id is treated as unmatched when it has a bbox", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "n_x", entity_id: null, tag: "?", class: null, bbox: [5, 5, 25, 25], tile: "t0", confidence: 0.4 },
+      ],
+      edges: [],
+    });
+    const { container } = renderLayer({ graph });
+    const node = container.querySelector('[data-graph-node="n_x"]') as SVGElement;
+    expect(node.getAttribute("data-unmatched")).toBe("true");
+    expect(node.getAttribute("stroke")).toBe("var(--warn)");
+  });
+
   test("renders nothing when not visible", () => {
     const { container } = renderLayer({ visible: false });
     expect(container.querySelector("[data-graph-layer]")).toBeNull();
     expect(container.querySelectorAll("[data-graph-node]")).toHaveLength(0);
     expect(container.querySelectorAll("[data-graph-edge]")).toHaveLength(0);
+    expect(container.querySelectorAll("[data-orphan]")).toHaveLength(0);
+  });
+
+  test("scales graph coords from page_width/height onto the canvas viewBox", () => {
+    // Graph traced at 1000x1000; canvas natural is 2000x2000 → scale(2,2).
+    const graph = makeGraph({ page_width: 1000, page_height: 1000 });
+    const { container } = renderLayer({ graph, natural: { w: 2000, h: 2000 } });
+    const content = container.querySelector('[data-graph-content]') as SVGElement;
+    expect(content).not.toBeNull();
+    expect(content.getAttribute("transform")).toBe("scale(2,2)");
+  });
+
+  test("does NOT scale when page dims are absent (legacy graph)", () => {
+    // makeGraph() has no page_width/height → scale 1 → no transform attr.
+    const { container } = renderLayer();
+    const content = container.querySelector('[data-graph-content]') as SVGElement;
+    expect(content).not.toBeNull();
+    expect(content.getAttribute("transform")).toBeNull();
   });
 });

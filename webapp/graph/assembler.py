@@ -65,6 +65,8 @@ def assemble(
     generated_at: str,
     fallback_used: bool = False,
     directed: Optional[Sequence[bool]] = None,
+    page_width: Optional[int] = None,
+    page_height: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Build the ``canonical_graph.json`` dict (the JobGraph).
 
@@ -122,6 +124,12 @@ def assemble(
         "version": GRAPH_VERSION,
         "job_id": job_id,
         "page": page,
+        # Reference page-image dimensions these node/edge/orphan coords live in
+        # (the full-page PNG the pipeline traced). The Studio canvas renders the
+        # page at a different resolution, so the frontend scales graph coords by
+        # natural/page_{width,height}. Missing (legacy) → frontend skips scaling.
+        "page_width": page_width,
+        "page_height": page_height,
         "generated_at": generated_at,
         "stats": {
             "nodes": len(node_dicts),

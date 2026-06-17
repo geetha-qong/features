@@ -73,6 +73,17 @@ def to_page_pixel_detections(
     for d in detections:
         tile = d.get("tile")
         bbox = d.get("bbox")
+        # Normalize the legacy GPU-worker shape (bbox_tile + tile_page/row/col,
+        # no `tile` filename / `bbox`). This mirrors
+        # `webapp.routers.api_v1._normalize_detection_shape` — without it every
+        # detection skips translation and the whole graph collapses into the
+        # top-left tile (tile-local coords). See FEATURES graph-coords fix.
+        if bbox is None and d.get("bbox_tile") is not None:
+            bbox = d.get("bbox_tile")
+        if tile is None:
+            page, row, col = d.get("tile_page"), d.get("tile_row"), d.get("tile_col")
+            if all(v is not None for v in (page, row, col)):
+                tile = f"tile_p{page}_r{row}_c{col}.png"
         box = tile_offsets.get(tile) if tile else None
         if box is None or not bbox or len(bbox) < 4:
             out.append(d)
