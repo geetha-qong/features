@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Sequence
 
-from webapp.graph import assembler, fallback, linker, loader, resolver
+from webapp.graph import assembler, fallback, linker, loader, orient, resolver
 from webapp.graph.tracer import LineTracer, OpenCVLineTracer
 
 GRAPH_FILENAME = "canonical_graph.json"
@@ -132,6 +132,14 @@ def extract_graph(
             warnings=warnings,
         )
 
+    # ── Step E.5: orient edges (flow direction) ──
+    # Best-effort: use arrow_*/connector_in/out detections (skipped as nodes
+    # above) to set per-edge direction. Never adds/drops edges — only the flag
+    # and possible source/target swap change. No arrow nearby → undirected.
+    oriented = orient.orient_edges(edges, job_input.detections, nodes)
+    edges = [e for (e, _d) in oriented]
+    directed_flags = [d for (_e, d) in oriented]
+
     # ── Step F: assemble ──
     graph = assembler.assemble(
         nodes,
@@ -141,6 +149,7 @@ def extract_graph(
         page=page,
         generated_at=generated_at,
         fallback_used=fallback_used,
+        directed=directed_flags,
     )
     if warnings:
         graph["warnings"] = warnings

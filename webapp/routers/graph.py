@@ -64,6 +64,10 @@ def _job_dir(job: models.Job) -> Optional[Path]:
 
 def _user_edge_to_dict(row: models.GraphCorrection) -> Dict[str, Any]:
     method = "user_added" if row.source == "user" else row.source
+    # User edges are directed by construction (the user drew source→target).
+    # A NULL `directed` column (legacy rows pre-migration) reads as True for
+    # user edges — they were always directed; the column just didn't exist yet.
+    directed = True if row.directed is None else bool(row.directed)
     return {
         "id": row.edge_id,
         "source": row.source_entity_id,
@@ -72,6 +76,7 @@ def _user_edge_to_dict(row: models.GraphCorrection) -> Dict[str, Any]:
         "tile": None,
         "method": method,
         "confidence": None,
+        "directed": directed,
         "line_type": row.line_type,
         "status": row.status,
         "source_entity_id": row.source_entity_id,
@@ -123,6 +128,10 @@ def get_job_graph(
 
     graph.setdefault("job_id", job_id)
     auto_edges: List[Dict[str, Any]] = list(graph.get("edges", []))
+    # Back-compat: legacy canonical_graph.json edges predate `directed`. A
+    # missing key reads as False (undirected — renders as today).
+    for e in auto_edges:
+        e.setdefault("directed", False)
 
     # Overlay user-drawn edges from graph_corrections.
     user_rows = (

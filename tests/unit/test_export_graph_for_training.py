@@ -111,6 +111,16 @@ def test_exports_jsonl_shape(db_session, patch_sessionlocal, job, user, tmp_path
     assert rec["metadata"] == {"spec": "CS150"}
 
 
+def test_export_includes_directed_flag(db_session, patch_sessionlocal, job, user, tmp_path):
+    """DoD: the `directed` flag must flow to the graph-extraction training set."""
+    _seed_edge(db_session, job, user, edge_id="dir-1", directed=False)
+    out = tmp_path / "edges.jsonl"
+    exp.run(job_id=None, since=None, out_path=out)
+    rec = json.loads(out.read_text().splitlines()[0])
+    assert "directed" in rec
+    assert rec["directed"] is False
+
+
 def test_status_filter_skips_rejected(db_session, patch_sessionlocal, job, user, tmp_path):
     _seed_edge(db_session, job, user, edge_id="ok-1", status="user_confirmed")
     _seed_edge(db_session, job, user, edge_id="rej-1", status="user_rejected")

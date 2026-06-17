@@ -41,6 +41,7 @@ def _row_to_dict(row: models.GraphCorrection) -> dict:
         "relation_type": row.relation_type,
         "source_entity_id": row.source_entity_id,
         "target_entity_id": row.target_entity_id,
+        "directed": (True if row.directed is None else bool(row.directed)),
         "polyline": row.polyline or [],
         "group_id": row.group_id,
         "metadata": row.metadata_json or {},

@@ -24,6 +24,59 @@
 
 ---
 
+## [2026-06-17] #53 — Directed process graph (flow direction) — model arrows + user edges
+
+**Type:** feature
+**Stage:** graph, webapp
+**Status:** shipped (merged to dev)
+
+**Why:** The process graph existed (auto CV+LLM extraction → nodes/edges, render in
+Studio, user draw-edge, training export — FEATURES #38/#40) but was **undirected**:
+the assembler explicitly deferred flow direction and the pipeline *skipped* the
+v1-11 detector's `arrow_*` / `connector_in/out` classes. User goal: a directed
+graph (valves/instruments connected with flow direction) — try the model first,
+else let users draw/correct direction as self-learning training data. Spec:
+`docs/superpowers/specs/2026-06-17-graph-directions-design.md`. Built with 4
+parallel agents (backend impl ∥ frontend impl, then test ∥ security-audit) + lead
+integration; design/branch policy now plain `dev` feature branch (no `dt/*`).
+
+**What:**
+- **`webapp/graph/orient.py`** (new, Step E.5 in `pipeline.py`): orients each
+  traced edge by the nearest `arrow_*` detection within `ARROW_PROXIMITY_PX`
+  (30px) of its polyline (dot-product decides source→target swap);
+  `connector_in/out` fallback; no arrow ⇒ stays undirected. **Edge-count
+  invariant** — only flags/swaps, never adds/drops. Defensive `_safe_polyline`.
+- **`directed` field everywhere:** `GraphCorrection.directed` (nullable bool,
+  `run_migrations` new_columns — no Alembic), `edges.py` EdgeCreate/Patch/Row
+  (user edges default true), `graph.py` merge (legacy/missing ⇒ false),
+  `canonical_graph.json` edges, and the training export (`export_graph_for_training`).
+- **Frontend `GraphLayer.tsx`:** per-method SVG `<marker>` arrowheads via
+  `markerEnd`, drawn only when `directed===true`; `directed?: boolean` on the
+  `GraphEdge` type. Undirected/legacy edges render exactly as before.
+- **Security hardening** (from the audit): polyline `conlist(max_length=500)`
+  (DoS cap), `relation_type`/`status` allowed-value validation (a typo'd status
+  could silently flip graph-merge visibility), `orient.py` malformed-point guard.
+
+**Result:** backend 338 pass / 1 pre-existing unrelated fail
+(`test_sheets_empty_when_no_tiles`, stray-tile container artifact); graph/edge/
+orient/export subset 123 pass (+~50 over baseline). Frontend tsc clean, GraphLayer
+8 vitest. Security audit: **AuthZ/AuthN sound (no IDOR)** — `_load_job_or_404`
+enforces owner-or-super_admin/404; findings were validation/DoS, now fixed.
+
+**Notes:**
+- **AuthZ is by `Job.user_id`** (owner-or-super_admin, 404-not-403) — the edge/
+  graph routers follow `entities.py`'s pattern; there is no org-scoping (Job has
+  no org_id).
+- **Existing dev jobs' `canonical_graph.json` predate this** → auto-direction
+  shows only on newly-processed / re-extracted jobs (the graph pipeline must
+  re-run to orient by arrows). **User-drawn edges are directed immediately.**
+- NetworkX container stays a `MultiGraph`; direction is a per-edge attribute, not
+  a `DiGraph` switch (canonical_graph.json remains source of truth).
+- Pipeline-test sharp edge: `extract_graph` only traces when a full-page PNG
+  exists on disk; a detections-only synthetic job yields 0 edges + LLM fallback.
+
+---
+
 ## [2026-06-17] #52 — Instrument loop_name/signal fixes + taxonomy loose-ends close-out
 
 **Type:** bugfix, test

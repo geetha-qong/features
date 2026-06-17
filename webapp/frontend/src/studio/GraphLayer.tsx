@@ -31,6 +31,12 @@ function styleFor(method: string) {
   return METHOD_STYLE[method as GraphEdgeMethod] ?? FALLBACK_STYLE;
 }
 
+// Stable marker id per method, e.g. "arrow-opencv". Directed edges reference
+// these via markerEnd; undirected edges reference nothing (render as today).
+function markerIdFor(method: string): string {
+  return `arrow-${method}`;
+}
+
 interface Props {
   graph: JobGraph;
   natural: { w: number; h: number };
@@ -52,8 +58,30 @@ export default function GraphLayer({ graph, natural, visible, onSelect }: Props)
   const tagById = new Map<string, string | null>();
   for (const n of graph.nodes) tagById.set(n.id, n.tag);
 
+  // One arrowhead marker per method, colored to match its edge. markerUnits
+  // defaults to "strokeWidth" so the arrowhead scales with each edge's
+  // strokeWidth/edgeWidth automatically. orient="auto" points it along the
+  // polyline's final segment (the target end). refX sits the tip at the
+  // endpoint; the 0..10 / 0..10 viewBox is the conventional marker space.
+  const markerDefs = (Object.keys(METHOD_STYLE) as GraphEdgeMethod[]).map((method) => (
+    <marker
+      key={`marker-${method}`}
+      id={markerIdFor(method)}
+      data-arrow-method={method}
+      viewBox="0 0 10 10"
+      refX="9"
+      refY="5"
+      markerWidth="6"
+      markerHeight="6"
+      orient="auto-start-reverse"
+    >
+      <path d="M 0 0 L 10 5 L 0 10 z" fill={METHOD_STYLE[method].color} />
+    </marker>
+  ));
+
   return (
     <g data-graph-layer="true">
+      <defs>{markerDefs}</defs>
       {/* Edges first so node circles draw on top of their endpoints. */}
       {graph.edges.map((e: GraphEdge) => {
         const style = styleFor(e.method);
@@ -69,6 +97,7 @@ export default function GraphLayer({ graph, natural, visible, onSelect }: Props)
             points={points}
             fill="none"
             stroke={style.color}
+            markerEnd={e.directed ? `url(#${markerIdFor(e.method)})` : undefined}
             strokeWidth={hovered ? edgeWidth * 2 : edgeWidth}
             strokeDasharray={style.dashed ? `${edgeWidth * 4} ${edgeWidth * 3}` : undefined}
             strokeLinecap="round"

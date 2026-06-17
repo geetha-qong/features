@@ -454,6 +454,10 @@ class GraphCorrection(Base):
     sheet_number = Column(Integer, nullable=False, default=1)
     group_id = Column(String, nullable=True, index=True)          # all edges in a loop/interlock share this
     metadata_json = Column(JSON, nullable=True)
+    # Flow direction flag (graph-directions, 2026-06-17). Nullable for back-compat:
+    # rows that predate this column read as directed=True at the API layer (user
+    # edges were always directed source→target). New user edges default True.
+    directed = Column(Boolean, nullable=True, default=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 

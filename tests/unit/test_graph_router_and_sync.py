@@ -165,3 +165,22 @@ def test_get_graph_merges_user_edges(client, db_session, job):
     methods = sorted(e["method"] for e in body["edges"])
     assert methods == ["opencv", "user_added"]  # rejected excluded
     assert body["stats"]["auto_edges"] == 1 and body["stats"]["user_edges"] == 1
+
+    # directed (graph-directions, 2026-06-17): legacy auto edge (no key) reads
+    # as False; user edge surfaces as True.
+    by_method = {e["method"]: e for e in body["edges"]}
+    assert by_method["opencv"]["directed"] is False
+    assert by_method["user_added"]["directed"] is True
+
+
+def test_get_graph_preserves_directed_auto_edge(client, job):
+    """An auto edge whose canonical_graph.json carries directed=true surfaces it."""
+    job_dir = os.path.dirname(job.output_csv_path)
+    auto = [{"id": "e_000", "source": "n_000", "target": "n_001",
+             "polyline": [[0, 0], [1, 1]], "method": "opencv",
+             "confidence": 0.7, "directed": True}]
+    with open(os.path.join(job_dir, "canonical_graph.json"), "w") as f:
+        json.dump(_graph(job.id, auto), f)
+    r = client.get(f"/api/v1/jobs/{job.id}/graph")
+    assert r.status_code == 200
+    assert r.json()["edges"][0]["directed"] is True

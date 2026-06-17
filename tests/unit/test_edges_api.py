@@ -170,6 +170,47 @@ def test_create_process_pipe(client, db_session, job, user):
     assert row.target_entity_id == "ent-B"
 
 
+# ── directed flag (graph-directions, 2026-06-17) ──────────────────────────────
+
+def test_create_defaults_directed_true(client, db_session, job):
+    """User edges are directed source→target by construction → default True."""
+    resp = client.post(f"/api/v1/jobs/{job.id}/edges", json=_valid_payload())
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    assert data["directed"] is True
+    row = (
+        db_session.query(models.GraphCorrection)
+        .filter_by(job_id=job.id, edge_id=data["edge_id"])
+        .one()
+    )
+    assert bool(row.directed) is True
+
+
+def test_create_directed_false_round_trips(client, job):
+    resp = client.post(
+        f"/api/v1/jobs/{job.id}/edges", json=_valid_payload(directed=False)
+    )
+    assert resp.status_code == 201, resp.text
+    edge_id = resp.json()["edge_id"]
+    assert resp.json()["directed"] is False
+    # GET surfaces it too.
+    listing = client.get(f"/api/v1/jobs/{job.id}/edges").json()["edges"]
+    match = [e for e in listing if e["edge_id"] == edge_id]
+    assert len(match) == 1
+    assert match[0]["directed"] is False
+
+
+def test_patch_can_flip_direction(client, job):
+    edge_id = client.post(
+        f"/api/v1/jobs/{job.id}/edges", json=_valid_payload()
+    ).json()["edge_id"]
+    resp = client.patch(
+        f"/api/v1/jobs/{job.id}/edges/{edge_id}", json={"directed": False}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["directed"] is False
+
+
 @pytest.mark.parametrize("line_type", ["process_pipe", "instrument", "signal", "interlock"])
 def test_create_each_line_type(client, job, line_type):
     resp = client.post(
@@ -212,6 +253,44 @@ def test_create_self_loop(client, job):
     )
     assert resp.status_code == 400
     assert "self-loop" in resp.json()["detail"].lower()
+
+
+def test_create_invalid_relation_type(client, job):
+    resp = client.post(
+        f"/api/v1/jobs/{job.id}/edges",
+        json=_valid_payload(relation_type="teleports"),
+    )
+    assert resp.status_code == 400
+    assert "invalid relation_type" in resp.json()["detail"]
+
+
+def test_create_valid_relation_type_ok(client, job):
+    resp = client.post(
+        f"/api/v1/jobs/{job.id}/edges",
+        json=_valid_payload(relation_type="carries"),
+    )
+    assert resp.status_code == 201, resp.text
+
+
+def test_patch_invalid_status_rejected(client, job):
+    edge_id = client.post(
+        f"/api/v1/jobs/{job.id}/edges", json=_valid_payload()
+    ).json()["edge_id"]
+    resp = client.patch(
+        f"/api/v1/jobs/{job.id}/edges/{edge_id}", json={"status": "user_rejcted"}
+    )
+    assert resp.status_code == 400
+    assert "invalid status" in resp.json()["detail"]
+
+
+def test_create_oversized_polyline_rejected(client, job):
+    # > max_length (500) points — pydantic conlist max_length guard (DoS cap).
+    huge = [[float(i), float(i)] for i in range(501)]
+    resp = client.post(
+        f"/api/v1/jobs/{job.id}/edges",
+        json=_valid_payload(polyline=huge),
+    )
+    assert resp.status_code == 422
 
 
 def test_foreign_job_404(client, foreign_job):
