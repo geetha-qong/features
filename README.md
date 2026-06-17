@@ -20,7 +20,24 @@ Extract structured **Valve Lists, Instrument Indexes, Equipment Lists, and Datas
 3. **Qong Studio** (React + Konva) renders the PDF tile-by-tile with detection overlays and lets reviewers edit entities. Edits land in the `entity_overrides` table and merge into every subsequent export.
 4. **Admin tools** manage users, customer-specific deliverable templates, and a feedback queue.
 
-**Current state (June 2026):** Phase 1–4 frontend ported to React SPA (Marketing, Dashboard, Studio canvas, Admin). Deliverables subsystem live with four generators + per-customer JSON templates. Spec A Day 1 (editable deliverables backend) shipped — `entity_overrides` + merge layer + `GET/PATCH /api/v1/jobs/{id}/entities`. AWS migration complete (ap-south-1), Postgres in all envs, GitHub Actions + SSM auto-deploys on dev. See `FEATURES.md` #21–26 for the most recent changes.
+**Current state (June 2026):** React SPA (Marketing, Dashboard, Studio canvas, Admin) live in production on dev. Deliverables subsystem ships four generators + per-customer JSON templates; editable deliverables (`entity_overrides` merge layer) and the cross-job `canonical_entities` index are live. AWS migration complete (ap-south-1), Postgres in all envs, GitHub Actions + SSM auto-deploy on every push to `dev`. Graph-extraction v0 (line detection → graph → DB) is in production. See **What's New** below for the latest, and `FEATURES.md` for the full decision log.
+
+---
+
+## What's New
+
+Plain-language summary of recently shipped features so the team can see what changed without reading the full `FEATURES.md` decision log. Each item links to its FEATURES entry for the *why* and the technical detail.
+
+### June 2026
+
+- **Unified symbol taxonomy + label triage** (FEATURES #49, #50). `webapp/taxonomy.json` is now the **single source of truth** for every label's display name, color, glyph, and YOLO routing — backend inference, the Studio palette/canvas, and exports all read from it (no more hand-maintained maps drifting apart). New labels the model emits but the taxonomy doesn't know about are auto-staged into a **Label Triage** queue at **Admin → Label Triage** (`/admin/label-triage`), where a super-admin classifies them; approving appends the new class straight back into `taxonomy.json`. Regenerate the frontend/LS configs after editing the taxonomy — see the *Annotation labels* section below.
+- **Studio canvas: P&ID symbol glyphs** (FEATURES #45). Detections now render as proper per-class P&ID symbol glyphs (LS-style colors) instead of plain rectangles, so reviewers recognise valves/instruments at a glance.
+- **Deep-zoom that stays sharp** (FEATURES #43, #44). The canvas re-renders the page on-demand at up to 6× and uses layout-based zoom, fixing the pixelation reviewers hit when zooming into dense drawings.
+- **Multi-page P&ID sheet attribution** (FEATURES #46). The source page number is threaded through the extractor → parser → emitter, so every row in a multi-sheet deliverable carries the correct **Sheet** number.
+- **v1-11 YOLO model deployed** (FEATURES #42). Retrained on +32% annotations; +0.06 mAP50 over v1-10 (arrows +24–29%, valves +10–17%).
+- **Local Docker builds no longer need a model PAT** (FEATURES #48). The model-bake step skips cleanly when no GitHub PAT is present, so a fresh clone builds out of the box. (Dev/QA/prod still bake the model via SSM-provided PAT.)
+
+> **Shipping something non-trivial?** Append a `FEATURES.md` entry (the *why*), and if it's user- or team-facing, add a one-line bullet here so the team sees it.
 
 ---
 
@@ -203,9 +220,10 @@ qong_product/
 
 | Branch | Purpose | Auto-deploys to |
 |---|---|---|
-| `dev` | Active development | `dev.qongsystems.com` via `.github/workflows/deploy-dev.yml` |
-| `feature/digital-twin` | Long-running MVP work (stale — to be deleted after soak) | nothing |
+| `dev` | Active development; branch features off this and PR back | `dev.qongsystems.com` via `.github/workflows/deploy-dev.yml` |
+| `qa` | QA release candidate | `qa.qongsystems.com` via **manual** `deploy-qa.yml` (workflow_dispatch) |
 | `main` | Reserved for production cutover | nothing yet — prod infra not provisioned |
+| `dt/*` | Experimental graph-extraction R&D track (`experiments/digital_twin/`) | nothing — never deploys; merges into `dev` only at handoff |
 
 Push to `dev` triggers GitHub Actions, which uses SSM Session Manager to deploy onto the EC2 instance (no SSH keys, no public port 22). Workflow runs ~3 min end-to-end.
 
@@ -213,34 +231,23 @@ QA deploys are **manual** via `deploy-qa.yml` workflow_dispatch. QA EC2 is **sto
 
 ---
 
-## Annotation labels (13 classes)
+## Annotation labels — `webapp/taxonomy.json` is the source of truth
 
-When annotating tiles in Label Studio, use **exactly** these label names — the pipeline parser is case- and underscore-sensitive.
+The label set is no longer a hand-kept list in this README (it used to drift). As of FEATURES #49/#50 **every label lives in `webapp/taxonomy.json`** — currently **43 classes** (23 the YOLO model can detect, plus 20 palette-only classes reviewers can mark by hand). That one file drives the YOLO class order, display names, colors, canvas glyphs, the Studio palette, and the Label Studio annotation config.
 
-### Valves
-| Label | Symbol |
-|---|---|
-| `valve_bf` | Butterfly — bowtie / diamond shape |
-| `valve_bv` | Ball — circle with line through it |
-| `valve_ck` | Check — arrowhead or half-circle |
-| `valve_gl` | Globe — circle with plug/bonnet on top |
-| `valve_db` | Double Block & Bleed — cluster of 3 small symbols |
-| `valve_cv` | Control valve — circle with dome actuator on top |
-| `valve_gen` | Generic (gate, needle, safety, pressure, flow valves) |
+**Don't edit label lists in code or in Label Studio by hand.** Instead:
 
-### Actuators
-| Label | Symbol |
-|---|---|
-| `actuator_motor` | Square box with letter **M** |
-| `actuator_pneu` | Dome/diaphragm shape above valve |
-| `actuator_sol` | Box labelled **SL** or coil symbol |
+1. Edit `webapp/taxonomy.json` (add a class, change a display name/color/glyph).
+2. Regenerate the downstream configs:
+   ```bash
+   python3 scripts/gen_taxonomy_ts.py      # → webapp/frontend/src/studio/taxonomy.generated.ts
+   python3 scripts/gen_ls_label_config.py  # → Label Studio labeling config
+   ```
+3. On startup the webapp upserts the taxonomy into the `label_taxonomy` table (`webapp/taxonomy_db.py`), keeping the DB read-index in sync.
 
-### Instruments
-| Label | Symbol |
-|---|---|
-| `inst_bubble` | Circle with tag text (PT, TT, FT, LT, PDT, PI, PS, ZS…) — draw box around circle + text |
-| `inst_cv` | Control/shutdown valve (FCV, XV) — full symbol including actuator |
-| `inst_solenoid` | Solenoid box/coil (FY, XY) |
+When the model emits a label the taxonomy doesn't recognise, it's auto-staged into the **Label Triage** queue (**Admin → Label Triage**) for a super-admin to classify — approving writes the new class back into `taxonomy.json`. So the live taxonomy grows through review, not ad-hoc code edits.
+
+> Annotators: open the live palette in Qong Studio (or `webapp/taxonomy.json`) for the current names, colors, and glyphs. Tag formats the parser accepts (KKS, etc.) are documented in `docs/claude/pipeline.md`.
 
 ---
 
@@ -270,7 +277,7 @@ Day 3+:
 
 **"OPENROUTER_API_KEY not set" error.** Confirm `.env` exists and the key has no `$` characters. `docker compose restart web`.
 
-**Webapp 500 on `/` after pull.** Run database migrations: `docker compose exec web python3 -m alembic upgrade head`.
+**Webapp 500 on `/` after pull.** There is **no Alembic** — schema changes run automatically on startup via `webapp/database.py:run_migrations()`. Just restart the container: `docker compose restart web`, then check `docker compose logs web` for a migration error.
 
 **Jobs stuck in "processing" after restart.** Normal — startup hook resets them to `failed`. Re-run from the dashboard.
 

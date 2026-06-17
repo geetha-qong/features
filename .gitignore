@@ -44,6 +44,9 @@ models/*.pt
 models/paddle_det/
 models/paddle_rec/
 models/paddle_cls/
+# Same binaries wherever they're copied (e.g. experiments/digital_twin/models/)
+**/models/*.onnx
+**/models/*.pt
 runs/
 annotate/tiles/
 
@@ -54,8 +57,9 @@ annotate/tiles/
 # Nested PNGs under design/, docs/, webapp/ etc. are tracked normally.
 /*.png
 
-# YOLO dataset images and label caches (regenerated from job_outputs)
+# YOLO dataset images, label files and caches (regenerated from job_outputs)
 datasets/pid_valves/images/
+datasets/pid_valves/labels/
 datasets/**/*.cache
 
 # Label Studio export archives (large, regenerable from LS)
