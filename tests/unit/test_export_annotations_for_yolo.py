@@ -248,6 +248,149 @@ def test_run_idempotent_dedupe(
     assert len(lines) == 1
 
 
+def _seed_correction(db_session, job, user, **overrides):
+    base = dict(
+        job_id=job.id,
+        user_id=user.id,
+        detection_index=-1,
+        action="add",
+        new_label="valve_bv",
+        new_bbox=[100.0, 100.0, 120.0, 110.0],
+    )
+    base.update(overrides)
+    c = models.ModelCorrection(**base)
+    db_session.add(c)
+    db_session.commit()
+    return c
+
+
+def test_run_exports_correction_add(
+    db_session, patch_sessionlocal, job, user, tmp_path, monkeypatch
+):
+    _seed_correction(db_session, job, user)
+    job_id = job.id
+    monkeypatch.setattr(exp, "page_full_path_for_job", lambda j, s: tmp_path / "page.png")
+    monkeypatch.setattr(exp, "page_dimensions", lambda p: (1200, 900))
+
+    out_dir = tmp_path / "labels"
+    exported, skipped, jobs_touched = exp.run(
+        job_id=None, since=None, out_dir=out_dir, dry_run=False
+    )
+    assert exported == 1
+    assert skipped == 0
+    assert jobs_touched == 1
+
+    label_path = out_dir / str(job_id) / "tile_p0_r0_c0.png.txt"
+    assert label_path.exists()
+    content = label_path.read_text().strip()
+    parts = content.split()
+    assert int(parts[0]) == 0  # valve_bv
+    cx, cy, w, h = (float(p) for p in parts[1:])
+    assert 0.0 <= cx <= 1.0 and 0.0 <= cy <= 1.0
+    assert 0.0 < w < 1.0 and 0.0 < h < 1.0
+
+
+def test_run_correction_instrument_folds_to_inst_field(
+    db_session, patch_sessionlocal, job, user, tmp_path, monkeypatch
+):
+    # ModelCorrection.new_label for instruments is "instrument_<sub>" (e.g.
+    # "instrument_pt"), which is NOT a literal YOLO class — the detector has no
+    # per-type instrument class. It must fold to the generic inst_field (idx 9),
+    # not be dropped as unmappable.
+    _seed_correction(db_session, job, user, new_label="instrument_pt")
+    job_id = job.id
+    monkeypatch.setattr(exp, "page_full_path_for_job", lambda j, s: tmp_path / "page.png")
+    monkeypatch.setattr(exp, "page_dimensions", lambda p: (1200, 900))
+
+    out_dir = tmp_path / "labels"
+    exported, skipped, jobs_touched = exp.run(
+        job_id=None, since=None, out_dir=out_dir, dry_run=False
+    )
+    assert exported == 1
+    assert skipped == 0
+
+    label_path = out_dir / str(job_id) / "tile_p0_r0_c0.png.txt"
+    assert label_path.exists()
+    assert int(label_path.read_text().strip().split()[0]) == 9  # inst_field
+
+
+def test_run_correction_unmappable_new_label(
+    db_session, patch_sessionlocal, job, user, tmp_path, monkeypatch
+):
+    # "valve_sb" is not in v1-10's CLASS_NAMES.
+    _seed_correction(db_session, job, user, new_label="valve_sb")
+    job_id = job.id
+    monkeypatch.setattr(exp, "page_full_path_for_job", lambda j, s: tmp_path / "page.png")
+    monkeypatch.setattr(exp, "page_dimensions", lambda p: (1200, 900))
+
+    out_dir = tmp_path / "labels"
+    exported, skipped, _ = exp.run(
+        job_id=None, since=None, out_dir=out_dir, dry_run=False
+    )
+    assert exported == 0
+    assert skipped == 1
+    assert not (out_dir / str(job_id)).exists()
+
+
+def test_run_correction_no_bbox_skipped(
+    db_session, patch_sessionlocal, job, user, tmp_path, monkeypatch
+):
+    _seed_correction(db_session, job, user, action="reclassify", new_bbox=None)
+    job_id = job.id
+    monkeypatch.setattr(exp, "page_full_path_for_job", lambda j, s: tmp_path / "page.png")
+    monkeypatch.setattr(exp, "page_dimensions", lambda p: (1200, 900))
+
+    out_dir = tmp_path / "labels"
+    exported, skipped, _ = exp.run(
+        job_id=None, since=None, out_dir=out_dir, dry_run=False
+    )
+    assert exported == 0
+    assert skipped == 1
+    assert not (out_dir / str(job_id)).exists()
+
+
+def test_run_correction_delete_not_exported(
+    db_session, patch_sessionlocal, job, user, tmp_path, monkeypatch
+):
+    # A delete correction (even with a bbox) must never produce a label line.
+    _seed_correction(
+        db_session, job, user, action="delete", new_label="valve_bv"
+    )
+    job_id = job.id
+    monkeypatch.setattr(exp, "page_full_path_for_job", lambda j, s: tmp_path / "page.png")
+    monkeypatch.setattr(exp, "page_dimensions", lambda p: (1200, 900))
+
+    out_dir = tmp_path / "labels"
+    exported, skipped, jobs_touched = exp.run(
+        job_id=None, since=None, out_dir=out_dir, dry_run=False
+    )
+    assert exported == 0
+    assert jobs_touched == 0
+    assert not (out_dir / str(job_id)).exists()
+
+
+def test_run_correction_and_twin_annotation_dedup(
+    db_session, patch_sessionlocal, job, user, tmp_path, monkeypatch
+):
+    # A "Mark Symbol" writes an `add` correction AND a twin user_added
+    # annotation with the same bbox+class. The idempotent writer must collapse
+    # the two identical lines to ONE.
+    shared_bbox = [100.0, 100.0, 120.0, 110.0]
+    _seed_annotation(db_session, job, user, bbox=list(shared_bbox))
+    _seed_correction(
+        db_session, job, user, new_label="valve_bv", new_bbox=list(shared_bbox)
+    )
+    job_id = job.id
+    monkeypatch.setattr(exp, "page_full_path_for_job", lambda j, s: tmp_path / "page.png")
+    monkeypatch.setattr(exp, "page_dimensions", lambda p: (1200, 900))
+
+    out_dir = tmp_path / "labels"
+    exp.run(job_id=None, since=None, out_dir=out_dir, dry_run=False)
+    label_path = out_dir / str(job_id) / "tile_p0_r0_c0.png.txt"
+    lines = [ln for ln in label_path.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1
+
+
 def test_run_since_filters_old_rows(
     db_session, patch_sessionlocal, job, user, tmp_path, monkeypatch
 ):

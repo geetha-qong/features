@@ -24,6 +24,54 @@
 
 ---
 
+## [2026-06-18] #62 — Self-learning loop: label-in-Studio → trainable dataset (close gaps 1 & 2)
+
+**Type:** feature
+**Stage:** training
+**Status:** shipped (deployed to dev)
+
+**Why:** User asked whether Studio can replace Label Studio for labeling → train. The
+Studio→GPU path existed (`UserAnnotation` → exporter → `build_training_set`) but two
+gaps blocked it: (1) the biggest correction source (`ModelCorrection` detection-review
+add/reclassify) was NOT exported — on dev that's 84 corrections invisible to training;
+(2) `build_training_set` emitted label files only, no images/data.yaml/split, so the
+output wasn't directly trainable.
+
+**What:**
+- **Gap 1** (`export_annotations_for_yolo.py`): also export `ModelCorrection`
+  action in (add, reclassify) with a stored `new_bbox` as positive YOLO labels.
+  `new_bbox` is the SAME page-pixel space as `UserAnnotation.bbox` (verified in
+  `annotations.py` — both from `payload.bbox`), so it reuses the existing tile
+  geometry. Class id: try `new_label` as a literal YOLO class, else parse
+  `<entity_class>_<sub>` and route through `map_to_class_id` — folding instrument
+  sub-types (`instrument_pt/ft/tt/lt`) into the generic `inst_field` the detector
+  predicts. `delete` not exported (documented; needs future reconciled-tile work).
+  add/twin dedup handled by the existing idempotent writer.
+- **Gap 2** (`build_training_set.py`): `<out>/<date>/detection/` is now a trainable
+  YOLO tree — crops tile images from `page_N_full.png`, flattens to
+  `images|labels/{train,val}/<job>__<tile>` with a deterministic PER-JOB hash split
+  (sha1(job_id)%10 → val), writes `data.yaml` (nc + names from `taxonomy.class_names()`).
+  Manifest extended (images/train_tiles/val_tiles/train_jobs/val_jobs/classes).
+- Lifted PIL `MAX_IMAGE_PIXELS` guard in both (P&ID pages >140M px would hard-error
+  >178M and silently lose a page's tiles).
+- Built by 2 parallel agents; a defect (29 instrument corrections dropped as
+  "unmappable") was caught by running the REAL scripts against dev data, not just
+  unit fixtures — fixed via the `map_to_class_id` fallback.
+
+**Result:** Verified on dev (49 jobs): exporter now 70 labels / 14 jobs with **0
+instrument skips** (was 67 / 29-skipped); `build_training_set` produced a real dataset
+— 30 tiles (27 train / 3 val), `data.yaml` nc=23, paired images+labels, graph + tag
+JSONL. 40 unit tests pass (export + builder + schema). **"Label in Studio → train on
+GPU" is now real end-to-end** for incremental corrections.
+
+**Notes:** LS still holds the ~32k base corpus; Studio path is for incremental
+improvement on top (or a future one-time LS→UserAnnotation migration). 37/56 dev jobs
+have 0 YOLO overlay detections (legacy jobs pre-#28 in-process inference — their CSVs
+are fine; a `gpu_detections` backfill would add canvas boxes). This dataset feeds
+Phase 2 (gated retrain), where the eval gate is the safety net for label completeness.
+
+---
+
 ## [2026-06-17] #61 — Self-learning loop Phase 1: correction-rate surface + training-set builder
 
 **Type:** feature

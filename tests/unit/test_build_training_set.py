@@ -82,7 +82,18 @@ def test_dry_run_returns_manifest_shape(patch_sessionlocal, tmp_path):
         "annotations",
         "skipped_unmappable",
         "jobs",
+        "images",
+        "train_tiles",
+        "val_tiles",
+        "train_jobs",
+        "val_jobs",
+        "classes",
     }
+    # `classes` reflects the taxonomy even in dry-run; the rest are 0/empty.
+    from webapp.taxonomy import class_names
+
+    assert manifest["detection"]["classes"] == len(class_names())
+    assert manifest["detection"]["images"] == 0
     assert manifest["graph"] == {"edges": 0}
     assert manifest["tags"]["corrections"] == 0
     assert manifest["class_counts"] == {}
@@ -221,3 +232,157 @@ def test_class_counts_and_tags_from_db(
     assert manifest["tags"]["corrections"] == 1
     # Still no files in dry-run.
     assert _list_created(str(tmp_path)) == []
+
+
+# ── _split_for_job determinism ────────────────────────────────────────────────
+
+
+def test_split_for_job_is_deterministic():
+    # Same job id -> same split, repeatedly.
+    assert builder._split_for_job(42) == builder._split_for_job(42)
+    assert builder._split_for_job(7) == builder._split_for_job(7)
+    # Only "train" / "val" ever come out.
+    for jid in range(0, 50):
+        assert builder._split_for_job(jid) in ("train", "val")
+
+
+def test_split_for_job_known_values():
+    # sha1(str(job_id)) % 10 == 0 -> "val", else "train". Computed independently.
+    import hashlib
+
+    def expected(job_id):
+        h = int(hashlib.sha1(str(job_id).encode()).hexdigest(), 16)
+        return "val" if h % 10 == 0 else "train"
+
+    for jid in (1, 2, 3, 17, 41, 100, 999):
+        assert builder._split_for_job(jid) == expected(jid)
+
+
+# ── data.yaml writer ──────────────────────────────────────────────────────────
+
+
+def test_data_yaml_names_match_class_names(tmp_path):
+    from webapp.taxonomy import class_names
+
+    det_dir = tmp_path / "detection"
+    det_dir.mkdir()
+    nc = builder._write_data_yaml(det_dir / "data.yaml", det_dir)
+
+    names = class_names()
+    assert nc == len(names)
+
+    import yaml
+
+    data = yaml.safe_load((det_dir / "data.yaml").read_text())
+    assert data["nc"] == len(names)
+    assert data["train"] == "images/train"
+    assert data["val"] == "images/val"
+    # names is an int-keyed mapping of the full ordered class list.
+    assert len(data["names"]) == nc
+    assert data["names"][0] == names[0]
+    assert data["names"][nc - 1] == names[nc - 1]
+
+
+# ── Non-dry-run build: crop + split + data.yaml ───────────────────────────────
+
+
+def test_non_dry_run_builds_trainable_dataset(
+    db_session, patch_sessionlocal, tmp_path, monkeypatch
+):
+    """Exercise crop+split+data.yaml deterministically.
+
+    Stub the YOLO exporter's run() to drop one known staging label file, and
+    stub page_full_path_for_job to return a small PNG we create. Assert the
+    trainable tree + data.yaml + consistent manifest counts.
+    """
+    from PIL import Image
+
+    from webapp.scripts import export_annotations_for_yolo as yolo
+    from webapp.taxonomy import class_names
+
+    job_id = 1
+    # A Job must exist for the crop step to resolve the page image.
+    u = models.User(username="u", password_hash="x", is_active=True)
+    db_session.add(u)
+    db_session.flush()
+    db_session.add(
+        models.Job(
+            id=job_id, user_id=u.id,
+            original_filename="job1.pdf", stored_filename="job1.pdf",
+            output_csv_path="/tmp/job1/valves.csv",
+        )
+    )
+    db_session.commit()
+
+    # The tile the staging label belongs to: page index 0 -> sheet_number 1.
+    tile_png = "tile_p0_r1_c1.png"
+
+    # A small page-full PNG on disk that the (stubbed) lookup returns.
+    page_png = tmp_path / "page_0_full.png"
+    Image.new("RGB", (300, 300), (255, 255, 255)).save(page_png)
+    monkeypatch.setattr(
+        yolo, "page_full_path_for_job", lambda job, sheet_number: page_png
+    )
+
+    # Stub the exporter run() to write one known staging label file.
+    def fake_run(*, job_id, since, out_dir, dry_run):
+        d = out_dir / str(1)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / (tile_png + ".txt")).write_text(
+            "3 0.500000 0.500000 0.100000 0.100000\n", encoding="utf-8"
+        )
+        return 1, 0, 1  # exported, skipped, jobs_touched
+
+    monkeypatch.setattr(builder._yolo_exporter, "run", fake_run)
+
+    # Skip the graph exporter so the build stays focused + offline.
+    monkeypatch.setattr(builder, "_graph_exporter", None)
+
+    manifest = builder.run(
+        since="2026-01-01",
+        out_root=str(tmp_path / "out"),
+        job_ids=None,
+        dry_run=False,
+        date_str="2026-06-18",
+    )
+
+    detection = tmp_path / "out" / "2026-06-18" / "detection"
+
+    # data.yaml exists with nc == len(class_names()).
+    import yaml
+
+    data = yaml.safe_load((detection / "data.yaml").read_text())
+    assert data["nc"] == len(class_names())
+    assert len(data["names"]) == len(class_names())
+
+    # Staging dir is gone; detection holds only images/, labels/, data.yaml.
+    assert not (detection / "_staging").exists()
+    assert sorted(p.name for p in detection.iterdir()) == [
+        "data.yaml",
+        "images",
+        "labels",
+    ]
+
+    # The split for job 1 (deterministic).
+    split = builder._split_for_job(job_id)
+    stem = "{}__{}".format(job_id, tile_png[: -len(".png")])
+    img = detection / "images" / split / (stem + ".png")
+    lbl = detection / "labels" / split / (stem + ".txt")
+    assert img.exists(), "tile image not written"
+    assert lbl.exists(), "label not written"
+    # Same stem on both sides.
+    assert img.stem == lbl.stem
+    # Label content preserved verbatim from staging.
+    assert lbl.read_text().strip() == "3 0.500000 0.500000 0.100000 0.100000"
+
+    # Manifest detection counts are consistent.
+    det = manifest["detection"]
+    assert det["images"] == 1
+    assert det["train_tiles"] + det["val_tiles"] == det["images"]
+    assert det["classes"] == len(class_names())
+    if split == "val":
+        assert det["val_tiles"] == 1 and det["train_tiles"] == 0
+        assert det["val_jobs"] == [job_id]
+    else:
+        assert det["train_tiles"] == 1 and det["val_tiles"] == 0
+        assert det["train_jobs"] == [job_id]

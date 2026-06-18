@@ -1,14 +1,34 @@
-"""Export user_annotations rows as YOLO-format training labels.
+"""Export user_annotations + model_corrections rows as YOLO-format labels.
 
-For each `user_added` / `user_confirmed` row we:
+Two sources feed the same per-tile label files:
+
+1. `UserAnnotation` rows with status `user_added` / `user_confirmed`:
   - map (entity_class, sub_class) -> the v1-10 YOLO class index
     (CLASS_NAMES in webapp.inference). Unmappable rows are SKIPPED.
-  - translate the page-pixel bbox into the FIRST tile whose bounds
-    contain the bbox center (the same 3×3 grid / 20% overlap math as
-    `pdf_to_tiles.py`).
-  - emit a YOLO line `<class_id> <cx> <cy> <w> <h>` (tile-local,
-    normalized [0,1]) appended to
-    `<out>/{job_id}/{tile_filename}.txt` (idempotent on the 5-tuple).
+
+2. `ModelCorrection` rows with action `add` / `reclassify` that carry a
+   stored `new_bbox`:
+  - `new_label` is already a canonical YOLO-style class name (e.g.
+    "valve_bv") so it is looked up directly in the CLASS_NAMES reverse
+    index — NOT routed through `map_to_class_id`. Rows with a `new_label`
+    absent from CLASS_NAMES, or with no usable `new_bbox`, are SKIPPED.
+  - `new_bbox` lives in the SAME page-pixel coordinate space as
+    `UserAnnotation.bbox`, so it runs through the identical tile geometry.
+  - `delete` corrections are intentionally NOT exported: we never emit the
+    underlying model detections as labels, so there is nothing to subtract.
+    (Known limitation — proper handling needs "reconciled complete-tile"
+    export, i.e. start from the full model detection set then apply
+    add/delete/reclassify. Future work.)
+
+Both sources translate the page-pixel bbox into the FIRST tile whose bounds
+contain the bbox center (the same 3×3 grid / 20% overlap math as
+`pdf_to_tiles.py`) and emit a YOLO line `<class_id> <cx> <cy> <w> <h>`
+(tile-local, normalized [0,1]) appended to `<out>/{job_id}/{tile}.txt`.
+
+A fresh "Mark Symbol" writes BOTH an `add` correction and a twin
+`user_added` annotation with the same bbox; the idempotent writer collapses
+the resulting identical (class_id, cx, cy, w, h) lines to one — no
+special-case dedup needed here.
 
 Usage:
     python -m webapp.scripts.export_annotations_for_yolo \
@@ -29,6 +49,11 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from PIL import Image
+
+# P&ID page-full PNGs are large (~12000px → >140M px). These are trusted internal
+# renders, not untrusted uploads, so lift PIL's decompression-bomb guard which
+# otherwise warns at >89M px and HARD-ERRORS at >178M px (losing a page's labels).
+Image.MAX_IMAGE_PIXELS = None
 
 from webapp import models
 from webapp.database import SessionLocal
@@ -209,6 +234,28 @@ def _eligible_annotations(
     return q.order_by(models.UserAnnotation.job_id, models.UserAnnotation.id).all()
 
 
+def _eligible_corrections(
+    db,
+    job_id: Optional[int],
+    since: Optional[datetime],
+):
+    """ModelCorrection rows usable as labels: add / reclassify only.
+
+    `delete` is excluded by design (see module docstring). Filters/ordering
+    mirror `_eligible_annotations`.
+    """
+    q = db.query(models.ModelCorrection).filter(
+        models.ModelCorrection.action.in_(("add", "reclassify"))
+    )
+    if job_id is not None:
+        q = q.filter(models.ModelCorrection.job_id == job_id)
+    if since is not None:
+        q = q.filter(models.ModelCorrection.created_at >= since)
+    return q.order_by(
+        models.ModelCorrection.job_id, models.ModelCorrection.id
+    ).all()
+
+
 # ── Idempotent writer ────────────────────────────────────────────────────────
 
 
@@ -324,6 +371,100 @@ def run(
             )
             pending[label_path].append((class_id, cx, cy, w, h))
             jobs_touched.add(row.job_id)
+            exported += 1
+
+        # ── ModelCorrection rows (add / reclassify) ──────────────────────────
+        # Emit into the SAME `pending` dict, reusing all the per-job geometry
+        # caches above. new_bbox shares UserAnnotation.bbox's page-pixel space.
+        name_to_idx = _class_index()
+        corrections = _eligible_corrections(db, job_id=job_id, since=since)
+        for corr in corrections:
+            # new_label is canonical `<entity_class>_<sub>` (e.g. "valve_bv",
+            # "instrument_pt"). First try it as a literal YOLO class name (valves
+            # + the generic inst_field/inst_bpcs/inst_sis are real labels). If it
+            # misses, parse and route through map_to_class_id — which folds
+            # instrument SUB-types (instrument_pt/ft/tt/lt …) into the generic
+            # `inst_field` class the detector actually predicts (the model has no
+            # per-type instrument class). Without this fallback every instrument
+            # correction is dropped as "unmappable".
+            class_id = name_to_idx.get(corr.new_label) if corr.new_label else None
+            if class_id is None and corr.new_label and "_" in corr.new_label:
+                head, tail = corr.new_label.split("_", 1)
+                class_id = map_to_class_id(head, tail)
+            if class_id is None:
+                skipped_unmappable += 1
+                print(
+                    f"  skip correction id={corr.id} job={corr.job_id} "
+                    f"new_label={corr.new_label!r} (unmappable)"
+                )
+                continue
+
+            # A reclassify (or any correction) without a stored bbox can't be
+            # placed onto a tile — skip and count.
+            if not corr.new_bbox or len(corr.new_bbox) < 4:
+                skipped_unmappable += 1
+                print(
+                    f"  skip correction id={corr.id} job={corr.job_id}: "
+                    f"no usable new_bbox"
+                )
+                continue
+
+            job = job_cache.get(corr.job_id)
+            if job is None and corr.job_id not in job_cache:
+                job = (
+                    db.query(models.Job)
+                    .filter(models.Job.id == corr.job_id)
+                    .first()
+                )
+                job_cache[corr.job_id] = job
+            if job is None:
+                skipped_unmappable += 1
+                print(f"  skip correction id={corr.id}: job {corr.job_id} not found")
+                continue
+
+            # model_corrections has no sheet_number column — corrections are
+            # single-sheet / sheet-1 today. Default to sheet 1, which keeps the
+            # page_dims / tile_bounds cache key shape identical to annotations.
+            sheet_number = 1
+            page_key = (corr.job_id, sheet_number)
+            if page_key not in page_dims_cache:
+                page_path = page_full_path_for_job(job, sheet_number)
+                if page_path is None:
+                    page_dims_cache[page_key] = None
+                else:
+                    try:
+                        page_dims_cache[page_key] = page_dimensions(page_path)
+                    except Exception as e:
+                        print(
+                            f"  skip correction id={corr.id}: "
+                            f"page-full read failed: {e}"
+                        )
+                        page_dims_cache[page_key] = None
+            dims = page_dims_cache[page_key]
+            if dims is None:
+                skipped_unmappable += 1
+                continue
+            W, H = dims
+            if page_key not in tile_bounds_cache:
+                tile_bounds_cache[page_key] = compute_tile_bounds(W, H)
+            tiles = tile_bounds_cache[page_key]
+
+            tile = find_owning_tile(corr.new_bbox, tiles)
+            if tile is None:
+                skipped_unmappable += 1
+                continue
+            cx, cy, w, h = bbox_to_yolo(corr.new_bbox, tile)
+            if w <= 0 or h <= 0:
+                skipped_unmappable += 1
+                continue
+
+            label_path = (
+                out_dir
+                / str(corr.job_id)
+                / (tile_filename(sheet_number, tile["row"], tile["col"]) + ".txt")
+            )
+            pending[label_path].append((class_id, cx, cy, w, h))
+            jobs_touched.add(corr.job_id)
             exported += 1
 
         if dry_run:
