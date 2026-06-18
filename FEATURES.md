@@ -24,6 +24,36 @@
 
 ---
 
+## [2026-06-18] #63 — Backfill gpu_detections for 37 legacy jobs (canvas overlays)
+
+**Type:** feature / data-backfill
+**Stage:** webapp
+**Status:** shipped (script on dev; data backfilled + verified)
+
+**Why:** User opened job 5, saw no detection boxes. Root cause: 37 of 56 done jobs
+(ids 2–37, 40) predate in-process YOLO (#28) → `gpu_detections` empty → no canvas
+overlay (their CSVs/entities/datasheets were always fine). User asked for the backfill.
+
+**What:** `webapp/scripts/backfill_gpu_detections.py` (NEW) — selects done jobs with
+empty `gpu_detections` and re-runs YOLO over their existing tiles via the SAME path a
+fresh job uses (`pipeline_runner._run_inplace_inference`), so the stored shape +
+coordinate space match exactly (no #56 scatter). Purely additive (only writes
+`gpu_detections`); idempotent (skips populated jobs). `jobs_needing_backfill` /
+`_is_empty_detections` unit-tested (3 tests).
+
+**Result:** All 37 backfilled → **56/56 done jobs now have detections, 0 remaining.**
+Job 5 = 243, job 40 = 1673, job 36 (222-page doc, 1998 tiles) = 246. Verified job 5
+coords are tile-local with `tiling_dims (7152,5052)` resolving → render correctly.
+
+**Notes:** Job 36 (1998 tiles) stalled the initial detached single-pass run (lost its
+buffered stdout on exit, but per-job DB commits persisted 34 jobs); re-running the
+remainder individually finished it. For future bulk backfills, run per-job or in
+batches — a 2000-tile job is ~10 min of CPU ONNX and dominates a single-process sweep.
+The detached process redirected stdout to a file → buffered; use `PYTHONUNBUFFERED=1`
+or per-job SSM calls to see live progress.
+
+---
+
 ## [2026-06-18] #62 — Self-learning loop: label-in-Studio → trainable dataset (close gaps 1 & 2)
 
 **Type:** feature
