@@ -237,7 +237,15 @@ export default function BulkReviewScreen({
       const r = await getEntities(jobId, activeType);
       if (myReq !== reqIdRef.current) return;
       setResp(r);
-      setSelectedId(r.entities[0]?.entity_id ?? null);
+      // Preserve the current selection across a refresh (e.g. after a side-panel
+      // or cell save) — only fall back to the first row when the previously
+      // selected entity is gone or nothing was selected. Functional update so we
+      // don't need selectedId in this callback's deps.
+      setSelectedId((prev) =>
+        prev && r.entities.some((e) => e.entity_id === prev)
+          ? prev
+          : (r.entities[0]?.entity_id ?? null),
+      );
       // Cache this tab's count so the sidebar shows it even when tab is inactive.
       setTabCounts(prev => ({ ...prev, [activeKey]: r.entities.length }));
       // Drop stale edit state from the previous tab — different rows / schema.
