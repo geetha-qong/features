@@ -24,6 +24,20 @@
 
 ---
 
+## [2026-06-22] #64 — Bulk-review side panel shows the FULL per-instrument datasheet
+
+**Type:** feature
+**Stage:** webapp
+**Status:** shipped
+
+**Why:** User report: in the datasheet Bulk Review, the right side panel showed only ~6 fields (the customer-template list columns: Tag/Service/P&ID/Manufacturer/Model/Part No.), even though #59/#60 added the complete per-type IDS field set. Each row is an individual instrument datasheet — clicking a row should surface that one instrument's full fields, chosen automatically by its type, and edits must persist. (Download was already comprehensive — `datasheet.py` emits one XLSX sheet per instrument via `get_ids_sections_for_type`; verified one sheet/instrument, 57 Common fields for generic types, 171 for CV.)
+
+**What:** Frontend-only, reusing the existing `GET /jobs/{id}/entities/{eid}/datasheet` (field set already auto-selected from `sub_class`). Extracted the drawer's `SectionedDatasheet` + cells + `valueToString`/`stringToValue`/`isPidSourced` + new `seedDatasheetEditValues`/`computeDatasheetDirty` into shared `studio/datasheet/sectioned.tsx`; `DatasheetDrawer.tsx` now imports them (no logic dup). New `studio/datasheet/DatasheetPanel.tsx` (self-contained fetch+edit+save via `patchEntity`) renders in `BulkReviewScreen` `br-detail` for the datasheet deliverable only (other deliverables keep the field-list `<dl>`); keyed by entity_id so state resets per row. Grid made responsive (`auto-fill minmax(180px)`); added `.br-body.ds-wide` (560px panel) when datasheet active. Backend: added IDS sub_class aliases `pdit/pdt/fdit→PT`, `pdi→PG` (DP transmitter/indicator forms) so MUK job-55 types get full sets instead of Common-only.
+
+**Result:** Bulk side panel now shows all sections/fields for the selected instrument (e.g. CV 171, PT 129), editable + persisted. 123 vitest (2 new) + 9 ids_schema tests pass; tsc + vite build clean. FI/PZA correctly stay Common-only (no matching physical type — avoids wrong fields).
+
+---
+
 ## [2026-06-18] #63 — Backfill gpu_detections for 37 legacy jobs (canvas overlays)
 
 **Type:** feature / data-backfill

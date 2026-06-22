@@ -109,13 +109,19 @@ _SUBCLASS_ALIASES: Dict[str, str] = {
     "ft": "PT",
     "fit": "PT",
     "fzit": "PT",
+    # Differential-pressure transmitter family also shares the PT form
+    # (DP cell + sensing element + transmitter sections all apply).
+    "pdit": "PT",
+    "pdt": "PT",
+    "fdit": "PT",
     # Temperature transmitter
     "tt": "TT",
     "tit": "TT",
     "tzit": "TT",
-    # Pressure gauge (PG / PI)
+    # Pressure gauge (PG / PI); differential-pressure indicator shares the form
     "pg": "PG",
     "pi": "PG",
+    "pdi": "PG",
     # Temperature gauge (TG / TI)
     "tg": "TG",
     "ti": "TG",

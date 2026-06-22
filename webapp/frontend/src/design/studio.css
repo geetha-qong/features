@@ -2262,6 +2262,11 @@ input, textarea { font-family: inherit; }
 .br-body.no-detail {
   grid-template-columns: 260px 1fr;
 }
+/* Datasheet deliverable shows a full sectioned datasheet in the side panel —
+   give it more room than the slim 340px field-list panel. */
+.br-body.ds-wide {
+  grid-template-columns: 260px 1fr 560px;
+}
 
 /* deliverables nav */
 .br-nav {
