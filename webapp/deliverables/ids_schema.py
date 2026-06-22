@@ -148,15 +148,73 @@ _SUBCLASS_ALIASES: Dict[str, str] = {
 }
 
 
+def _match_descriptive(k: str) -> Optional[str]:
+    """Keyword classifier for descriptive sub_class names.
+
+    The pipeline writes human-readable sub_classes ("FLOW TRANSMITTER",
+    "PRESSURE GAUGE", "DIFFERENTIAL PRESSURE INDICATING TRANSMITTER") rather
+    than ISA codes, so the exact-match alias table misses them. We classify by
+    keyword instead. Order matters — most specific first. Returns None for
+    genuinely ambiguous names (analyzer, alarm, hand switch, level, generic
+    valve/controller) so they get the Common datasheet rather than wrong
+    type-specific fields.
+    """
+    has = lambda *words: any(w in k for w in words)
+
+    # Mechanical / fixed types (check before the transmitter/gauge families).
+    if "thermowell" in k:
+        return "TW"
+    if "restriction orifice" in k:
+        return "RO"
+    if ("safety" in k or "relief" in k) and "valve" in k:
+        return "PSV"
+    if "control valve" in k:
+        return "CV"
+    if has("thermocouple", "rtd", "resistance temperature") or (
+        "temperature" in k and "element" in k
+    ):
+        return "TE"
+
+    # Transmitters (a transmitter wins even if the name also says "indicating").
+    if "transmitter" in k:
+        if "temperature" in k:
+            return "TT"
+        if has("pressure", "flow", "differential"):
+            return "PT"  # pressure / DP / flow transmitters share the PT form
+        return None  # level / other transmitter — no matching datasheet type
+
+    # Local gauges / indicators (no transmitter).
+    if has("gauge", "indicator", "indicating"):
+        if "temperature" in k:
+            return "TG"
+        if "pressure" in k:
+            return "PG"
+        if "flow" in k:
+            return "FE"
+
+    # Flow / sight-glass elements + measurement orifices.
+    if has("flow element", "orifice", "sight glass", "flow gauge"):
+        return "FE"
+
+    return None
+
+
 def normalize_subclass(sub_class: Optional[str]) -> Optional[str]:
-    """Map a canonical sub_class / ISA code to a datasheet type key.
+    """Map a canonical sub_class / ISA code / descriptive name to a datasheet key.
 
     Returns one of the keys in ``TYPE_LABELS`` (CV/PT/TT/PG/TG/TW/TE/FE/RO/PSV),
     or None if unknown. Case-insensitive. FT maps to PT (shared form).
+
+    Resolution order: (1) exact alias table (ISA codes like ``ft``/``pdit`` plus
+    a few canonical phrases), then (2) a keyword classifier for the descriptive
+    names the pipeline actually emits ("PRESSURE TRANSMITTER", ...).
     """
     if not sub_class:
         return None
-    return _SUBCLASS_ALIASES.get(sub_class.strip().lower())
+    key = sub_class.strip().lower()
+    if key in _SUBCLASS_ALIASES:
+        return _SUBCLASS_ALIASES[key]
+    return _match_descriptive(key)
 
 
 # --------------------------------------------------------------------------- #

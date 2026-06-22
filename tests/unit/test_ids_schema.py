@@ -125,3 +125,44 @@ def test_new_type_normalization():
     assert normalize_subclass("RTD") == "TE"
     assert normalize_subclass("fg") == "FE"
     assert normalize_subclass("ro") == "RO"
+
+
+def test_dp_code_aliases():
+    # Differential-pressure transmitter/indicator ISA codes.
+    assert normalize_subclass("PDIT") == "PT"
+    assert normalize_subclass("pdt") == "PT"
+    assert normalize_subclass("fdit") == "PT"
+    assert normalize_subclass("PDI") == "PG"
+
+
+def test_descriptive_name_normalization():
+    """The pipeline emits human-readable sub_classes, not ISA codes — these
+    must classify to the right datasheet type, not fall back to Common."""
+    # Transmitters -> PT/TT (a transmitter wins over "indicating").
+    assert normalize_subclass("FLOW TRANSMITTER") == "PT"
+    assert normalize_subclass("PRESSURE TRANSMITTER") == "PT"
+    assert normalize_subclass("DIFFERENTIAL PRESSURE TRANSMITTER") == "PT"
+    assert normalize_subclass("DIFFERENTIAL PRESSURE INDICATING TRANSMITTER") == "PT"
+    assert normalize_subclass("PRESSURE DIFFERENTIAL INDICATOR TRANSMITTER") == "PT"
+    assert normalize_subclass("FLOW INDICATING TRANSMITTER") == "PT"
+    assert normalize_subclass("TEMPERATURE TRANSMITTER") == "TT"
+    # Local gauges / indicators -> PG/TG/FE.
+    assert normalize_subclass("PRESSURE GAUGE") == "PG"
+    assert normalize_subclass("PRESSURE INDICATOR") == "PG"
+    assert normalize_subclass("DIFFERENTIAL PRESSURE INDICATOR") == "PG"
+    assert normalize_subclass("TEMPERATURE GAUGE") == "TG"
+    assert normalize_subclass("FLOW GAUGE") == "FE"
+    assert normalize_subclass("FLOW INDICATOR") == "FE"
+    # Mechanical / fixed types.
+    assert normalize_subclass("PRESSURE SAFETY VALVE") == "PSV"
+    assert normalize_subclass("THERMOWELL") == "TW"
+    assert normalize_subclass("RESTRICTION ORIFICE") == "RO"
+    assert normalize_subclass("FLOW ELEMENT") == "FE"
+    assert normalize_subclass("CONTROL VALVE") == "CV"
+    assert normalize_subclass("TEMPERATURE ELEMENT") == "TE"
+    # Ambiguous / unsupported -> None (Common datasheet, not wrong fields).
+    assert normalize_subclass("PRESSURE ALARM") is None
+    assert normalize_subclass("PRESSURE ANALYZER") is None
+    assert normalize_subclass("HAND SWITCH") is None
+    assert normalize_subclass("LEVEL TRANSMITTER") is None
+    assert normalize_subclass("FLOW CONTROLLER") is None
