@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import DocTypeIcon from "../datasheet/DocTypeIcon";
+import DatasheetPanel from "../datasheet/DatasheetPanel";
 import {
   HttpError,
   getEntities,
@@ -539,7 +540,7 @@ export default function BulkReviewScreen({
         </button>
       </header>
 
-      <div className={`br-body ${showDetail ? "" : "no-detail"}`}>
+      <div className={`br-body ${showDetail ? "" : "no-detail"} ${showDetail && activeType === "datasheet" ? "ds-wide" : ""}`}>
         <aside className="br-nav">
           <div className="br-nav-head">
             <span>Deliverables</span>
@@ -890,6 +891,20 @@ export default function BulkReviewScreen({
                   {selectedRow.pid_number} · sheet {selectedRow.sheet_number}
                 </div>
 
+                {/* Datasheet deliverable: show the entity's FULL per-type
+                    datasheet (all sections, chosen automatically by sub_class)
+                    instead of the few list columns. Edits persist via PATCH.
+                    Keyed by entity_id so internal state resets per row. */}
+                {activeType === "datasheet" ? (
+                  <div className="group" style={{ marginLeft: -16, marginRight: -16 }}>
+                    <DatasheetPanel
+                      key={selectedRow.entity_id}
+                      jobId={jobId}
+                      entityId={selectedRow.entity_id}
+                      onSaved={() => void fetchRows()}
+                    />
+                  </div>
+                ) : (
                 <div className="group">
                   <h4>Fields</h4>
                   <dl style={{ margin: 0 }}>
@@ -967,6 +982,7 @@ export default function BulkReviewScreen({
                     })}
                   </dl>
                 </div>
+                )}
 
                 <div className="actions" style={{ marginTop: 16, display: "flex", gap: 8 }}>
                   <button
