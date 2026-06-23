@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
-  ChevronDown,
   Download,
   Info,
   LayoutGrid,
@@ -473,7 +472,6 @@ export default function DatasheetDrawer({
             <button className="ds-doc-picker" onClick={() => setShowDocPicker((v) => !v)}>
               <DocTypeIcon name={currentDoc.icon} size={14} />
               <span>{currentDoc.name}</span>
-              <ChevronDown size={12} strokeWidth={1.6} />
             </button>
             {showDocPicker && (
               <div className="ds-doc-menu" onMouseLeave={() => setShowDocPicker(false)}>

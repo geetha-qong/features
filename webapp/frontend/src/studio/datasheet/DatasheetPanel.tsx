@@ -10,11 +10,12 @@
  *  drawer's doc-type switching / OCR / create-mode — those don't apply here.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Save } from "lucide-react";
+import { FileDown, Save } from "lucide-react";
 import {
   HttpError,
   getEntityDatasheet,
   patchEntity,
+  type DatasheetSectionOut,
   type EntityDatasheetResponse,
 } from "../api";
 import {
@@ -22,6 +23,94 @@ import {
   computeDatasheetDirty,
   seedDatasheetEditValues,
 } from "./sectioned";
+
+// ── Instrument spec auto-fill ─────────────────────────────────────────────────
+const SPEC_API_URL = "/api/v1/jobs/instrument-spec";
+
+/** API response is a free-form dict — use Record for dynamic key lookup. */
+type InstrumentSpecResponse = Record<string, string | null | undefined>;
+
+/** "Case Type" → "case_type", "Model No." → "model_no", "Graduation & Color" → "graduation_color" */
+const _toSnakeCase = (str: string) =>
+  str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+/** Headers where snake_case(header) doesn't match the API key directly. */
+const _SPEC_OVERRIDES: Record<string, string> = {
+  model_no:               "model_number",
+  dial_size:              "dial_size_value",
+  process_conn_size:      "connection_size",
+  process_conn_type:      "connection_type",
+  process_conn_location:  "connection_position",
+  graduation_color:       "graduation_color",
+  nom_accuracy_grade:     "nom_accuracy_grade",
+  ambient_temp_min:       "ambient_temp_min",
+  ambient_temp_max:       "ambient_temp_max",
+  instrument_range_min:   "instrument_range_min",
+  instrument_range_max:   "instrument_range_max",
+};
+
+/** Unit fields to append to value (keyed by snake_case header). */
+const _SPEC_UNIT_MAP: Record<string, string> = {
+  ambient_temp_min:    "ambient_temp_unit",
+  ambient_temp_max:    "ambient_temp_unit",
+  instrument_range_min: "instrument_range_unit",
+  instrument_range_max: "instrument_range_unit",
+  dial_size:           "dial_size_unit",
+};
+
+/** Resolve a single field header → value string from the spec API response. */
+function _getSpecValue(header: string, apiData: InstrumentSpecResponse): string {
+  const snakeHeader = _toSnakeCase(header);
+  const mappedKey = _SPEC_OVERRIDES[snakeHeader] ?? snakeHeader;
+  const rawVal = (apiData[mappedKey] ?? "").trim();
+  if (!rawVal) return "";
+  const unitKey = _SPEC_UNIT_MAP[snakeHeader];
+  if (unitKey) {
+    const unit = (apiData[unitKey] ?? "").trim();
+    return unit ? `${rawVal} ${unit}` : rawVal;
+  }
+  return rawVal;
+}
+
+/** Apply spec values to editable fields → updated editValues. */
+function _applySpecToEditValues(
+  spec: InstrumentSpecResponse,
+  sections: DatasheetSectionOut[],
+  base: Record<string, string>,
+): Record<string, string> {
+  const updates: Record<string, string> = {};
+  for (const sec of sections) {
+    for (const f of sec.fields) {
+      if (!f.editable) continue;
+      const val = _getSpecValue(f.header, spec);
+      if (val !== "") updates[f.field] = val;
+    }
+  }
+  return { ...base, ...updates };
+}
+
+/** Inject spec values into vendor (read-only) field values in the response so
+ *  ReadOnlyCell renders them. Editable fields are handled via editValues only. */
+function _injectSpecIntoResp(
+  spec: InstrumentSpecResponse,
+  ds: EntityDatasheetResponse,
+): EntityDatasheetResponse {
+  return {
+    ...ds,
+    sections: ds.sections.map((sec) => ({
+      ...sec,
+      fields: sec.fields.map((f) => {
+        if (f.editable) return f;
+        const val = _getSpecValue(f.header, spec);
+        return val !== "" ? { ...f, value: val } : f;
+      }),
+    })),
+  };
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function DatasheetPanel({
   jobId,
@@ -55,8 +144,46 @@ export default function DatasheetPanel({
       const ds = await getEntityDatasheet(jobId, entityId);
       if (myReq !== reqIdRef.current) return;
       setResp(ds);
-      setEditValues(seedDatasheetEditValues(ds));
+      const seeded = seedDatasheetEditValues(ds);
+      setEditValues(seeded);
       setUnlocked({});
+
+      // Auto-fill fields from the instrument spec API using the instrument type
+      // (sub_class, e.g. "PG"). Errors are silently swallowed — the user can
+      // always fill fields manually if the spec API is unavailable.
+      const instType = ds.tag?.split('-')[1];
+      console.log("[spec] tag:", ds.tag, "→ instType:", instType);
+      if (instType) {
+        try {
+          const specRes = await fetch(SPEC_API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ instType }),
+          });
+          console.log("[spec] API status:", specRes.status, specRes.ok);
+          if (specRes.ok && myReq === reqIdRef.current) {
+            const rawResp = await specRes.json() as { success: boolean; instType: string; data: InstrumentSpecResponse };
+            const spec = rawResp.data ?? rawResp;
+            console.log("[spec] data keys:", Object.keys(spec));
+            console.log("[spec] data values:", JSON.stringify(spec));
+            // Log each field and what value would be assigned
+            for (const sec of ds.sections) {
+              for (const f of sec.fields) {
+                const val = _getSpecValue(f.header, spec);
+                if (val) console.log(`[spec] match: "${f.header}" → snake:"${_toSnakeCase(f.header)}" → val:"${val}" editable:${f.editable}`);
+              }
+            }
+            setResp(_injectSpecIntoResp(spec, ds));
+            const appliedValues = _applySpecToEditValues(spec, ds.sections, seeded);
+            const specKeys = Object.keys(appliedValues).filter(k => !seeded[k] || seeded[k] !== appliedValues[k]);
+            console.log("[spec] fields updated:", specKeys.length, specKeys);
+            setEditValues(prev => ({ ...prev, ...appliedValues }));
+          }
+        } catch (err) {
+          console.error("[spec] API error:", err);
+        }
+      }
     } catch (e) {
       if (myReq !== reqIdRef.current) return;
       if (e instanceof HttpError && e.status === 404) {
@@ -101,6 +228,22 @@ export default function DatasheetPanel({
     } finally {
       setSaving(false);
     }
+  }
+
+  async function exportToExcel() {
+    if (!resp) return;
+    const url = `/api/v1/jobs/${jobId}/entities/${encodeURIComponent(entityId)}/datasheet/export`;
+    const res = await fetch(url, { credentials: "include" });
+    if (!res.ok) {
+      setToast({ kind: "error", msg: "Export failed" });
+      return;
+    }
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${resp.tag ?? "datasheet"}_datasheet.xlsx`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   if (loading) {
@@ -158,6 +301,14 @@ export default function DatasheetPanel({
             {toast.msg}
           </span>
         )}
+        <button
+          className="br-btn small"
+          onClick={() => void exportToExcel()}
+          title="Export datasheet to Excel"
+        >
+          <FileDown size={12} strokeWidth={1.6} />
+          <span>Export</span>
+        </button>
         <button
           className={`br-btn small${dirtyCount > 0 ? " primary" : ""}`}
           onClick={() => void onSave()}

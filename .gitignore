@@ -37,6 +37,8 @@ docs/*.pdf
 
 # Excel working files
 *.xlsx
+# Exception: source templates needed for the export feature
+!webapp/deliverables/pg_template.xlsx
 
 # Own-system model artifacts (large binaries)
 models/*.onnx

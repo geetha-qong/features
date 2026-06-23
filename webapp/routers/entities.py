@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -548,3 +549,127 @@ def get_entity_datasheet(
         sheet_number=entity.sheet_number,
         sections=sections_out,
     )
+
+
+@router.get(
+    "/{job_id}/entities/{entity_id}/datasheet/export",
+    responses={
+        200: {
+            "description": "Formatted Excel instrument datasheet",
+            "content": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
+            },
+        },
+        404: {"description": "Job, entity, or canonical not found"},
+    },
+)
+def export_entity_datasheet(
+    job_id: int,
+    entity_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+) -> Response:
+    """Return a formatted Excel instrument data sheet for a single entity."""
+    from webapp.deliverables.datasheet_export import generate_datasheet_excel
+
+    job = _load_job_or_404(job_id, db, current_user)
+
+    try:
+        canonical = load_canonical_with_overrides(job.output_csv_path, job.id, db)
+    except JobCanonicalNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail=f"canonical.json missing for job {job_id}",
+        )
+
+    entity = next(
+        (e for e in canonical.entities if str(e.entity_id) == entity_id),
+        None,
+    )
+    if entity is None:
+        raise HTTPException(status_code=404, detail=f"entity {entity_id} not in job {job_id}")
+
+    overridden = {
+        ov.field_name
+        for ov in db.query(EntityOverride.field_name)
+        .filter(
+            EntityOverride.job_id == job_id,
+            EntityOverride.entity_id == entity_id,
+        )
+        .all()
+    }
+
+    sections_out: List[DatasheetSectionOut] = []
+    for section in get_ids_sections_for_type(entity.sub_class):
+        fields_out = [
+            DatasheetFieldOut(
+                field=f.path,
+                header=f.header,
+                source=f.source,
+                editable=f.editable,
+                value=resolve_field_raw(entity, f.path),
+                is_override=f.path in overridden,
+            )
+            for f in section.fields
+        ]
+        sections_out.append(DatasheetSectionOut(name=section.name, fields=fields_out))
+
+    type_key = normalize_subclass(entity.sub_class)
+    type_label = TYPE_LABELS.get(type_key, entity.sub_class or "Generic")
+
+    ds = EntityDatasheetResponse(
+        entity_id=str(entity.entity_id),
+        sub_class=entity.sub_class,
+        type_label=type_label,
+        type_supported=type_key is not None,
+        tag=entity.tag,
+        pid_number=entity.pid_number,
+        sheet_number=entity.sheet_number,
+        sections=sections_out,
+    )
+
+    xlsx_bytes = generate_datasheet_excel(ds)
+    tag_slug = (entity.tag or "datasheet").replace("/", "_").replace(" ", "_")
+    filename = f"{tag_slug}_datasheet.xlsx"
+
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Instrument spec proxy ─────────────────────────────────────────────────────
+# The spec API lives on an external ngrok URL which browsers can't call
+# directly (CORS). This endpoint proxies the request server-side.
+
+_SPEC_API_URL = "https://dill-payday-chirping.ngrok-free.dev/api/instrument-datasheet"
+_SPEC_API_KEY = "qong-local-dev-key-0000000000000000"
+
+
+class _SpecRequest(BaseModel):
+    instType: str
+
+
+@router.post(
+    "/instrument-spec",
+    responses={200: {"description": "Instrument spec data from upstream API"}},
+)
+def proxy_instrument_spec(
+    payload: _SpecRequest,
+    current_user: models.User = Depends(get_current_user),
+):
+    """Proxy POST to the external instrument-spec API to avoid browser CORS."""
+    import requests as _requests
+
+    try:
+        resp = _requests.post(
+            _SPEC_API_URL,
+            json={"instType": payload.instType},
+            headers={"Content-Type": "application/json", "X-API-KEY": _SPEC_API_KEY},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
