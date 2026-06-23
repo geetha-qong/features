@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Vendor Match API",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "slug": "muk",
+  "customer_name": "MUK Oman",
+  "deliverables": {
+    "valve_list": {
+      "sheet_name": "Valve List",
+      "columns": [
+        {"field": "pid_number", "header": "P&ID No", "order": 1},
+        {"field": "fields.dynamic_code", "header": "Dynamic Code", "order": 2},
+        {"field": "fields.category", "header": "Category", "order": 3},
+        {"field": "fields.size", "header": "Size", "order": 4},
+        {"field": "fields.area_code", "header": "Area Code", "order": 5},
+        {"field": "fields.serial_no", "header": "Serial No", "order": 6},
+        {"field": "fields.series_code", "header": "Series Code", "order": 7},
+        {"field": "fields.fluid_code", "header": "Fluid Code", "order": 8},
+        {"field": "fields.piping_class", "header": "Piping Class", "order": 9},
+        {"field": "fields.qty", "header": "Qty", "order": 10},
+        {"field": "fields.motor_actuator", "header": "Motor Actuator", "order": 11},
+        {"field": "fields.pneumatic_actuator", "header": "Pneumatic Actuator ", "order": 12},
+        {"field": "fields.solenoid", "header": "Solenoid", "order": 13},
+        {"field": "fields.line", "header": "line", "order": 14}
+      ]
+    },
+    "instrument_index": {
+      "sheet_name": "Instrument Index",
+      "columns": [
+        {"field": "fields.unit_number", "header": "Unit", "order": 1},
+        {"field": "tag", "header": "Tag", "order": 2},
+        {"field": "fields.instrument_type", "header": "Type", "order": 3},
+        {"field": "fields.service_description", "header": "Service", "order": 4},
+        {"field": "pid_number", "header": "Drawing", "order": 5},
+        {"field": "fields.io_type", "header": "IO", "order": 6}
+      ]
+    },
+    "equipment_list": {
+      "sheet_name": "Equipment List",
+      "columns": [
+        {"field": "tag", "header": "Tag", "order": 1},
+        {"field": "fields.equipment_type", "header": "Type", "order": 2},
+        {"field": "fields.service_duty", "header": "Service", "order": 3},
+        {"field": "pid_number", "header": "Drawing", "order": 4}
+      ]
+    },
+    "datasheet": {
+      "sheet_name": "Datasheet",
+      "columns": [
+        {"field": "tag", "header": "Tag", "order": 1},
+        {"field": "fields.service_description", "header": "Service", "order": 2},
+        {"field": "vendor_match.vendor_name", "header": "Mfg", "order": 3},
+        {"field": "vendor_match.product_name", "header": "Model", "order": 4}
+      ]
+    }
+  }
+}

@@ -1,0 +1,31 @@
+meta {
+  name: LT - Level Transmitter
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/instrument-match
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-KEY: {{api_key}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "instType": "LT"
+  }
+}
+
+docs {
+  # LT - Level Transmitter
+
+  New instrument type added to the resolver.
+  Returns all level transmitter products with Qong fields once data is seeded.
+  Supports optional filter: accuracy.
+}

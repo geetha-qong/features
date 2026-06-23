@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Deliverable cards</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  body { margin: 0; padding: 18px 22px; background: var(--ink-50); font-family: var(--font-sans); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .card { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+  .ico { width: 36px; height: 36px; border-radius: 8px; background: var(--ink-50); display: grid; place-items: center; color: var(--qong-purple); flex-shrink: 0; }
+  .ico svg { width: 18px; height: 18px; stroke-width: 1.6; }
+  .body { flex: 1; min-width: 0; }
+  .ttl { font-family: var(--font-display); font-weight: 700; font-size: 16px; color: var(--fg-1); margin: 0; letter-spacing: 0; text-transform: uppercase; }
+  .meta { font-size: 11px; color: var(--fg-3); margin-top: 2px; }
+  .badge { font-family: var(--font-mono); font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: #D1FAE5; color: #065F46; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="card"><div class="ico"><i data-lucide="bar-chart-3"></i></div><div class="body"><div class="ttl">Instrument Index</div><div class="meta">800+ rows · ISA</div></div><span class="badge">✓ DONE</span></div>
+  <div class="card"><div class="ico"><i data-lucide="file-spreadsheet"></i></div><div class="body"><div class="ttl">Datasheets</div><div class="meta">180+ sheets</div></div><span class="badge">✓ DONE</span></div>
+  <div class="card"><div class="ico"><i data-lucide="git-merge"></i></div><div class="body"><div class="ttl">Control Narrative</div><div class="meta">110+ logics</div></div><span class="badge">✓ DONE</span></div>
+  <div class="card"><div class="ico"><i data-lucide="zap"></i></div><div class="body"><div class="ttl">Cause &amp; Effect</div><div class="meta">120+ matrices</div></div><span class="badge">✓ DONE</span></div>
+  <div class="card"><div class="ico"><i data-lucide="list-checks"></i></div><div class="body"><div class="ttl">I/O Lists</div><div class="meta">800+ I/O mapped</div></div><span class="badge">✓ DONE</span></div>
+  <div class="card"><div class="ico"><i data-lucide="circle-dot"></i></div><div class="body"><div class="ttl">Valve Lists</div><div class="meta">300+ valves</div></div><span class="badge">✓ DONE</span></div>
+</div>
+<script>lucide.createIcons();</script>
+</body>
+</html>

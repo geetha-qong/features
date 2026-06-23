@@ -1,0 +1,25 @@
+name: Nightly Backup → GCS
+
+on:
+  schedule:
+    - cron: "30 20 * * *"  # 02:00 IST daily (20:30 UTC)
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.GSP_DEV_SSH_KEY }}
+
+      - name: Add GCP VM to known hosts
+        run: ssh-keyscan -t ed25519 34.126.93.103 >> ~/.ssh/known_hosts
+
+      - name: Run backup on GCP VM
+        run: |
+          ssh maahedev@34.126.93.103 << 'ENDSSH'
+          set -e
+          bash /app/qong_poc/scripts/backup.sh
+          ENDSSH

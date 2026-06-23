@@ -1,0 +1,29 @@
+meta {
+  name: PDT - Advanced
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/instrument-match
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-KEY: {{api_key}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "instType": "PDT",
+    "range_min": 0,
+    "range_max": 500,
+    "range_unit": "mbar",
+    "ids_output_signal": "4-20mA HART",
+    "ids_enclosure_protection": "IP67",
+    "power_supply": "24VDC"
+  }
+}

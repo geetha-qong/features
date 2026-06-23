@@ -1,0 +1,29 @@
+<!--
+  Label Studio Labeling Config for P&ID Valve Annotation
+
+  How to use:
+  1. Create new project in Label Studio
+  2. Go to Settings → Labeling Interface → Code
+  3. Paste this entire XML
+  4. Save
+-->
+<View>
+  <Image name="image" value="$image" zoom="true" zoomControl="true" rotateControl="false"/>
+  <RectangleLabels name="label" toName="image" showInline="true">
+
+    <!-- VALVE SYMBOLS -->
+    <Label value="valve_bf"   background="#E74C3C" hotkey="1"/>  <!-- Butterfly: bowtie/diamond -->
+    <Label value="valve_bv"   background="#3498DB" hotkey="2"/>  <!-- Ball: circle with line -->
+    <Label value="valve_ck"   background="#2ECC71" hotkey="3"/>  <!-- Check: arrowhead/half-circle -->
+    <Label value="valve_gl"   background="#9B59B6" hotkey="4"/>  <!-- Globe: circle with plug -->
+    <Label value="valve_db"   background="#F39C12" hotkey="5"/>  <!-- Double Block & Bleed: 3-symbol cluster -->
+    <Label value="valve_cv"   background="#1ABC9C" hotkey="6"/>  <!-- Control valve: circle + dome -->
+    <Label value="valve_gen"  background="#95A5A6" hotkey="7"/>  <!-- Generic (VM, VG, NV, SV, UZV, PV, FV) -->
+
+    <!-- ACTUATOR SYMBOLS (separate boxes from valve body) -->
+    <Label value="actuator_motor" background="#E67E22" hotkey="8"/>  <!-- Motor: square box with M -->
+    <Label value="actuator_pneu"  background="#C0392B" hotkey="9"/>  <!-- Pneumatic: dome/diaphragm -->
+    <Label value="actuator_sol"   background="#8E44AD" hotkey="0"/>  <!-- Solenoid: SL box/coil -->
+
+  </RectangleLabels>
+</View>

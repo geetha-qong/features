@@ -1,0 +1,10 @@
+anthropic
+pymupdf
+pillow
+pandas
+rapidocr-onnxruntime
+onnxruntime>=1.17.0
+rapidfuzz
+opencv-python-headless
+scikit-image
+networkx

@@ -1,0 +1,42 @@
+# Dockerfile.trainer — YOLO training environment
+# Includes: Python 3.11, PyTorch (CPU), Ultralytics YOLOv8, export tools
+#
+# GPU users: replace the base image with pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+# and remove the torch CPU install line.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps needed by OpenCV (used inside ultralytics)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxrender1 \
+    libxext6 \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# PyTorch CPU build first (smaller image; swap for CUDA build if you have a GPU)
+RUN pip install --no-cache-dir \
+    torch==2.3.0 torchvision==0.18.0 --index-url https://download.pytorch.org/whl/cpu
+
+# Ultralytics YOLOv8 + ONNX export support
+RUN pip install --no-cache-dir \
+    "numpy<2.0" \
+    ultralytics==8.2.0 \
+    onnx==1.16.0 \
+    onnxruntime==1.18.0 \
+    pillow \
+    pandas \
+    pyyaml
+
+# Copy only what training needs (keeps image lean)
+COPY train.py ./
+COPY datasets/ ./datasets/
+
+# Pre-download YOLOv8s base weights so first run doesn't need internet
+RUN python3 -c "from ultralytics import YOLO; YOLO('yolov8s.pt')"
+
+CMD ["python3", "train.py"]
