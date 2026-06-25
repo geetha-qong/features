@@ -1,0 +1,26 @@
+meta {
+  name: TE - Temperature Element
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/instrument-match
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-KEY: {{api_key}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "instType": "TE",
+    "range_min": -50,
+    "range_max": 400,
+    "range_unit": "C"
+  }
+}

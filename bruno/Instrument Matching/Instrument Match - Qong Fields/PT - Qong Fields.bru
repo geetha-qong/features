@@ -1,0 +1,58 @@
+meta {
+  name: PT - Qong Fields
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/instrument-match
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-KEY: {{api_key}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "instType": "PT",
+    "range_min": 0,
+    "range_max": 160,
+    "range_unit": "bar",
+    "ids_output_signal": "HART",
+    "power_supply": "24VDC"
+  }
+}
+
+docs {
+  # PT - Qong Fields Verification
+
+  Matches YOKOGAWA EJA530E.
+
+  Expected response includes all Qong Studio fields:
+
+  ```json
+  {
+    "product_id": 3,
+    "vendor_profile_id": 3,
+    "brand": "YOKOGAWA",
+    "model_number": "EJA530E",
+    "manufacturer": "YOKOGAWA",
+    "model": "EJA530E",
+    "piping_class": "Class 150",
+    "calibration_range_min": 0,
+    "calibration_range_max": 160,
+    "calibration_range_unit": "bar",
+    "measuring_range_min": 0,
+    "measuring_range_max": 160,
+    "measuring_range_unit": "bar",
+    "external_power_supply": "Yes",
+    "power_supply_input": "24VDC",
+    "power_supply_output": "4-20mA",
+    "io_output": "HART"
+  }
+  ```
+}

@@ -1,0 +1,18 @@
+path: datasets/pid_valves   # relative to cwd (project root on host, /app in Docker)
+train: images/train
+val: images/val
+
+nc: 10
+# Matches CLASS_NAMES in inference/engine.py — 10 valve+actuator classes
+# Instruments not yet annotated; add inst_bubble/cv/solenoid when annotation begins
+names:
+  0: actuator_motor  # Motor box with M label (square)
+  1: actuator_pneu   # Pneumatic dome / diaphragm
+  2: actuator_sol    # Solenoid coil or SL text box
+  3: valve_bf        # Butterfly valve — bowtie/diamond on pipe
+  4: valve_bv        # Ball valve — circle with line through it
+  5: valve_ck        # Check valve — arrowhead / half-circle
+  6: valve_cv        # Control valve — circle with actuator dome
+  7: valve_db        # Double Block & Bleed — cluster of 3 small symbols
+  8: valve_gen       # Generic (VM, VG, NV, SV, UZV, PV, FV)
+  9: valve_gl        # Globe valve — circle with internal plug

@@ -1,0 +1,55 @@
+meta {
+  name: TT - Temperature Transmitter
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/qong-instrument
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  X-API-KEY: {{api_key}}
+}
+
+body:json {
+  {
+    "instType": "TT"
+  }
+}
+
+docs {
+  # TT — Qong Instrument
+
+  Returns the first active Temperature Transmitter product.
+
+  Expected response:
+
+  ```json
+  {
+    "success": true,
+    "instType": "TT",
+    "data": {
+      "product_id": 1,
+      "vendor_profile_id": 3,
+      "manufacturer": "YOKOGAWA",
+      "model_number": "YTA710",
+      "piping_class": null,
+      "calibration_range_min": 4,
+      "calibration_range_max": 20,
+      "calibration_range_unit": "mA",
+      "measuring_range_min": -200,
+      "measuring_range_max": 850,
+      "measuring_range_unit": "C",
+      "external_power_supply": "Yes",
+      "power_supply_input": "10.5-42.4VDC",
+      "power_supply_output": null,
+      "io_output": "4-20mA HART"
+    }
+  }
+  ```
+}

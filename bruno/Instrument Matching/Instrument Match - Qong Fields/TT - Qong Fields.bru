@@ -1,0 +1,56 @@
+meta {
+  name: TT - Qong Fields
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/instrument-match
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-KEY: {{api_key}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "instType": "TT",
+    "range_min": -200,
+    "range_max": 850,
+    "range_unit": "C"
+  }
+}
+
+docs {
+  # TT - Qong Fields Verification
+
+  Matches ROSEMOUNT 3144P (only product within -200 to 850°C span).
+
+  Expected response:
+
+  ```json
+  {
+    "product_id": 1,
+    "vendor_profile_id": 5,
+    "brand": "ROSEMOUNT",
+    "model_number": "3144P",
+    "manufacturer": "ROSEMOUNT",
+    "model": "3144P",
+    "piping_class": "N/A",
+    "calibration_range_min": -200,
+    "calibration_range_max": 850,
+    "calibration_range_unit": "C",
+    "measuring_range_min": -200,
+    "measuring_range_max": 850,
+    "measuring_range_unit": "C",
+    "external_power_supply": "Yes",
+    "power_supply_input": "12-42.4VDC",
+    "power_supply_output": "4-20mA",
+    "io_output": "HART"
+  }
+  ```
+}

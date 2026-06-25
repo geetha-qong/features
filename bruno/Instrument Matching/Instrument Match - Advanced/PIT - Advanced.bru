@@ -1,0 +1,29 @@
+meta {
+  name: PIT - Advanced
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/instrument-match
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-KEY: {{api_key}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "instType": "PIT",
+    "range_min": 0,
+    "range_max": 100,
+    "range_unit": "bar",
+    "ids_output_signal": "4-20mA HART",
+    "ids_enclosure_protection": "IP67",
+    "power_supply": "24VDC"
+  }
+}

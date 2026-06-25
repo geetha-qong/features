@@ -1,0 +1,1350 @@
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Filter,
+  PanelRight,
+  Save,
+  Search,
+  X,
+} from "lucide-react";
+import DocTypeIcon from "../datasheet/DocTypeIcon";
+import DatasheetPanel from "../datasheet/DatasheetPanel";
+import { PdfModal } from "../PdfModal";
+import {
+  HttpError,
+  getEntities,
+  patchEntity,
+  type EntitiesResponse,
+  type EntityColumn,
+  type EntityFieldValue,
+  type EntityRow,
+} from "../api";
+import { DELIVERABLES } from "./deliverables";
+
+/** Maps the 10 design-time deliverable keys onto the 4 backend deliverable_type
+ *  slugs. Kept verbatim with `DatasheetDrawer.tsx:DOC_TYPE_TO_DELIVERABLE` —
+ *  if/when we wire more deliverables, update both. The remaining 6 keys render
+ *  as disabled "Coming soon" tabs so the UX intent stays visible. */
+const DELIVERABLE_KEY_TO_TYPE: Record<string, string | undefined> = {
+  index: "instrument_index",
+  datasheet: "datasheet",
+  valves: "valve_list",
+  equip: "equipment_list",
+  // 6 unsupported (no backend generator yet)
+  io: undefined,
+  narrative: undefined,
+  cande: undefined,
+  lines: undefined,
+  loop: undefined,
+  tags: undefined,
+};
+
+/** Per-deliverable export format — mirrors Studio.tsx:EXPORT_FORMAT so the two
+ *  download surfaces stay consistent. */
+const EXPORT_FORMAT: Record<string, "csv" | "xlsx"> = {
+  valve_list: "csv",
+  instrument_index: "xlsx",
+  equipment_list: "xlsx",
+  datasheet: "xlsx",
+};
+
+interface Props {
+  /** Job ID — drives every `/api/v1/jobs/{jobId}/entities` call. */
+  jobId: number;
+  /** Project name for the breadcrumb only. */
+  projectName: string;
+  /** Optional deliverable_type ("valve_list", "datasheet", …) the parent wants
+   *  the workbench to open on. Falls back to the first supported tab. */
+  initialDeliverableType?: string;
+  onBack: () => void;
+  /** Click "Open in Studio" on a row → close workbench, surface the drawer
+   *  upstream by selecting the entity. The parent (Studio.tsx) decides
+   *  what to do — currently flips `mode` back to "studio" and opens the
+   *  DatasheetDrawer with the entity_id. Class is also forwarded so the
+   *  drawer can default its deliverable_type to match (clicking a valve in
+   *  Bulk Review shouldn't open the Instrument Index in Studio). */
+  onOpenEntity: (entityId: string, entityClass?: string) => void;
+}
+
+/** Stringify any canonical-ish JSON value for the cell input. Mirrors
+ *  DatasheetDrawer's `valueToString` so the two surfaces format identically. */
+function valueToString(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return "";
+  }
+}
+
+/** Coerce a user-edited string back to the original primitive type. Numeric
+ *  coercion is opt-in (only when original was a number) so serials like
+ *  "0001" don't get silently turned into 1. */
+function stringToValue(s: string, original: unknown): unknown {
+  if (s === "") return null;
+  if (typeof original === "number") {
+    const n = Number(s);
+    if (!Number.isNaN(n)) return n;
+  }
+  return s;
+}
+
+/** Identity columns rendered sticky-left, regardless of template schema.
+ *  editable: true → double-click opens inline edit (backend allows PATCH).
+ *  pid_number + sheet_number are in READ_ONLY_FIELDS on the backend — keep them display-only. */
+const IDENTITY_COLS: { field: keyof EntityRow; header: string; editable: boolean }[] = [
+  { field: "tag",          header: "Tag",              editable: true },
+  { field: "sub_class",    header: "Process Function", editable: true },
+  { field: "pid_number",   header: "P&ID",             editable: true },
+  { field: "sheet_number", header: "Sheet",            editable: true },
+];
+
+export default function BulkReviewScreen({
+  jobId,
+  projectName: _projectName,
+  initialDeliverableType,
+  onBack,
+  onOpenEntity,
+}: Props) {
+  // Map the incoming deliverable_type back to a UI key so the tab highlights.
+  const initialKey = useMemo<string>(() => {
+    if (initialDeliverableType) {
+      for (const [k, v] of Object.entries(DELIVERABLE_KEY_TO_TYPE)) {
+        if (v === initialDeliverableType) return k;
+      }
+    }
+    // Fall back to the first phase-1 supported tab (datasheet).
+    return "datasheet";
+  }, [initialDeliverableType]);
+
+  const [activeKey, setActiveKey] = useState<string>(initialKey);
+  const activeType = DELIVERABLE_KEY_TO_TYPE[activeKey];
+
+  const [resp, setResp] = useState<EntitiesResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  // Per-cell edit state — keyed `${entityId}:${field}` so a partially-edited
+  // cell survives row-selection changes (until the user navigates away or
+  // commits). null entry means "not editing"; string means "editing with this
+  // working value".
+  const [editing, setEditing] = useState<Record<string, string>>({});
+  const [cellError, setCellError] = useState<Record<string, string>>({});
+  // Cells currently in-flight to PATCH — disables the input + shows a save hint.
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showDetail, setShowDetail] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportErr, setExportErr] = useState<string | null>(null);
+  // Cache entity counts per tab key so non-active tabs show their count too.
+  const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  // Column header renames — persisted in localStorage; double-click any <th> to rename.
+  const [headerOverrides, setHeaderOverrides] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem("br-header-overrides") ?? "{}"); } catch { return {}; }
+  });
+  const [editingHeader, setEditingHeader] = useState<string | null>(null);
+  const [headerDraft, setHeaderDraft] = useState("");
+
+  // Vendor lookup — populated by POST /api/qong-instrument when a row is selected.
+  const [vendorApiData, setVendorApiData] = useState<Record<string, unknown>[] | null>(null);
+  const [vendorLoading, setVendorLoading] = useState(false);
+  const [vendorSaving, setVendorSaving] = useState(false);
+  const [pdfModalUrl, setPdfModalUrl] = useState<string | null>(null);
+  const [pendingVendorData, setPendingVendorData] = useState<Record<string, unknown> | null>(null);
+  const [vendorAccepted, setVendorAccepted] = useState(false);
+
+  // Download the active deliverable. Wires the previously-stubbed "Export"
+  // button to the same POST /export endpoint Studio's right-panel uses.
+  const onExport = useCallback(async () => {
+    if (!activeType) return;
+    const format = EXPORT_FORMAT[activeType] || "xlsx";
+    setExporting(true);
+    setExportErr(null);
+    try {
+      const res = await fetch(`/api/v1/jobs/${jobId}/export/${activeType}/${format}`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        setExportErr(`Export failed (HTTP ${res.status}) ${detail.slice(0, 80)}`);
+        return;
+      }
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `job-${jobId}-${activeType}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      setExportErr(e instanceof Error ? e.message : "Export error");
+    } finally {
+      setExporting(false);
+    }
+  }, [activeType, jobId]);
+
+  // Batch-save all cells currently in edit mode. PATCHes each independently
+  // then does a single refresh so the table reflects the saved state.
+  async function saveAll() {
+    const entries = Object.entries(editing);
+    if (entries.length === 0) {
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 1500);
+      return;
+    }
+    setSaveStatus("saving");
+    await Promise.all(
+      entries.map(([k, draft]) => {
+        const colonIdx = k.indexOf(":");
+        const entityId = k.slice(0, colonIdx);
+        const field = k.slice(colonIdx + 1);
+        const entity = rows.find(r => r.entity_id === entityId);
+        if (!entity) return Promise.resolve();
+        const origVal = entity.values[field]?.value;
+        if (draft === valueToString(origVal)) return Promise.resolve();
+        return patchEntity(jobId, entityId, { [field]: stringToValue(draft, origVal) }).catch(() => {});
+      })
+    );
+    await fetchRows();
+    setSaveStatus("saved");
+    setTimeout(() => setSaveStatus("idle"), 1500);
+  }
+
+  // Filter: typed value (immediate) + debounced value (the one we actually
+  // filter on). Debounce reduces re-render churn on big tables.
+  const [filterText, setFilterText] = useState("");
+  const [debouncedFilter, setDebouncedFilter] = useState("");
+  const [showOnlyEdited, setShowOnlyEdited] = useState(false);
+
+  // Guard against stale GET responses if the user spam-clicks tabs.
+  const reqIdRef = useRef(0);
+
+  const fetchRows = useCallback(async () => {
+    if (!activeType) {
+      // Unsupported deliverable — clear state, render empty panel.
+      setResp(null);
+      setSelectedId(null);
+      setFetchError(null);
+      return;
+    }
+    const myReq = ++reqIdRef.current;
+    setLoading(true);
+    setFetchError(null);
+    try {
+      const r = await getEntities(jobId, activeType);
+      if (myReq !== reqIdRef.current) return;
+      setResp(r);
+      // Preserve the current selection across a refresh (e.g. after a side-panel
+      // or cell save) — only fall back to the first row when the previously
+      // selected entity is gone or nothing was selected. Functional update so we
+      // don't need selectedId in this callback's deps.
+      setSelectedId((prev) =>
+        prev && r.entities.some((e) => e.entity_id === prev)
+          ? prev
+          : (r.entities[0]?.entity_id ?? null),
+      );
+      // Cache this tab's count so the sidebar shows it even when tab is inactive.
+      setTabCounts(prev => ({ ...prev, [activeKey]: r.entities.length }));
+      // Drop stale edit state from the previous tab — different rows / schema.
+      setEditing({});
+      setCellError({});
+      setSaving({});
+      setEditingHeader(null);
+    } catch (e) {
+      if (myReq !== reqIdRef.current) return;
+      if (e instanceof HttpError && e.status === 404) {
+        setFetchError("No canonical output yet — this job hasn't finished extraction.");
+      } else {
+        setFetchError(e instanceof Error ? e.message : "Failed to load entities");
+      }
+      setResp(null);
+    } finally {
+      if (myReq === reqIdRef.current) setLoading(false);
+    }
+  }, [jobId, activeType]);
+
+  useEffect(() => {
+    void fetchRows();
+  }, [fetchRows]);
+
+  // Pre-fetch counts for every supported tab in parallel on mount so the
+  // sidebar shows totals immediately without the user clicking each tab.
+  useEffect(() => {
+    const supported = (
+      Object.entries(DELIVERABLE_KEY_TO_TYPE) as [string, string | undefined][]
+    ).filter((e): e is [string, string] => e[1] !== undefined);
+    Promise.all(
+      supported.map(([key, type]) =>
+        getEntities(jobId, type)
+          .then(r => ({ key, count: r.entities.length }))
+          .catch(() => null)
+      )
+    ).then(results => {
+      const counts: Record<string, number> = {};
+      for (const r of results) {
+        if (r) counts[r.key] = r.count;
+      }
+      setTabCounts(counts);
+    });
+  }, [jobId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 150ms filter debounce — fast enough to feel live, slow enough that typing
+  // doesn't re-filter every keystroke on a 500-row table.
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedFilter(filterText), 150);
+    return () => window.clearTimeout(id);
+  }, [filterText]);
+
+  // Esc closes detail panel; nice keyboard parity with the drawer.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && showDetail) setShowDetail(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showDetail]);
+
+  const rows = resp?.entities ?? [];
+  const schema = resp?.schema ?? [];
+
+  // Editable columns from the template, in `order` ascending. Read-only columns
+  // are dropped from the grid body — the identity columns above already cover
+  // the same conceptual ground (tag, sub_class, pid_number, sheet_number).
+  const editableColumns = useMemo<EntityColumn[]>(
+    () => [...schema].filter((c) => c.editable).sort((a, b) => a.order - b.order),
+    [schema],
+  );
+
+  // Filtered + optional "show only edited" rows. Cheap O(n*k) — fine at the
+  // current scales we ship (typical jobs ≤ a few hundred entities).
+  const filteredRows = useMemo(() => {
+    const q = debouncedFilter.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (q) {
+        const hay = [
+          r.tag ?? "",
+          r.sub_class ?? "",
+          r.pid_number ?? "",
+          String(r.sheet_number ?? ""),
+          r.entity_id,
+        ]
+          .join("|")
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (showOnlyEdited) {
+        const hasOverride = Object.values(r.values).some((v) => v.is_override);
+        if (!hasOverride) return false;
+      }
+      return true;
+    });
+  }, [rows, debouncedFilter, showOnlyEdited]);
+
+  // Keep selectedId valid when rows change (filter narrows, refresh swaps).
+  useEffect(() => {
+    if (selectedId && filteredRows.find((r) => r.entity_id === selectedId)) return;
+    setSelectedId(filteredRows[0]?.entity_id ?? null);
+  }, [filteredRows, selectedId]);
+
+  const selectedRow = useMemo<EntityRow | null>(
+    () => filteredRows.find((r) => r.entity_id === selectedId) ?? null,
+    [filteredRows, selectedId],
+  );
+
+  // Fetch available vendors when an instrument row is selected on the index tab.
+  useEffect(() => {
+    if (activeKey !== "index" || !selectedRow) {
+      setVendorApiData(null);
+      return;
+    }
+    const rawCode = String(
+      selectedRow.values["fields.tag_type_code"]?.value ?? ""
+    ).trim().toUpperCase();
+    if (!rawCode) return;
+
+    const SUPPORTED = new Set([
+      "PT","PIT","PDT","PG","TT","TE","TI","TG","FT","FI","LT","LI","VT",
+      "PBS","PS","LS","RTD","TC","TW","FM","FE","RO","CVP","PSV","V",
+      "ACT","MOT","CMP","BLW","FAN","GBX","HEX","TN","VS","FIL","STR","PLC",
+    ]);
+    let instType = rawCode;
+    if (!SUPPORTED.has(instType)) {
+      const stripped = rawCode.replace(/IT$/, "T");
+      if (SUPPORTED.has(stripped)) { instType = stripped; }
+      else if (rawCode.startsWith("PD")) { instType = "PDT"; }
+      else if (rawCode.startsWith("PZ")) { instType = "PIT"; }
+      else {
+        const firstTwo = rawCode.slice(0, 2);
+        if (SUPPORTED.has(firstTwo)) instType = firstTwo;
+      }
+    }
+
+    let cancelled = false;
+    setVendorApiData(null);
+    setVendorLoading(true);
+    fetch("https://dill-payday-chirping.ngrok-free.dev/api/qong-instrument", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": "qong-local-dev-key-0000000000000000",
+        "ngrok-skip-browser-warning": "true",
+      },
+      body: JSON.stringify({ instType }),
+    })
+      .then((r) => r.json())
+      .then((json: { success?: boolean; data?: unknown }) => {
+        if (!cancelled) {
+          if (json.success && json.data) {
+            const raw = json.data;
+            setVendorApiData(Array.isArray(raw) ? (raw as Record<string, unknown>[]) : [raw as Record<string, unknown>]);
+          } else {
+            console.log("Vendor API response:", json);
+          }
+        }
+      })
+      .catch((err) => { console.error("Vendor fetch error:", err); })
+      .finally(() => { if (!cancelled) setVendorLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeKey, selectedRow?.entity_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset vendor state when a different instrument is selected
+  useEffect(() => {
+    setVendorAccepted(false);
+    setPendingVendorData(null);
+    setPdfModalUrl(null);
+  }, [selectedId]);
+
+  async function handleVendorSelect(productIdStr: string) {
+    if (!vendorApiData || !selectedRow) return;
+    if (!productIdStr) {
+      setPendingVendorData(null);
+      setPdfModalUrl(null);
+      setVendorAccepted(false);
+      return;
+    }
+    const d = vendorApiData.find((v) => String(v.product_id) === productIdStr);
+    if (!d) return;
+    setPendingVendorData(d);
+    if (d.datasheet_url && String(d.datasheet_url).startsWith("http")) {
+      setPdfModalUrl(String(d.datasheet_url));
+    }
+  }
+
+  async function handleVendorAccept() {
+    if (!pendingVendorData || !selectedRow) return;
+    const d = pendingVendorData;
+    const fieldMap: Record<string, unknown> = {
+      "vendor_match.vendor_name":    d.manufacturer,
+      "vendor_match.product_name":   d.model_number,
+      "fields.piping_class":         d.piping_class,
+      "fields.calb_range_min":       d.calibration_range_min,
+      "fields.calb_range_max":       d.calibration_range_max,
+      "fields.calb_range_unit":      d.calibration_range_unit,
+      "fields.measuring_range_min":  d.measuring_range_min,
+      "fields.measuring_range_max":  d.measuring_range_max,
+      "fields.measuring_range_unit": d.measuring_range_unit,
+      "fields.certification":        d.certificate,
+      "fields.power_in":             d.power_supply_input,
+      "fields.power_out":            d.power_supply_output,
+      "fields.io_output":            d.io_output,
+      "fields.datasheet_ref":        "TBD",
+    };
+    const patch: Record<string, string> = {};
+    for (const [k, v] of Object.entries(fieldMap)) {
+      if (v !== null && v !== undefined && String(v).trim() !== "") {
+        patch[k] = String(v);
+      }
+    }
+    if (Object.keys(patch).length === 0) return;
+    setVendorSaving(true);
+    try {
+      await patchEntity(jobId, selectedRow.entity_id, patch);
+      await fetchRows();
+      setVendorAccepted(true);
+    } catch (e) {
+      console.error("Vendor apply failed", e);
+    } finally {
+      setVendorSaving(false);
+    }
+  }
+
+  function handleVendorDecline() {
+    setPendingVendorData(null);
+  }
+
+  function cellKey(entityId: string, field: string) {
+    return `${entityId}:${field}`;
+  }
+
+  function beginEdit(entity: EntityRow, field: string) {
+    const k = cellKey(entity.entity_id, field);
+    if (editing[k] !== undefined) return; // already editing
+    // Prefer the values dict (tracks overrides). Fall back to the top-level
+    // entity property for identity fields like sub_class that aren't in the schema.
+    const cur = field in entity.values
+      ? valueToString(entity.values[field]?.value)
+      : valueToString((entity as unknown as Record<string, unknown>)[field]);
+    setEditing((s) => ({ ...s, [k]: cur }));
+    setCellError((s) => {
+      if (!(k in s)) return s;
+      const next = { ...s };
+      delete next[k];
+      return next;
+    });
+  }
+
+  function setEditingValue(entity: EntityRow, field: string, val: string) {
+    const k = cellKey(entity.entity_id, field);
+    setEditing((s) => ({ ...s, [k]: val }));
+  }
+
+  function cancelEdit(entity: EntityRow, field: string) {
+    const k = cellKey(entity.entity_id, field);
+    setEditing((s) => {
+      if (!(k in s)) return s;
+      const next = { ...s };
+      delete next[k];
+      return next;
+    });
+    setCellError((s) => {
+      if (!(k in s)) return s;
+      const next = { ...s };
+      delete next[k];
+      return next;
+    });
+  }
+
+  async function commitEdit(entity: EntityRow, field: string) {
+    const k = cellKey(entity.entity_id, field);
+    const newStr = editing[k];
+    if (newStr === undefined) return;
+    const origVal = entity.values[field]?.value;
+    const origStr = valueToString(origVal);
+    if (newStr === origStr) {
+      cancelEdit(entity, field);
+      return;
+    }
+    const coerced = stringToValue(newStr, origVal);
+    setSaving((s) => ({ ...s, [k]: true }));
+    try {
+      await patchEntity(jobId, entity.entity_id, { [field]: coerced });
+      // If Rev. No is edited, apply the same value to all other rows so the
+      // entire deliverable shares one revision number.
+      if (field === "fields.rev_no") {
+        const others = rows.filter((r) => r.entity_id !== entity.entity_id);
+        await Promise.all(others.map((r) => patchEntity(jobId, r.entity_id, { [field]: coerced })));
+      }
+      // Refresh just the active tab — keeps badges (is_override) accurate and
+      // pulls in any concurrent edits from another tab. Cheap at current
+      // entity counts; see open-question note on virtualization for the
+      // threshold where this stops being free.
+      await fetchRows();
+      cancelEdit(entity, field);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Save failed";
+      setCellError((s) => ({ ...s, [k]: msg }));
+      // Leave the input mounted with the user's draft so they can retry / fix.
+    } finally {
+      setSaving((s) => {
+        const next = { ...s };
+        delete next[k];
+        return next;
+      });
+    }
+  }
+
+  // --- Column header rename helpers ---
+  function headerKey(field: string) { return `${activeType ?? ""}:${field}`; }
+  function getHeader(field: string, def: string) { return headerOverrides[headerKey(field)] ?? def; }
+  function startHeaderEdit(field: string, def: string) {
+    setEditingHeader(field);
+    setHeaderDraft(getHeader(field, def));
+  }
+  function commitHeaderEdit() {
+    if (!editingHeader) return;
+    const k = headerKey(editingHeader);
+    const val = headerDraft.trim();
+    const next = val
+      ? { ...headerOverrides, [k]: val }
+      : ((): Record<string, string> => { const o = { ...headerOverrides }; delete o[k]; return o; })();
+    setHeaderOverrides(next);
+    localStorage.setItem("br-header-overrides", JSON.stringify(next));
+    setEditingHeader(null);
+  }
+  function cancelHeaderEdit() { setEditingHeader(null); }
+
+  // Grid template: identity cols (sticky-left) · editable cols · open-action.
+  const gridTemplate = useMemo(() => {
+    const idCols = IDENTITY_COLS.map(() => "minmax(90px, 1fr)").join(" ");
+    const editCols = editableColumns.map(() => "minmax(110px, 1.2fr)").join(" ");
+    return `${idCols} ${editCols} 36px`;
+  }, [editableColumns]);
+
+  const totalCount = rows.length;
+  const shownCount = filteredRows.length;
+
+  return (
+    <div className="bulk-review" data-screen-label="04 Bulk Review">
+      <header className="br-top">
+        <button className="br-back" onClick={onBack} title="Back to PID Studio">
+          <ArrowLeft size={14} strokeWidth={1.6} />
+          <span>Back to Studio</span>
+        </button>
+        <div className="br-divider"></div>
+        <div className="br-crumbs">
+          <span className="strong">
+            {DELIVERABLES.find((d) => d.key === activeKey)?.name ?? "—"}
+          </span>
+        </div>
+        <div style={{ flex: 1 }}></div>
+
+        <div className="br-search">
+          <Search size={12} strokeWidth={1.6} />
+          <input
+            placeholder="Filter tag, sub-class, P&ID…"
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+          />
+          {filterText && (
+            <button
+              onClick={() => setFilterText("")}
+              style={{
+                background: "transparent",
+                border: 0,
+                color: "var(--fg-3)",
+                cursor: "pointer",
+                padding: 0,
+                display: "inline-flex",
+              }}
+              title="Clear filter"
+            >
+              <X size={11} strokeWidth={1.6} />
+            </button>
+          )}
+        </div>
+        <button
+          className={`br-btn ${showOnlyEdited ? "primary" : ""}`}
+          onClick={() => setShowOnlyEdited((v) => !v)}
+          title="Show only rows with overrides"
+        >
+          <Filter size={12} strokeWidth={1.6} />
+          <span>{showOnlyEdited ? "Edited only" : "All rows"}</span>
+        </button>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: "var(--fg-3)",
+            padding: "0 6px",
+          }}
+        >
+          {shownCount === totalCount
+            ? `${totalCount} total`
+            : `${shownCount} of ${totalCount}`}
+        </span>
+        <button
+          className="br-btn primary"
+          disabled={!activeType || exporting || rows.length === 0}
+          onClick={onExport}
+          title={
+            !activeType
+              ? "Select a supported deliverable"
+              : rows.length === 0
+                ? "Nothing to export — no entities for this deliverable"
+                : exportErr || `Download ${EXPORT_FORMAT[activeType] || "xlsx"}`
+          }
+        >
+          <Download size={12} strokeWidth={1.6} />
+          <span>{exporting ? "Exporting…" : "Export"}</span>
+        </button>
+        <button
+          className={`br-btn icon ${showDetail ? "active" : ""}`}
+          onClick={() => setShowDetail((v) => !v)}
+          title={showDetail ? "Hide detail panel" : "Show detail panel"}
+        >
+          <PanelRight size={13} strokeWidth={1.6} />
+        </button>
+      </header>
+
+      <div className={`br-body ${showDetail ? "" : "no-detail"} ${showDetail && activeType === "datasheet" ? "ds-wide" : ""}`}>
+        <aside className="br-nav">
+          <div className="br-nav-head">
+            <span>Deliverables</span>
+            <span className="cnt">{DELIVERABLES.length}</span>
+          </div>
+          {DELIVERABLES.map((d) => {
+            const supported = !!DELIVERABLE_KEY_TO_TYPE[d.key];
+            const isActive = d.key === activeKey;
+            return (
+              <button
+                key={d.key}
+                className={`br-doc ${isActive ? "active" : ""}`}
+                disabled={!supported}
+                title={
+                  supported
+                    ? d.name
+                    : `${d.name} — Coming soon (no backend generator yet)`
+                }
+                onClick={() => supported && setActiveKey(d.key)}
+                style={
+                  supported
+                    ? undefined
+                    : { opacity: 0.4, cursor: "not-allowed" }
+                }
+              >
+                <DocTypeIcon name={d.icon} size={13} />
+                <span className="nm">{d.name}</span>
+                {!supported ? (
+                  <span
+                    className="completion"
+                    style={{ fontSize: 8.5, letterSpacing: "0.12em" }}
+                  >
+                    SOON
+                  </span>
+                ) : (
+                  <span className="completion">
+                    {isActive && resp
+                      ? resp.entities.length
+                      : tabCounts[d.key] !== undefined
+                        ? tabCounts[d.key]
+                        : "—"}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </aside>
+
+        <section className="br-center">
+          <div className="br-center-head">
+            <div>
+              <span className="overline">Bulk Review · Editable Deliverable</span>
+              <h2>
+                {DELIVERABLES.find((d) => d.key === activeKey)?.name ?? "—"}
+              </h2>
+            </div>
+            <div className="br-stats">
+              <div className="stat">
+                <strong>{totalCount}</strong>
+                <span>Entities</span>
+              </div>
+              <div className="stat">
+                <strong style={{ color: "var(--qong-magenta, #FF4DA8)" }}>
+                  {rows.filter((r) =>
+                    Object.values(r.values).some((v) => v.is_override),
+                  ).length}
+                </strong>
+                <span>Edited</span>
+              </div>
+              <div className="stat">
+                <strong>{editableColumns.length}</strong>
+                <span>Editable Cols</span>
+              </div>
+              <button
+                className={`br-btn${saveStatus === "saved" ? " primary" : ""}`}
+                onClick={() => void saveAll()}
+                disabled={saveStatus === "saving"}
+                title={
+                  Object.keys(editing).length > 0
+                    ? `Save ${Object.keys(editing).length} unsaved cell(s) · Ctrl+S`
+                    : "All changes saved · Ctrl+S"
+                }
+                style={{ marginLeft: 8 }}
+              >
+                <Save size={12} strokeWidth={1.6} />
+                <span>
+                  {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved ✓" : "Save"}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div className="br-table-wrap">
+            {loading && (
+              <div className="br-empty">Loading entities…</div>
+            )}
+            {!loading && fetchError && (
+              <div className="br-empty" style={{ color: "var(--error, #dc2626)" }}>
+                {fetchError}
+                <div style={{ marginTop: 12 }}>
+                  <button className="br-btn small" onClick={() => void fetchRows()}>
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
+            {!loading && !fetchError && !activeType && (
+              <div className="br-empty">
+                <strong>Coming soon.</strong> No backend generator for this
+                deliverable yet.
+              </div>
+            )}
+            {!loading && !fetchError && activeType && rows.length === 0 && (
+              <div className="br-empty">
+                No entities for this deliverable in job #{jobId}.
+              </div>
+            )}
+            {!loading && !fetchError && activeType && rows.length > 0 && (
+              <div className="br-table" style={{ gridTemplateColumns: gridTemplate }}>
+                {/* Headers — double-click any cell to rename it (saved in localStorage) */}
+                {IDENTITY_COLS.map((c) => (
+                  <div
+                    key={`id-${c.field}`}
+                    className="br-th"
+                    style={{ cursor: "text" }}
+                    onDoubleClick={() => startHeaderEdit(c.field, c.header)}
+                    title="Double-click to rename column"
+                  >
+                    {editingHeader === c.field ? (
+                      <input
+                        autoFocus
+                        value={headerDraft}
+                        style={{ width: "100%", border: 0, outline: 0, background: "transparent", font: "inherit", color: "inherit", padding: 0 }}
+                        onChange={(e) => setHeaderDraft(e.target.value)}
+                        onBlur={commitHeaderEdit}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitHeaderEdit(); } else if (e.key === "Escape") cancelHeaderEdit(); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : getHeader(c.field, c.header)}
+                  </div>
+                ))}
+                {editableColumns.map((c) => (
+                  <div
+                    key={`ed-${c.field}`}
+                    className="br-th"
+                    style={{ cursor: "text" }}
+                    onDoubleClick={() => startHeaderEdit(c.field, c.header)}
+                    title="Double-click to rename column"
+                  >
+                    {editingHeader === c.field ? (
+                      <input
+                        autoFocus
+                        value={headerDraft}
+                        style={{ width: "100%", border: 0, outline: 0, background: "transparent", font: "inherit", color: "inherit", padding: 0 }}
+                        onChange={(e) => setHeaderDraft(e.target.value)}
+                        onBlur={commitHeaderEdit}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitHeaderEdit(); } else if (e.key === "Escape") cancelHeaderEdit(); }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : getHeader(c.field, c.header)}
+                  </div>
+                ))}
+                <div className="br-th"></div>
+
+                {filteredRows.map((r) => {
+                  const isSel = r.entity_id === selectedId;
+                  return (
+                    <div
+                      key={r.entity_id}
+                      className={`br-row ${isSel ? "selected" : ""}`}
+                      style={{ display: "contents" }}
+                      onClick={() => setSelectedId(r.entity_id)}
+                    >
+                      {/* Identity cells — editable ones (tag, sub_class) use BulkCell;
+                          pid_number + sheet_number stay display-only (backend READ_ONLY_FIELDS). */}
+                      {IDENTITY_COLS.map((c) => {
+                        if (c.editable) {
+                          // Construct fv: prefer values dict (has override tracking);
+                          // fall back to raw entity property for sub_class which
+                          // isn't in the schema template.
+                          const fv = r.values[c.field as string] ?? {
+                            value: r[c.field],
+                            source: "pid" as const,
+                            is_override: false,
+                          };
+                          const fakecol = { field: c.field as string, header: c.header, order: 0, editable: true };
+                          return (
+                            <BulkCell
+                              key={`id-${r.entity_id}-${c.field}`}
+                              entity={r}
+                              col={fakecol}
+                              fv={fv as import("../api").EntityFieldValue}
+                              ck={cellKey(r.entity_id, c.field as string)}
+                              editing={editing[cellKey(r.entity_id, c.field as string)]}
+                              saving={!!saving[cellKey(r.entity_id, c.field as string)]}
+                              error={cellError[cellKey(r.entity_id, c.field as string)]}
+                              onBeginEdit={() => beginEdit(r, c.field as string)}
+                              onChange={(v) => setEditingValue(r, c.field as string, v)}
+                              onCancel={() => cancelEdit(r, c.field as string)}
+                              onCommit={() => void commitEdit(r, c.field as string)}
+                            />
+                          );
+                        }
+                        const raw = r[c.field];
+                        const display = raw === null || raw === undefined || raw === "" ? "—" : String(raw);
+                        const isEmpty = display === "—";
+                        const cls = ["br-td"];
+                        if (c.field === "pid_number") cls.push("mono");
+                        return (
+                          <div
+                            key={`id-${r.entity_id}-${c.field}`}
+                            className={cls.join(" ")}
+                            style={{ color: isEmpty ? "var(--fg-3)" : "var(--fg-2)", fontStyle: isEmpty ? "italic" : "normal" }}
+                            title="Read-only — pipeline-extracted"
+                          >
+                            {display}
+                          </div>
+                        );
+                      })}
+
+                      {/* Editable cells — click to edit, blur/Enter to commit. */}
+                      {editableColumns.map((col) => {
+                        const fv: EntityFieldValue | undefined = r.values[col.field];
+                        return (
+                          <BulkCell
+                            key={`ed-${r.entity_id}-${col.field}`}
+                            entity={r}
+                            col={col}
+                            fv={fv}
+                            ck={cellKey(r.entity_id, col.field)}
+                            editing={editing[cellKey(r.entity_id, col.field)]}
+                            saving={!!saving[cellKey(r.entity_id, col.field)]}
+                            error={cellError[cellKey(r.entity_id, col.field)]}
+                            onBeginEdit={() => beginEdit(r, col.field)}
+                            onChange={(v) => setEditingValue(r, col.field, v)}
+                            onCancel={() => cancelEdit(r, col.field)}
+                            onCommit={() => void commitEdit(r, col.field)}
+                          />
+                        );
+                      })}
+
+                      {/* Per-row action: jump back into Studio with this entity. */}
+                      <div
+                        className="br-td"
+                        style={{
+                          textAlign: "center",
+                          padding: "8px 6px",
+                          cursor: "pointer",
+                          color: "var(--fg-3)",
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenEntity(r.entity_id, r.entity_class);
+                        }}
+                        title="Open this entity in Studio (datasheet drawer)"
+                      >
+                        <ArrowUpRight size={13} strokeWidth={1.6} />
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {filteredRows.length === 0 && (
+                  <div className="br-empty" style={{ gridColumn: "1 / -1" }}>
+                    {debouncedFilter || showOnlyEdited
+                      ? "No entities match the current filter."
+                      : "No entities to show."}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {showDetail && (
+          <aside className="br-detail">
+            <div className="row-hd">
+              <span className="overline">
+                {selectedRow
+                  ? `Row · ${filteredRows.findIndex((r) => r.entity_id === selectedRow.entity_id) + 1} of ${filteredRows.length}`
+                  : "No row selected"}
+              </span>
+              <div className="nav">
+                <button
+                  title="Previous row"
+                  onClick={() => {
+                    if (!selectedRow) return;
+                    const idx = filteredRows.findIndex(
+                      (r) => r.entity_id === selectedRow.entity_id,
+                    );
+                    if (idx > 0) setSelectedId(filteredRows[idx - 1].entity_id);
+                  }}
+                  disabled={!selectedRow}
+                >
+                  <ChevronUp size={13} strokeWidth={1.6} />
+                </button>
+                <button
+                  title="Next row"
+                  onClick={() => {
+                    if (!selectedRow) return;
+                    const idx = filteredRows.findIndex(
+                      (r) => r.entity_id === selectedRow.entity_id,
+                    );
+                    if (idx >= 0 && idx < filteredRows.length - 1) {
+                      setSelectedId(filteredRows[idx + 1].entity_id);
+                    }
+                  }}
+                  disabled={!selectedRow}
+                >
+                  <ChevronDown size={13} strokeWidth={1.6} />
+                </button>
+                <button title="Close panel" onClick={() => setShowDetail(false)}>
+                  <X size={13} strokeWidth={1.6} />
+                </button>
+              </div>
+            </div>
+
+            {selectedRow ? (
+              <>
+                <h3 style={{ color: "var(--qong-magenta, #FF4DA8)" }}>
+                  {selectedRow.tag || "Untagged"}
+                </h3>
+                <div
+                  className="row-meta"
+                  style={{ display: "flex", alignItems: "center", gap: 6 }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 9.5,
+                      letterSpacing: "0.14em",
+                      textTransform: "uppercase",
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      background: "var(--bg-elev)",
+                      border: "1px solid var(--border)",
+                      color: "var(--fg-2)",
+                    }}
+                  >
+                    {selectedRow.entity_class}
+                  </span>
+                  <span>{selectedRow.sub_class}</span>
+                </div>
+                <div
+                  className="row-meta"
+                  style={{ fontSize: 10.5, marginTop: 4, opacity: 0.7 }}
+                >
+                  {selectedRow.pid_number} · sheet {selectedRow.sheet_number}
+                </div>
+
+                {/* Datasheet deliverable: show the entity's FULL per-type
+                    datasheet (all sections, chosen automatically by sub_class)
+                    instead of the few list columns. Edits persist via PATCH.
+                    Keyed by entity_id so internal state resets per row. */}
+                {activeType === "datasheet" ? (
+                  <div className="group" style={{ marginLeft: -16, marginRight: -16 }}>
+                    <DatasheetPanel
+                      key={selectedRow.entity_id}
+                      jobId={jobId}
+                      entityId={selectedRow.entity_id}
+                      onSaved={() => void fetchRows()}
+                    />
+                  </div>
+                ) : (
+                <div className="group">
+                  <h4>Fields</h4>
+                  <dl style={{ margin: 0 }}>
+                    {schema.map((col) => {
+                      // Vendor-related fields to hide during vendor selection
+                      const vendorFields = new Set([
+                        "vendor_match.vendor_name",
+                        "vendor_match.product_name",
+                        "fields.piping_class",
+                        "fields.calb_range_min",
+                        "fields.calb_range_max",
+                        "fields.calb_range_unit",
+                        "fields.measuring_range_min",
+                        "fields.measuring_range_max",
+                        "fields.measuring_range_unit",
+                        "fields.certification",
+                        "fields.power_in",
+                        "fields.power_out",
+                        "fields.io_output",
+                        "fields.datasheet_ref",
+                      ]);
+                      // When PDF is open with pending vendor, hide vendor fields
+                      const isVendorSelectionMode = pdfModalUrl && pendingVendorData;
+                      if (isVendorSelectionMode && vendorFields.has(col.field)) {
+                        return null;
+                      }
+                      const fv = selectedRow.values[col.field];
+                      // Show vendor fields as empty until vendor is accepted this session
+                      const v = vendorFields.has(col.field) && !vendorAccepted
+                        ? ""
+                        : valueToString(fv?.value);
+                      const empty = v === "";
+                      const overridden = !!fv?.is_override;
+                      return (
+                        <Fragment key={col.field}>
+                        <div className="kv">
+                          <span className="k">{col.header}</span>
+                          <span
+                            className={`v ${empty ? "miss" : ""}`}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                            }}
+                          >
+                            {empty ? "—" : v}
+                            {overridden && (
+                              <span
+                                title="This value was edited from its original P&ID-extracted value"
+                                style={{
+                                  width: 6,
+                                  height: 6,
+                                  borderRadius: "50%",
+                                  background: "var(--qong-magenta, #FF4DA8)",
+                                  display: "inline-block",
+                                }}
+                              />
+                            )}
+                            {!overridden && fv?.source === "pid" && !empty && (
+                              <span
+                                title="Pipeline-extracted from the P&ID"
+                                style={{
+                                  width: 6,
+                                  height: 6,
+                                  borderRadius: "50%",
+                                  background: "var(--qong-cyan, #06b6d4)",
+                                  display: "inline-block",
+                                  opacity: 0.7,
+                                }}
+                              />
+                            )}
+                          </span>
+                        </div>
+                        {activeKey === "index" && col.field === "fields.pair_no" && (
+                          <>
+                            <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "6px 0" }} />
+                            <div className="kv" style={{ flexDirection: "column", gap: 4, alignItems: "stretch" }}>
+                              <span className="k">Select Vendor</span>
+                              {vendorLoading ? (
+                                <span style={{ fontSize: 11, color: "var(--fg-3)", padding: "4px 0" }}>Loading vendors…</span>
+                              ) : (() => {
+                                  const hasVendors = vendorApiData && vendorApiData.length > 0;
+                                  return (
+                                    <select
+                                      key={selectedRow?.entity_id}
+                                      value={pendingVendorData ? String(pendingVendorData.product_id) : ""}
+                                      disabled={vendorSaving || !hasVendors}
+                                      onChange={(e) => { void handleVendorSelect(e.target.value); }}
+                                      style={{
+                                        width: "100%",
+                                        height: 32,
+                                        padding: "0 10px",
+                                        background: "var(--surface)",
+                                        border: "1px solid var(--border)",
+                                        borderRadius: 8,
+                                        color: "var(--fg-1)",
+                                        fontSize: 12.5,
+                                        fontFamily: "var(--font-sans)",
+                                        outline: "none",
+                                        cursor: hasVendors ? "pointer" : "not-allowed",
+                                        appearance: "auto",
+                                        opacity: vendorSaving ? 0.6 : 1,
+                                      }}
+                                    >
+                                      <option value="">
+                                        {hasVendors ? "-- Choose a Vendor --" : "-- No vendors found --"}
+                                      </option>
+                                      {vendorApiData && vendorApiData.map((v) => (
+                                        <option key={String(v.product_id)} value={String(v.product_id)}>
+                                          {String(v.manufacturer ?? "")}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  );
+                                })()}
+                              {vendorSaving && (
+                                <span style={{ fontSize: 11, color: "var(--fg-3)" }}>Applying vendor data…</span>
+                              )}
+                            </div>
+                          </>
+                        )}
+                        </Fragment>
+                      );
+                    })}
+                  </dl>
+                </div>
+                )}
+
+                <div className="actions" style={{ marginTop: 16, display: "flex", gap: 8 }}>
+                  <button
+                    className="br-btn small primary"
+                    onClick={() => onOpenEntity(selectedRow.entity_id, selectedRow.entity_class)}
+                  >
+                    <ArrowUpRight size={11} strokeWidth={1.6} /> Open in Studio
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="row-meta" style={{ marginTop: 12 }}>
+                Select a row to inspect its fields.
+              </div>
+            )}
+          </aside>
+        )}
+      </div>
+      {pdfModalUrl && (
+        <PdfModal
+          url={pdfModalUrl}
+          onClose={() => setPdfModalUrl(null)}
+          onAccept={handleVendorAccept}
+          onDecline={handleVendorDecline}
+        />
+      )}
+    </div>
+  );
+}
+
+/** One editable cell. Click → input; Enter / blur → PATCH; Esc → revert.
+ *  Renders a P&ID dot for pipeline-extracted, un-overridden cells, and an
+ *  EDITED dot for cells with an override. Read-only `null` / `""` show "—". */
+function BulkCell({
+  entity,
+  col,
+  fv,
+  editing,
+  saving,
+  error,
+  onBeginEdit,
+  onChange,
+  onCancel,
+  onCommit,
+}: {
+  entity: EntityRow;
+  col: EntityColumn;
+  fv: EntityFieldValue | undefined;
+  ck: string;
+  editing: string | undefined;
+  saving: boolean;
+  error: string | undefined;
+  onBeginEdit: () => void;
+  onChange: (v: string) => void;
+  onCancel: () => void;
+  onCommit: () => void;
+}) {
+  const display = valueToString(fv?.value);
+  const isEmpty = display === "";
+  const isOverride = !!fv?.is_override;
+  const isPidSourced = fv?.source === "pid" && !isOverride && !isEmpty;
+  const isEditing = editing !== undefined;
+
+  // Auto-save: commit 10s after the last keystroke. onCommitRef keeps a
+  // stable pointer so the timer closure always calls the latest callback.
+  const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+
+  function resetAutoSave() {
+    if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+    autoSaveRef.current = setTimeout(() => onCommitRef.current(), 10_000);
+  }
+
+  useEffect(() => {
+    if (!isEditing) {
+      if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
+      return;
+    }
+    resetAutoSave();
+    return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current); };
+  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Click-to-edit affordance: a single click flips the cell into an input,
+  // pre-populated with the current value. We deliberately don't use a separate
+  // "edit" icon — the whole cell is the affordance.
+  return (
+    <div
+      className="br-td"
+      style={{
+        position: "relative",
+        padding: isEditing ? "4px 6px" : "10px 12px",
+        cursor: isEditing ? "text" : "pointer",
+        background: isEditing ? "var(--bg-elev)" : undefined,
+        boxShadow: error ? "inset 0 0 0 1px var(--error, #dc2626)" : undefined,
+      }}
+      onDoubleClick={(e) => {
+        if (isEditing) return;
+        e.stopPropagation();
+        onBeginEdit();
+      }}
+      title={error || (isOverride ? "Edited — double-click to edit" : isPidSourced ? "P&ID-extracted — double-click to edit" : "Double-click to edit")}
+    >
+      {isEditing ? (
+        <input
+          autoFocus
+          type="text"
+          value={editing ?? ""}
+          disabled={saving}
+          onChange={(e) => { onChange(e.target.value); resetAutoSave(); }}
+          onClick={(e) => e.stopPropagation()}
+          onBlur={() => onCommit()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || (e.key === "s" && (e.ctrlKey || e.metaKey))) {
+              e.preventDefault();
+              onCommit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+          style={{
+            width: "100%",
+            border: 0,
+            outline: 0,
+            background: "transparent",
+            font: "inherit",
+            color: "var(--fg-1)",
+            padding: "6px 6px",
+          }}
+        />
+      ) : (
+        <>
+          <span
+            style={{
+              color: isEmpty ? "var(--fg-3)" : "var(--fg-1)",
+              fontStyle: isEmpty ? "italic" : "normal",
+            }}
+          >
+            {isEmpty ? "—" : display}
+          </span>
+          {/* P&ID dot — top-right corner, small + subtle */}
+          {isPidSourced && (
+            <span
+              style={{
+                position: "absolute",
+                top: 6,
+                right: 6,
+                width: 5,
+                height: 5,
+                borderRadius: "50%",
+                background: "var(--qong-cyan, #06b6d4)",
+                opacity: 0.7,
+              }}
+            />
+          )}
+          {/* EDITED dot — magenta, takes precedence over the P&ID dot */}
+          {isOverride && (
+            <span
+              style={{
+                position: "absolute",
+                top: 6,
+                right: 6,
+                width: 5,
+                height: 5,
+                borderRadius: "50%",
+                background: "var(--qong-magenta, #FF4DA8)",
+              }}
+            />
+          )}
+        </>
+      )}
+      {/* Make the entity prop "used" for ESLint — col + entity power the title
+       *  attribute upstream, and entity is part of the prop API even though
+       *  the cell itself doesn't render it. */}
+      <span style={{ display: "none" }} aria-hidden>{entity.entity_id}{col.field}</span>
+    </div>
+  );
+}

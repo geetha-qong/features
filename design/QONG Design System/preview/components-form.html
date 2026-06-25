@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Form inputs</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin: 0; padding: 22px 26px; background: #fff; font-family: var(--font-sans); }
+  .stack { display: grid; gap: 14px; max-width: 460px; }
+  .label { font-size: 12px; font-weight: 600; color: var(--fg-1); margin-bottom: 6px; display: block; }
+  .input, .select, .textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 8px; padding: 10px 12px; font-size: 14px; font-family: inherit; color: var(--fg-1); background: #fff; transition: all 160ms; }
+  .input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--qong-purple); box-shadow: var(--ring-brand); }
+  .input::placeholder { color: var(--fg-3); }
+  .helper { font-size: 11px; color: var(--fg-3); margin-top: 4px; }
+  .check { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--fg-2); line-height: 1.5; }
+  .check input { margin-top: 2px; accent-color: var(--qong-purple); }
+</style>
+</head>
+<body>
+<div class="stack">
+  <div><label class="label">Work email</label><input class="input" placeholder="you@plant.example"></div>
+  <div><label class="label">Project type</label><select class="select"><option>FEED — Front-End Engineering Design</option><option>EPC</option></select></div>
+  <div><label class="label">Brief</label><textarea class="textarea" rows="2" placeholder="Tell us about your P&amp;ID volume…"></textarea></div>
+  <label class="check"><input type="checkbox" checked> I agree to receive product updates and accept the privacy policy.</label>
+</div>
+</body>
+</html>

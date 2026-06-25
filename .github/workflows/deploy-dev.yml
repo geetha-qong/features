@@ -1,0 +1,138 @@
+name: Deploy → dev.qongsystems.com
+
+# Fires automatically when commits land on `dev`. Also exposes a manual
+# `workflow_dispatch` button in the GitHub UI for re-running a deploy without
+# pushing a new commit (e.g., after rotating a secret or restarting a service).
+#
+# Mechanism: AWS SSM RunCommand against the dev EC2. No SSH keys, no bastion,
+# no inbound port 22 — IAM perms are the only authorization boundary.
+#
+# Required GitHub Secrets:
+#   DEV_AWS_ACCESS_KEY_ID, DEV_AWS_SECRET_ACCESS_KEY — for the
+#   github-actions-deploy IAM user, scoped to ssm:SendCommand +
+#   ssm:GetCommandInvocation on the dev EC2 only. Prefix is env-scoped so
+#   later we can rotate or split into separate IAM users per env without
+#   cross-env blast radius.
+#
+# Replaces the legacy GCP-SSH workflow (decommissioned 2026-06-02 alongside
+# the GCP→AWS dev migration — see FEATURES #21).
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-south-1
+  EC2_INSTANCE_ID: i-0e7b89bd91b67a291
+  HEALTH_URL: https://dev.qongsystems.com/healthz
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.DEV_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.DEV_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Send deploy command via SSM
+        id: send
+        run: |
+          # Build secret: docker compose build needs a github_pat file path
+          # at $GITHUB_PAT_FILE (referenced from the top-level `secrets:` block
+          # in docker-compose.yml). The PAT is pulled from SSM at deploy time,
+          # written to /tmp/qong-github-pat.<cmd-id>, used for the build, then
+          # deleted. Buildkit reads the file at build start and forgets it —
+          # the PAT never lands in an image layer.
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy-dev GH Actions ${GITHUB_SHA:0:7}" \
+            --cloud-watch-output-config CloudWatchOutputEnabled=true \
+            --parameters '{"commands":[
+              "set -e",
+              "cd /opt/qong",
+              "sudo -u ubuntu git fetch origin dev",
+              "sudo -u ubuntu git reset --hard origin/dev",
+              "PAT_FILE=/tmp/qong-github-pat.$$",
+              "aws ssm get-parameter --name /may26aws/qong-shared/github-pat-model-release --with-decryption --region ap-south-1 --query Parameter.Value --output text > $PAT_FILE",
+              "chmod 600 $PAT_FILE",
+              "trap \"rm -f $PAT_FILE\" EXIT",
+              "GITHUB_PAT_FILE=$PAT_FILE DOCKER_BUILDKIT=1 sudo -E docker compose -f docker-compose.yml -f docker-compose.override.dev.yml --env-file .env.dev -p qong build web cpu-worker",
+              "sudo docker compose -f docker-compose.yml -f docker-compose.override.dev.yml --env-file .env.dev -p qong up -d web cpu-worker",
+              "sudo -u ubuntu git log -1 --format=%H"
+            ]}' \
+            --query 'Command.CommandId' --output text)
+          echo "command_id=$CMD_ID" >> $GITHUB_OUTPUT
+          echo "Started SSM command: $CMD_ID"
+
+      - name: Wait for SSM command to complete
+        run: |
+          CMD_ID="${{ steps.send.outputs.command_id }}"
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query 'Status' --output text 2>/dev/null || echo "Pending")
+            echo "[$i/60] Status: $STATUS"
+            case "$STATUS" in
+              Success)
+                echo "--- stdout ---"
+                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID" --query 'StandardOutputContent' --output text
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut)
+                echo "--- stdout ---"
+                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID" --query 'StandardOutputContent' --output text
+                echo "--- stderr ---"
+                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID" --query 'StandardErrorContent' --output text
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          echo "SSM command did not finish in 10 minutes."
+          exit 1
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 12); do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo "000")
+            echo "[$i/12] $HEALTH_URL → $CODE"
+            if [[ "$CODE" == "200" ]]; then exit 0; fi
+            sleep 5
+          done
+          echo "Health check failed."
+          exit 1
+
+      # Purge the Cloudflare edge cache after a successful deploy so no stale
+      # HTML/assets linger. Belt-and-suspenders with the origin `Cache-Control:
+      # no-cache` on index.html (webapp/main.py spa_fallback) — that handles
+      # browser revalidation; this clears CF's edge. Token + zone id live in SSM
+      # (same convention as the GitHub PAT); this job already has AWS creds, so
+      # no new GitHub secrets are needed. Non-fatal + auto-skips until the SSM
+      # params exist, so it never blocks a deploy that's already healthy.
+      - name: Purge Cloudflare cache
+        run: |
+          TOKEN=$(aws ssm get-parameter --name /may26aws/qong-shared/cloudflare-purge-token --with-decryption --region "$AWS_REGION" --query Parameter.Value --output text 2>/dev/null || true)
+          ZONE=$(aws ssm get-parameter --name /may26aws/qong-shared/cloudflare-zone-id --region "$AWS_REGION" --query Parameter.Value --output text 2>/dev/null || true)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "None" ] || [ -z "$ZONE" ] || [ "$ZONE" = "None" ]; then
+            echo "::notice::Cloudflare purge skipped — set SSM /may26aws/qong-shared/cloudflare-purge-token + cloudflare-zone-id to enable."
+            exit 0
+          fi
+          RESP=$(curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE/purge_cache" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}')
+          echo "$RESP"
+          if echo "$RESP" | grep -q '"success":true'; then
+            echo "Cloudflare cache purged."
+          else
+            # Don't fail the deploy — the app is already live + healthy, and the
+            # origin no-cache header still prevents stale browser HTML.
+            echo "::warning::Cloudflare purge did not report success (see response above)."
+          fi

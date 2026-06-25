@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Feature tiles</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  body { margin: 0; padding: 22px; background: #fff; font-family: var(--font-sans); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  .tile { background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 18px 18px 20px; position: relative; overflow: hidden; }
+  .tile::before { content:""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--qong-gradient); }
+  .icon { width: 40px; height: 40px; border-radius: 10px; background: var(--qong-gradient-soft); color: var(--qong-purple); display: grid; place-items: center; margin-bottom: 12px; }
+  .icon svg { width: 22px; height: 22px; stroke-width: 1.5; }
+  h4 { font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--fg-1); margin: 0 0 6px; letter-spacing: 0; text-transform: uppercase; }
+  p { font-size: 12.5px; line-height: 1.5; color: var(--fg-2); margin: 0; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="tile"><div class="icon"><i data-lucide="brain"></i></div><h4>AI-Powered P&amp;ID Reading</h4><p>Computer vision extracts instruments, valves, and process connections automatically.</p></div>
+  <div class="tile"><div class="icon"><i data-lucide="zap"></i></div><h4>Cross-Discipline Platform</h4><p>Synchronizes Instrumentation, Mechanical, Electrical, Civil — eliminating revision chains.</p></div>
+  <div class="tile"><div class="icon"><i data-lucide="clipboard-list"></i></div><h4>Auto-Generated Deliverables</h4><p>Index, Datasheets, Control Narrative, Cause &amp; Effect — from one P&amp;ID upload.</p></div>
+</div>
+<script>lucide.createIcons();</script>
+</body>
+</html>

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QONG BOX hardware tile</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body {
+    margin: 0;
+    padding: 28px;
+    background:
+      radial-gradient(ellipse at top, rgba(139,63,206,0.16) 0%, transparent 60%),
+      var(--ink-1000);
+    font-family: var(--font-sans);
+    min-height: 320px;
+    display: grid;
+    place-items: center;
+  }
+
+  /* Realistic rack-style appliance — front face view */
+  .box {
+    width: 600px;
+    position: relative;
+    color: var(--ink-100);
+  }
+
+  .face {
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 8%, transparent 92%, rgba(0,0,0,0.3) 100%),
+      linear-gradient(180deg, #1F2240 0%, #14162A 50%, #0E1024 100%);
+    border: 1px solid #2a2e4a;
+    border-radius: 16px;
+    padding: 26px 30px 22px;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.08),
+      inset 0 -1px 0 rgba(0,0,0,0.4),
+      0 0 0 1px rgba(139,63,206,0.18),
+      0 40px 80px rgba(0,0,0,0.5);
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* faint inner gradient highlight strip behind the wordmark */
+  .face::before {
+    content: "";
+    position: absolute;
+    inset: 50% -10% auto -10%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(139,63,206,0.4), rgba(199,63,190,0.5), rgba(139,63,206,0.4), transparent);
+    filter: blur(0.5px);
+    transform: translateY(-50%);
+  }
+
+  /* TOP STRIP — ports + brand tag */
+  .top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .ports { display: flex; gap: 18px; }
+  .port {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 9px;
+    color: var(--ink-400); letter-spacing: 0.18em; font-weight: 700;
+  }
+  .glyph {
+    background: #050610;
+    border: 1px solid #2a2e4a;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.04),
+      inset 0 -1px 1px rgba(0,0,0,0.6);
+    display: inline-block;
+  }
+  .g-usb  { width: 13px; height: 7px; border-radius: 1px; }
+  .g-eth  { width: 14px; height: 9px; border-radius: 1px; position: relative; }
+  .g-eth::after {
+    content: ""; position: absolute; inset: auto 2px 1px 2px; height: 2px;
+    background: repeating-linear-gradient(90deg, #2a2e4a 0 1px, transparent 1px 2px);
+  }
+  .g-dc   { width: 8px; height: 8px; border-radius: 999px; }
+  .g-dc::after { content:""; display:block; width:3px; height:3px; background:#0A0B14; border-radius: 999px; margin: 2px; box-shadow: inset 0 0 2px #000; }
+  .g-io   { width: 16px; height: 5px; border-radius: 999px; }
+
+  .model {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    color: var(--ink-400);
+    font-weight: 600;
+  }
+  .model span { color: var(--qong-violet-300); }
+
+  /* CENTER — large wordmark */
+  .id {
+    text-align: center;
+    padding: 22px 0 18px;
+    position: relative;
+  }
+  .id .qong {
+    font-family: var(--font-condensed);
+    font-weight: 900; font-size: 56px; line-height: 1;
+    letter-spacing: -0.005em;
+    text-transform: uppercase;
+    background: var(--qong-gradient-text);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 24px rgba(139,63,206,0.45));
+  }
+  .id .box-text {
+    font-family: var(--font-condensed);
+    font-weight: 900; font-size: 22px; line-height: 1;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--ink-100);
+    margin-top: 6px;
+    padding-left: 0.28em;
+  }
+  .id .tag {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.32em;
+    color: var(--ink-400);
+    margin-top: 12px;
+  }
+  .id .tag .sep { color: var(--qong-purple); margin: 0 6px; }
+
+  /* BOTTOM — vent grille + status lamps */
+  .bottom {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 18px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .vents {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 3px;
+    height: 12px;
+  }
+  .vents span {
+    background: #050610;
+    border-radius: 1px;
+    box-shadow: inset 0 0 1px rgba(0,0,0,0.8);
+  }
+
+  .lamps {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+  }
+  .lamp {
+    display: flex; align-items: center; gap: 7px;
+    font-family: var(--font-mono); font-size: 9px;
+    color: var(--ink-200); letter-spacing: 0.16em; font-weight: 700;
+  }
+  .lamp .l {
+    width: 6px; height: 6px; border-radius: 999px;
+    background: #2A2E4A;
+  }
+  .lamp.on .l    { background: #10B981; box-shadow: 0 0 8px #10B981; }
+  .lamp.brand .l { background: var(--qong-magenta); box-shadow: 0 0 10px var(--qong-magenta); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+  /* small caption beneath */
+  .caption {
+    text-align: center;
+    margin-top: 14px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-400);
+  }
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;800&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="box">
+  <div class="face">
+    <div class="top">
+      <div class="ports">
+        <span class="port"><span class="glyph g-usb"></span>USB</span>
+        <span class="port"><span class="glyph g-eth"></span>ETH</span>
+        <span class="port"><span class="glyph g-dc"></span>PWR</span>
+        <span class="port"><span class="glyph g-io"></span>PRC</span>
+      </div>
+      <div class="model">QB-01 · <span>ON-PREMISES</span></div>
+    </div>
+
+    <div class="id">
+      <div class="qong">QONG</div>
+      <div class="box-text">BOX</div>
+      <div class="tag">OFFLINE <span class="sep">·</span> ENCRYPTED</div>
+    </div>
+
+    <div class="bottom">
+      <div class="vents">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="lamps">
+        <span class="lamp on"><span class="l"></span>ENCRYPTED</span>
+        <span class="lamp on"><span class="l"></span>OFFLINE</span>
+        <span class="lamp brand"><span class="l"></span>AIR-GAPPED</span>
+      </div>
+      <div class="vents">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </div>
+  </div>
+  <div class="caption">Your AI · on your hardware</div>
+</div>
+</body>
+</html>

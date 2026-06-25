@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Process flow</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin: 0; padding: 22px 26px; background: var(--ink-50); font-family: var(--font-sans); }
+  .row { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 14px; align-items: center; }
+  .step {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: var(--shadow-xs);
+  }
+  /* Same colors across all three — minor change only on the middle step */
+  .step::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 3px;
+    background: var(--qong-purple);
+    opacity: 0.35;
+  }
+  .step.mid::before { opacity: 1; background: var(--qong-gradient); }
+  .step.mid { box-shadow: var(--shadow-sm); }
+
+  .ov {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--qong-purple);
+    margin-bottom: 6px;
+  }
+  .ttl {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--fg-1);
+    letter-spacing: -0.01em;
+    margin-bottom: 3px;
+  }
+  .meta {
+    font-size: 12.5px;
+    color: var(--fg-2);
+    line-height: 1.4;
+  }
+
+  .arr {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--qong-purple);
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 600;
+  }
+  .arr svg { display: block; margin: 4px auto 0; color: var(--qong-purple); }
+</style>
+</head>
+<body>
+<div class="row">
+  <div class="step">
+    <div class="ov">Input</div>
+    <div class="ttl">Engineering Drawings</div>
+    <div class="meta">P&amp;IDs, vendor docs</div>
+  </div>
+  <div class="arr">
+    AI reads
+    <svg width="22" height="10" viewBox="0 0 22 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1 5 H20 M15 1 L20 5 L15 9"/></svg>
+  </div>
+  <div class="step mid">
+    <div class="ov">Process</div>
+    <div class="ttl">QONG AI Engine</div>
+    <div class="meta">Interprets &amp; cross-links</div>
+  </div>
+  <div class="arr">
+    generates
+    <svg width="22" height="10" viewBox="0 0 22 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1 5 H20 M15 1 L20 5 L15 9"/></svg>
+  </div>
+  <div class="step">
+    <div class="ov">Output</div>
+    <div class="ttl">Deliverables</div>
+    <div class="meta">Ready in minutes</div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shadows</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin: 0; padding: 30px; background: #fff; font-family: var(--font-sans); }
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 22px; }
+  .item { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .box { width: 70px; height: 50px; background: #fff; border-radius: 10px; border: 1px solid #F2F2F2; }
+  .nm { font-family: var(--font-mono); font-size: 10px; color: var(--fg); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="item"><div class="box" style="box-shadow: var(--shadow-xs)"></div><div class="nm">shadow-xs</div></div>
+  <div class="item"><div class="box" style="box-shadow: var(--shadow-sm)"></div><div class="nm">shadow-sm</div></div>
+  <div class="item"><div class="box" style="box-shadow: var(--shadow-md)"></div><div class="nm">shadow-md</div></div>
+  <div class="item"><div class="box" style="box-shadow: var(--shadow-lg)"></div><div class="nm">shadow-lg</div></div>
+  <div class="item"><div class="box" style="box-shadow: var(--shadow-xl)"></div><div class="nm">shadow-xl</div></div>
+  <div class="item"><div class="box" style="box-shadow: var(--glow-brand); border-color: var(--qong-purple)"></div><div class="nm" style="color:var(--qong-purple)">glow-brand</div></div>
+</div>
+</body>
+</html>

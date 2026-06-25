@@ -1,0 +1,55 @@
+meta {
+  name: PIT - Pressure Indicating Transmitter
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/qong-instrument
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  X-API-KEY: {{api_key}}
+}
+
+body:json {
+  {
+    "instType": "PIT"
+  }
+}
+
+docs {
+  # PIT — Qong Instrument
+
+  Returns the first active Pressure Indicating Transmitter product.
+
+  Expected response:
+
+  ```json
+  {
+    "success": true,
+    "instType": "PIT",
+    "data": {
+      "product_id": 1,
+      "vendor_profile_id": 1,
+      "manufacturer": "...",
+      "model_number": "...",
+      "piping_class": null,
+      "calibration_range_min": null,
+      "calibration_range_max": null,
+      "calibration_range_unit": null,
+      "measuring_range_min": 0,
+      "measuring_range_max": 100,
+      "measuring_range_unit": "bar",
+      "external_power_supply": "Yes",
+      "power_supply_input": "24VDC",
+      "power_supply_output": null,
+      "io_output": "4-20mA HART"
+    }
+  }
+  ```
+}

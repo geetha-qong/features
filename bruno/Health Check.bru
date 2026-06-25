@@ -1,0 +1,31 @@
+meta {
+  name: Health Check
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/api/health
+  body: none
+  auth: none
+}
+
+headers {
+  Accept: application/json
+}
+
+docs {
+  # Health Check
+
+  Public endpoint — no API key required.
+
+  Expected response:
+
+  ```json
+  {
+    "status": "UP",
+    "service": "Vendor API",
+    "timestamp": "2026-06-15T15:14:39+00:00"
+  }
+  ```
+}

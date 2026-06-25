@@ -1,0 +1,29 @@
+meta {
+  name: TG - Temperature Gauge
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/api/qong-instrument
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  X-API-KEY: {{api_key}}
+}
+
+body:json {
+  {
+    "instType": "TG"
+  }
+}
+
+docs {
+  # TG — Qong Instrument
+
+  Returns the first active Temperature Gauge product.
+}

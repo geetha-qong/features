@@ -1,0 +1,39 @@
+meta {
+  name: PBS - Push Button Switch
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{base_url}}/api/instrument-match
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-KEY: {{api_key}}
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+  {
+    "instType": "PBS",
+    "range_min": 0,
+    "range_max": 40,
+    "range_unit": "°C"
+  }
+}
+
+docs {
+  # PBS — Instrument Match (Basic)
+
+  Matches Push Button Switch products. The range maps to operating temperature
+  (min/max/unit) per the resolver. Expect OMRON C2UW-LP-I DA.
+
+  You can also filter on PBS-specific fields, e.g.:
+
+  ```json
+  { "instType": "PBS", "communication_protocol": "Bluetooth 4.0 Low Energy" }
+  ```
+}
