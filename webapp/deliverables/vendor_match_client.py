@@ -231,18 +231,71 @@ def fetch_vendor_fields(
     return result
 
 
+# API field-name -> existing IDS-schema column-name aliases, for the handful
+# of columns where the vendor API's snake_case name differs from the name
+# already used in webapp/deliverables/ids_schema.py. The schema/UI field
+# names are NOT changed — this table is the only translation layer.
+_DATASHEET_FIELD_ALIASES: Dict[str, str] = {
+    "schedule":                      "line_schedule",
+    "pipe_insulation":               "insulation",
+    "hazardous_area_classification": "area_classification",
+    "category":                      "ignition_group",
+    "process_conn_size":             "proc_conn_size",
+    "process_conn_type":             "proc_conn_type",
+    "process_conn_location":         "proc_conn_location",
+    "seal_bolting_material":         "bolting_material_seal",
+}
+
+# The API splits dial size into two fields; the schema has one "dial_size"
+# column, so they're combined ("100 mm") before matching.
+_DIAL_SIZE_VALUE_KEY = "dial_size_value"
+_DIAL_SIZE_UNIT_KEY = "dial_size_unit"
+_DIAL_SIZE_COL = "dial_size"
+
+# Vendor-identity keys: never stored as a plain field, consumed separately to
+# build entity.vendor_match.
+_IDENTITY_API_KEYS = {"manufacturer", "model_number", "product_id"}
+
+
+def _schema_col_index(sub_class: str) -> Tuple[set, set]:
+    """(process_cols, vendor_cols) column names for this datasheet type.
+
+    process_cols -> destined for entity.fields["ids_<col>"]
+    vendor_cols  -> destined for entity.vendor_match.catalog_fields[<col>]
+
+    Built by walking ``get_ids_sections_for_type`` (the schema module) itself,
+    so every field already defined there — for every instrument type — is
+    picked up automatically. Nothing here needs updating when the schema
+    changes or a new type is added.
+    """
+    from webapp.deliverables.ids_schema import get_ids_sections_for_type
+
+    process_cols: set = set()
+    vendor_cols: set = set()
+    for section in get_ids_sections_for_type(sub_class):
+        for field in section.fields:
+            if field.path.startswith("fields.ids_"):
+                process_cols.add(field.path[len("fields.ids_"):])
+            elif field.path.startswith("vendor_match.catalog_fields."):
+                vendor_cols.add(field.path[len("vendor_match.catalog_fields."):])
+    return process_cols, vendor_cols
+
+
 def fetch_vendor_datasheet(inst_type: str) -> Optional[Dict[str, Any]]:
-    """Fetch full datasheet (40+ fields) from /api/instrument-datasheet.
+    """Fetch the full datasheet from /api/instrument-datasheet and map every
+    field it returns onto the existing IDS schema for ``inst_type`` (e.g.
+    "PG", "PT") — schema-driven, so any field the API returns is displayed
+    automatically as long as a matching schema column already exists; no
+    per-type field list to maintain here.
 
     Returns a dict in the format expected by entities.py and datasheet.py:
-      - ``ids_*`` keys  → go into entity.fields  (e.g. "ids_calibration_range_min")
+      - ``ids_*`` keys  → go into entity.fields  (e.g. "ids_ambient_temp_min")
       - ``_vendor_name``, ``_model_number``, ``_product_id``  → private, used to
         build entity.vendor_match identity
-      - all other keys  → go into entity.vendor_match.catalog_fields; keys are
-        the IDS catalog_fields sub-keys  (e.g. "output_signal_type",
-        "enclosure_ip_rating", "proc_conn_size")
+      - all other keys  → go into entity.vendor_match.catalog_fields; keys
+        match the IDS schema's vendor catalog sub-keys exactly
 
-    Returns None if API not configured or call fails.
+    Returns None if API not configured, call fails, or no fields matched.
     """
     base = _api_url()
     key = _api_key()
@@ -283,99 +336,46 @@ def fetch_vendor_datasheet(inst_type: str) -> Optional[Dict[str, Any]]:
     def _s(v: Any) -> str:
         return str(v).strip() if v is not None else ""
 
-    # ── IDS direct fields (entity.fields["ids_*"]) ────────────────────────
-    # Prefer instrument_range_* if present, fall back to measurement_*_value.
-    inst_min  = _s(raw.get("instrument_range_min"))  or _s(raw.get("measurement_min_value"))
-    inst_max  = _s(raw.get("instrument_range_max"))  or _s(raw.get("measurement_max_value"))
-    inst_unit = _s(raw.get("instrument_range_unit")) or _s(raw.get("measurement_unit"))
+    process_cols, vendor_cols = _schema_col_index(code)
 
-    result: Dict[str, Any] = {
-        # Vendor identity (consumed by entities.py / datasheet.py to build VendorMatch)
-        "_vendor_name":   _s(raw.get("manufacturer")),
-        "_model_number":  _s(raw.get("model_number")),
-        "_product_id":    _s(raw.get("product_id")),
-        # IDS entity.fields keys
-        "ids_pipe_class":                        _s(raw.get("piping_class")),
-        "ids_calibration_range_min":             _s(raw.get("calibration_range_min")),
-        "ids_calibration_range_max":             _s(raw.get("calibration_range_max")),
-        "ids_calibration_range_unit":            _s(raw.get("calibration_range_unit")),
-        "ids_instrument_range_min":              inst_min,
-        "ids_instrument_range_max":              inst_max,
-        "ids_instrument_range_unit":             inst_unit,
-        "ids_display_range_min":                 _s(raw.get("display_range_min")),
-        "ids_display_range_max":                 _s(raw.get("display_range_max")),
-        "ids_display_range_unit":                _s(raw.get("display_range_unit")),
-        "ids_certification_special_requirement": _s(raw.get("hazardous_area_certification")),
-        "ids_ambient_temp_min":                  _s(raw.get("ambient_temp_min")),
-        "ids_ambient_temp_max":                  _s(raw.get("ambient_temp_max")),
-        # Catalog fields — keys match IDS vendor_match.catalog_fields sub-keys exactly
-        "body_flange_type":          _s(raw.get("body_flange_type")),
-        "vent_valve":                _s(raw.get("vent_valve")),
-        "drain_valve":               _s(raw.get("drain_valve")),
-        "vent_drain_size":           _s(raw.get("vent_drain_size")),
-        "proc_conn_size":            _s(raw.get("process_connection")) or _s(raw.get("connection_size")),
-        "proc_conn_rating":          _s(raw.get("proc_conn_rating")),
-        "mounting_type":             _s(raw.get("mounting_type")),
-        "body_flange_material":      _s(raw.get("body_flange_material")),
-        "vent_drain_material":       _s(raw.get("vent_drain_material")),
-        "bolting_material":          _s(raw.get("bolting_material")),
-        "gasket_oring_material":     _s(raw.get("gasket_oring_material")),
-        "mounting_kit_material":     _s(raw.get("mounting_kit_material")),
-        "detector_type":             _s(raw.get("detector_type")),
-        "measurement_span_min":      _s(raw.get("measurement_span_min")),
-        "measurement_span_max":      _s(raw.get("measurement_span_max")),
-        "diaphragm_wetted_material": _s(raw.get("wetted_material")),
-        "diaphragm_material":        _s(raw.get("diaphragm_material")),
-        "fill_fluid_material":       _s(raw.get("fill_fluid")),
-        "output_signal_type":        _s(raw.get("output_signal")),
-        "enclosure_ip_rating":       _s(raw.get("ip_rating")),
-        "enclosure_material":        _s(raw.get("enclosure_material")),
-        "digital_communication":     _s(raw.get("communication_protocol")),
-        "signal_power_supply":       _s(raw.get("power_supply")),
-        "external_power_supply":     _s(raw.get("external_power_supply")),
-        "integral_indicator_reqd":   _s(raw.get("integral_indicator_reqd")),
-        "integral_indicator_type":   _s(raw.get("integral_indicator_type")),
-        "signal_termination_type":   _s(raw.get("signal_termination_type")),
-        "elect_conn_size":           _s(raw.get("elect_conn_size")),
-        "elect_conn_type":           _s(raw.get("electrical_interface")),
-        "smart_device_type":         _s(raw.get("smart_device_type")),
-        "hardware_device_rev":       _s(raw.get("hardware_device_rev")),
-        "dd_edd_rev":                _s(raw.get("dd_edd_rev")),
-        "hart_version":              _s(raw.get("hart_version")),
-        "itk_version":               _s(raw.get("itk_version")),
-        "cff_rev":                   _s(raw.get("cff_rev")),
-        "pressure_accuracy":         _s(raw.get("accuracy")),
-        "zero_supply_elevation":     _s(raw.get("zero_supply_elevation")),
-        "fill_fluid_sp_gr_temp":     _s(raw.get("fill_fluid_sp_gr_temp")),
-        "seal_type":                 _s(raw.get("seal_type")),
-        "diaphragm_extn_length":     _s(raw.get("diaphragm_extn_length")),
-        "flush_conn_qty_size":       _s(raw.get("flush_conn_qty_size")),
-        "seal_proc_conn_size":       _s(raw.get("seal_proc_conn_size")),
-        "seal_proc_conn_rating":     _s(raw.get("seal_proc_conn_rating")),
-        "seal_conn_type_std":        _s(raw.get("seal_conn_type_std")),
-        "flushing_ring_reqd":        _s(raw.get("flushing_ring_reqd")),
-        "flushing_ring_rating":      _s(raw.get("flushing_ring_rating")),
-        "capillary_fitting_dia":     _s(raw.get("capillary_fitting_dia")),
-        "instr_conn_nom_size":       _s(raw.get("instr_conn_nom_size")),
-        "lower_housing_material":    _s(raw.get("lower_housing_material")),
-        "upper_housing_material":    _s(raw.get("upper_housing_material")),
-        "seal_bolting_material":     _s(raw.get("seal_bolting_material")),
-        "seal_gasket_material":      _s(raw.get("seal_gasket_material")),
-        "capillary_moc":             _s(raw.get("capillary_moc")),
-        "seal_fill_fluid_material":  _s(raw.get("seal_fill_fluid_material")),
-    }
+    result: Dict[str, Any] = {}
 
-    # Drop empty strings so callers can do a simple truthiness check
-    result = {k: v for k, v in result.items() if v}
+    if raw.get("manufacturer"):
+        result["_vendor_name"] = _s(raw.get("manufacturer"))
+    if raw.get("model_number"):
+        result["_model_number"] = _s(raw.get("model_number"))
+    if raw.get("product_id") is not None and raw.get("product_id") != "":
+        result["_product_id"] = _s(raw.get("product_id"))
+
+    # dial_size_value + dial_size_unit -> single "dial_size" schema field.
+    if _DIAL_SIZE_COL in vendor_cols and (
+        raw.get(_DIAL_SIZE_VALUE_KEY) is not None or raw.get(_DIAL_SIZE_UNIT_KEY)
+    ):
+        combined = " ".join(
+            p for p in (_s(raw.get(_DIAL_SIZE_VALUE_KEY)), _s(raw.get(_DIAL_SIZE_UNIT_KEY))) if p
+        )
+        if combined:
+            result[_DIAL_SIZE_COL] = combined
+
+    skip_keys = _IDENTITY_API_KEYS | {_DIAL_SIZE_VALUE_KEY, _DIAL_SIZE_UNIT_KEY}
+    for api_key_name, value in raw.items():
+        if api_key_name in skip_keys or value is None or value == "":
+            continue
+        col = _DATASHEET_FIELD_ALIASES.get(api_key_name, api_key_name)
+        if col in process_cols:
+            result[f"ids_{col}"] = _s(value)
+        elif col in vendor_cols:
+            result[col] = _s(value)
+        # else: API returned a field with no matching schema column — skip.
 
     if not result:
         _datasheet_cache[code] = None
         return None
 
-    log.info("vendor_match_client: datasheet %s → %d fields, vendor=%s model=%s",
-             code, len(result),
-             result.get("_vendor_name", ""),
-             result.get("_model_number", ""))
+    log.info(
+        "vendor_match_client: datasheet %s → %d fields mapped, vendor=%s model=%s",
+        code, len(result), result.get("_vendor_name", ""), result.get("_model_number", ""),
+    )
     _datasheet_cache[code] = result
     return result
 
