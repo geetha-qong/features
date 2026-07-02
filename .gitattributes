@@ -1,0 +1,3 @@
+# Fixture CSV files must retain CRLF line endings (csv.writer produces CRLF;
+# byte-equality tests compare against these files verbatim).
+tests/unit/deliverables/fixtures/*.csv text eol=crlf

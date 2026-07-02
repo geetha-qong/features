@@ -1,0 +1,40 @@
+<!--
+  GENERATED — do not edit by hand; run scripts/gen_ls_label_config.py
+  (source of truth: webapp/taxonomy.json).
+
+  Canonical Label Studio labeling config for P&ID annotation projects.
+  - To add/remove a label: edit webapp/taxonomy.json, then re-run this script
+    and `scripts/ls_sync_labels.py`.
+  - For NEW projects: paste this XML into the LS "Labeling Setup" step.
+
+  Label values are the YOLO classes (taxonomy rows with a non-null yolo_label),
+  in taxonomy order; backgrounds are the taxonomy colors.
+-->
+<View>
+  <Image name="image" value="$image"/>
+  <RectangleLabels name="label" toName="image">
+    <Label value="valve_bv" background="#86D8C4"/>
+    <Label value="valve_ncbv" background="#86A8E8"/>
+    <Label value="valve_gt" background="#7EC9C2"/>
+    <Label value="valve_bf" background="#FF6B6B"/>
+    <Label value="valve_ck" background="#D8C794"/>
+    <Label value="valve_db" background="#7FD4D2"/>
+    <Label value="valve_relief_safety" background="#A8DD92"/>
+    <Label value="valve_gl" background="#A8DD92"/>
+    <Label value="valve_3way_relief" background="#C49AE2"/>
+    <Label value="inst_field" background="#E5CBA0"/>
+    <Label value="inst_bpcs" background="#C5BCEC"/>
+    <Label value="Motor" background="#8CCC76"/>
+    <Label value="Pump/Dwg Pump" background="#8CCC76"/>
+    <Label value="inst_sis" background="#8585D6"/>
+    <Label value="SIS-R" background="#B4ACE6"/>
+    <Label value="interlock" background="#EC9696"/>
+    <Label value="inst_local_panel" background="#C6C6CE"/>
+    <Label value="arrow_up" background="#9498AE"/>
+    <Label value="arrow_left" background="#9498AE"/>
+    <Label value="arrow_right" background="#9498AE"/>
+    <Label value="arrow_down" background="#9498AE"/>
+    <Label value="connector_out" background="#9498AE"/>
+    <Label value="connector_in" background="#9498AE"/>
+  </RectangleLabels>
+</View>

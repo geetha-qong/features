@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Qong — P&ID Extractor{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <style>
+    body { background: #f8f9fa; }
+    .navbar-brand img {
+      height: 32px;
+      width: auto;
+      object-fit: contain;
+      filter: brightness(0) invert(1); /* makes logo white on dark navbar */
+    }
+    .badge-pending    { background-color: #6c757d; }
+    .badge-processing { background-color: #ffc107; color: #000; }
+    .badge-done       { background-color: #198754; }
+    .badge-failed     { background-color: #dc3545; }
+    .valve-table th   { font-size: 0.8rem; white-space: nowrap; }
+    .valve-table td   { font-size: 0.82rem; }
+  </style>
+</head>
+<body>
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+    <div class="container">
+      <a class="navbar-brand" href="/">
+        <img src="/imgs/67742-removebg-preview.png" alt="Qong">
+      </a>
+      <div class="collapse navbar-collapse">
+        <ul class="navbar-nav ms-auto">
+          {% if user is defined and user %}
+            {% if user.role != 'annotator' %}
+            <li class="nav-item"><a class="nav-link" href="/dashboard">Dashboard</a></li>
+            {% endif %}
+            {% if user.role == 'annotator' %}
+            <li class="nav-item"><a class="nav-link" href="/annotate">Annotate</a></li>
+            {% endif %}
+            {% if user.role == 'super_admin' %}
+            <li class="nav-item dropdown">
+              <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Admin</a>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="/admin/dashboard">Dashboard</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="/admin/users">Manage Users</a></li>
+                <li><a class="dropdown-item" href="/admin/credits">Credits Ledger</a></li>
+                <li><a class="dropdown-item" href="/admin/feedback">Feedback Inbox</a></li>
+                <li><a class="dropdown-item" href="/admin/plans">Billing Plans</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="/admin/label-studio">Label Studio Sync</a></li>
+              </ul>
+            </li>
+            {% endif %}
+            <li class="nav-item"><a class="nav-link" href="/account">Account</a></li>
+            <li class="nav-item"><span class="nav-link text-secondary">
+              {{ user.username }}
+              {% if user.role == 'super_admin' %}<span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem">ADMIN</span>{% endif %}
+              {% if user.role == 'annotator' %}<span class="badge bg-info text-dark ms-1" style="font-size:0.65rem">ANNOTATOR</span>{% endif %}
+            </span></li>
+            <li class="nav-item"><a class="nav-link" href="/logout">Logout</a></li>
+          {% else %}
+            <li class="nav-item"><a class="nav-link" href="/signin">Login</a></li>
+          {% endif %}
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    {% if error is defined and error %}
+      <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

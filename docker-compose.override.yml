@@ -1,0 +1,48 @@
+# Local-dev override — auto-loaded by `docker compose up` (no -f needed).
+#
+# Provides the bind-mounts that let you `git pull && docker compose restart web`
+# without rebuilding the image during local iteration. These USED to live in
+# base docker-compose.yml but were moved out on 2026-06-01 (FEATURES #18)
+# because Compose concatenates volume lists between base + override, so they
+# would have shadowed the baked SPA dist on QA / dev where iteration speed
+# is not the priority.
+#
+# Workflow:
+#   - Local:  `docker compose up -d`                                       → loads base + this file (auto)
+#   - QA:     `docker compose -f docker-compose.yml -f docker-compose.override.qa.yml --env-file .env.qa up -d`  → skips this file (explicit -f disables auto-load)
+
+services:
+  web:
+    volumes:
+      - ./webapp:/app/webapp
+      - ./tests:/app/tests
+
+  cpu-worker:
+    volumes:
+      - ./webapp:/app/webapp
+
+  # Remap host ports for postgres/redis so the stack starts even when
+  # orphaned docker-proxy processes occupy :5432/:6379.
+  # The web/cpu-worker containers always connect via Docker internal DNS
+  # (postgres:5432 / redis:6379) — host port mapping is only for psql/redis-cli
+  # access from the host. These alternate ports let the stack come up cleanly.
+  postgres:
+    ports: !override
+      - "127.0.0.1:5434:5432"
+
+  redis:
+    ports: !override
+      - "127.0.0.1:6381:6379"
+
+  # Local-only LS overrides. Base docker-compose.yml ships the dev-prod
+  # values (LABEL_STUDIO_HOST=https://dev.qongsystems.com/ls) which make Django
+  # redirect to /ls/* paths that 404 on http://localhost:8080. CSRF list also
+  # needs the local origins or POSTs from any vite/web tab return 403.
+  label-studio:
+    environment:
+      - LABEL_STUDIO_HOST=http://localhost:8080
+      - LABEL_STUDIO_CSRF_TRUSTED_ORIGINS=http://localhost:8080,http://localhost:5173,http://localhost:8000
+      # LS 1.23 dropped the legacy "Token <key>" auth header by default; our
+      # webapp/label_studio_client.py still sends that format (FEATURES #23).
+      # Until we migrate the client to Bearer-JWT, re-enable the legacy path:
+      - LABEL_STUDIO_LEGACY_API_TOKEN_ENABLED=true

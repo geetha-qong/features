@@ -1,0 +1,154 @@
+name: Deploy → qa.qongsystems.com
+
+# QA deploys are MANUAL by design — push to dev auto-deploys dev, but QA only
+# moves when a human clicks the "Run workflow" button (or triggers via gh CLI).
+# This lets stakeholders preview a dev commit on QA without the dev branch
+# being a moving target underneath them.
+#
+# Default: deploys the current tip of `dev`. Override `ref` input to deploy
+# any branch/tag/SHA (e.g., to ship a hotfix from a feature branch directly to
+# QA without merging to dev first).
+#
+# Required GitHub Secrets:
+#   QA_AWS_ACCESS_KEY_ID, QA_AWS_SECRET_ACCESS_KEY — env-scoped secrets for
+#   the github-actions-deploy IAM user. Same IAM user as dev today (single
+#   user has perms on both EC2s), so you can paste the SAME access key
+#   values you used for DEV_AWS_*. Splitting the env name now lets us rotate
+#   per-env later (or split to separate IAM users) without touching the
+#   workflows.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or SHA to deploy to QA'
+        required: false
+        default: 'dev'
+
+env:
+  AWS_REGION: ap-south-1
+  EC2_INSTANCE_ID: i-04be6af1fb7929a0c
+  HEALTH_URL: https://qa.qongsystems.com/healthz
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.QA_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.QA_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate ref input
+        # workflow_dispatch input flows into a shell-quoted JSON payload that
+        # becomes commands on the EC2 — without validation a compromised
+        # writer account could inject arbitrary shell. Restrict to characters
+        # legal in git refs.
+        env:
+          DEPLOY_REF: ${{ github.event.inputs.ref }}
+        run: |
+          if [[ ! "$DEPLOY_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "Invalid ref: '$DEPLOY_REF' — must match [A-Za-z0-9._/-]+"
+            exit 1
+          fi
+          echo "Ref validated: $DEPLOY_REF"
+
+      - name: Send deploy command via SSM
+        id: send
+        env:
+          DEPLOY_REF: ${{ github.event.inputs.ref }}
+        run: |
+          # Build secret: docker compose build needs a github_pat file path
+          # at $GITHUB_PAT_FILE (referenced from the top-level `secrets:` block
+          # in docker-compose.yml). The PAT is pulled from SSM at deploy time,
+          # written to /tmp/qong-github-pat.<cmd-id>, used for the build, then
+          # deleted via trap. Buildkit reads the file at build start and
+          # forgets it — the PAT never lands in an image layer.
+          # Mirrors the same block in deploy-dev.yml (FEATURES #28).
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy-qa GH Actions ref=${DEPLOY_REF}" \
+            --cloud-watch-output-config CloudWatchOutputEnabled=true \
+            --parameters "{\"commands\":[
+              \"set -e\",
+              \"cd /opt/qong\",
+              \"sudo -u ubuntu git fetch origin\",
+              \"sudo -u ubuntu git checkout ${DEPLOY_REF} || sudo -u ubuntu git checkout -B ${DEPLOY_REF} origin/${DEPLOY_REF}\",
+              \"sudo -u ubuntu git reset --hard origin/${DEPLOY_REF}\",
+              \"PAT_FILE=/tmp/qong-github-pat.\$\$\",
+              \"aws ssm get-parameter --name /may26aws/qong-shared/github-pat-model-release --with-decryption --region ap-south-1 --query Parameter.Value --output text > \$PAT_FILE\",
+              \"chmod 600 \$PAT_FILE\",
+              \"trap \\\"rm -f \$PAT_FILE\\\" EXIT\",
+              \"GITHUB_PAT_FILE=\$PAT_FILE DOCKER_BUILDKIT=1 sudo -E docker compose -f docker-compose.yml -f docker-compose.override.qa.yml --env-file .env.qa -p qong build web cpu-worker\",
+              \"sudo docker compose -f docker-compose.yml -f docker-compose.override.qa.yml --env-file .env.qa -p qong up -d web cpu-worker\",
+              \"sudo -u ubuntu git log -1 --format=%H\"
+            ]}" \
+            --query 'Command.CommandId' --output text)
+          echo "command_id=$CMD_ID" >> $GITHUB_OUTPUT
+          echo "Started SSM command: $CMD_ID (ref=$DEPLOY_REF)"
+
+      - name: Wait for SSM command to complete
+        run: |
+          CMD_ID="${{ steps.send.outputs.command_id }}"
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query 'Status' --output text 2>/dev/null || echo "Pending")
+            echo "[$i/60] Status: $STATUS"
+            case "$STATUS" in
+              Success)
+                echo "--- stdout ---"
+                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID" --query 'StandardOutputContent' --output text
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut)
+                echo "--- stdout ---"
+                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID" --query 'StandardOutputContent' --output text
+                echo "--- stderr ---"
+                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID" --query 'StandardErrorContent' --output text
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          echo "SSM command did not finish in 10 minutes."
+          exit 1
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 12); do
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo "000")
+            echo "[$i/12] $HEALTH_URL → $CODE"
+            if [[ "$CODE" == "200" ]]; then exit 0; fi
+            sleep 5
+          done
+          echo "Health check failed."
+          exit 1
+
+      # Purge the Cloudflare edge cache post-deploy (same zone as dev — qa is a
+      # subdomain of qongsystems.com). Token + zone id from SSM; non-fatal and
+      # auto-skips until set. Mirrors deploy-dev.yml. See webapp/main.py
+      # spa_fallback for the origin no-cache header that handles browser HTML.
+      - name: Purge Cloudflare cache
+        run: |
+          TOKEN=$(aws ssm get-parameter --name /may26aws/qong-shared/cloudflare-purge-token --with-decryption --region "$AWS_REGION" --query Parameter.Value --output text 2>/dev/null || true)
+          ZONE=$(aws ssm get-parameter --name /may26aws/qong-shared/cloudflare-zone-id --region "$AWS_REGION" --query Parameter.Value --output text 2>/dev/null || true)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "None" ] || [ -z "$ZONE" ] || [ "$ZONE" = "None" ]; then
+            echo "::notice::Cloudflare purge skipped — set SSM /may26aws/qong-shared/cloudflare-purge-token + cloudflare-zone-id to enable."
+            exit 0
+          fi
+          RESP=$(curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE/purge_cache" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}')
+          echo "$RESP"
+          if echo "$RESP" | grep -q '"success":true'; then
+            echo "Cloudflare cache purged."
+          else
+            echo "::warning::Cloudflare purge did not report success (see response above)."
+          fi

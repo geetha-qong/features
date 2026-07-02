@@ -1,0 +1,461 @@
+{
+  "slug": "ronesans",
+  "customer_name": "Ronesans Engineering",
+  "deliverables": {
+    "valve_list": {
+      "sheet_name": "VALVE LIST",
+      "font": "Arial",
+      "columns": [
+        {
+          "field": "tag",
+          "header": "Tag No.",
+          "order": 0
+        },
+        {
+          "field": "pid_number",
+          "header": "P&ID No",
+          "order": 1
+        },
+        {
+          "field": "fields.dynamic_code",
+          "header": "Dynamic Code",
+          "order": 2
+        },
+        {
+          "field": "fields.category",
+          "header": "Category",
+          "order": 3
+        },
+        {
+          "field": "fields.size",
+          "header": "Size",
+          "order": 4
+        },
+        {
+          "field": "fields.area_code",
+          "header": "Area Code",
+          "order": 5
+        },
+        {
+          "field": "fields.serial_no",
+          "header": "Serial No",
+          "order": 6
+        },
+        {
+          "field": "fields.series_code",
+          "header": "Series Code",
+          "order": 7
+        },
+        {
+          "field": "fields.fluid_code",
+          "header": "Fluid Code",
+          "order": 8
+        },
+        {
+          "field": "fields.piping_class",
+          "header": "Piping Class",
+          "order": 9
+        },
+        {
+          "field": "fields.qty",
+          "header": "Qty",
+          "order": 10
+        },
+        {
+          "field": "fields.motor_actuator",
+          "header": "Motor Actuator",
+          "order": 11
+        },
+        {
+          "field": "fields.pneumatic_actuator",
+          "header": "Pneumatic Actuator ",
+          "order": 12
+        },
+        {
+          "field": "fields.solenoid",
+          "header": "Solenoid",
+          "order": 13
+        },
+        {
+          "field": "fields.line",
+          "header": "line",
+          "order": 14
+        }
+      ]
+    },
+    "instrument_index": {
+      "sheet_name": "INSTRUMENT INDEX",
+      "font": "Arial",
+      "columns": [
+        {
+          "field": "fields.rev_no",
+          "header": "Rev. No",
+          "order": 1
+        },
+        {
+          "field": "fields.unit_number",
+          "header": "Unit Number",
+          "order": 2
+        },
+        {
+          "field": "fields.loop_name",
+          "header": "Loop Name",
+          "order": 3
+        },
+        {
+          "field": "tag",
+          "header": "Tag Number",
+          "order": 4
+        },
+        {
+          "field": "fields.instrument_type",
+          "header": "Instrument Type",
+          "order": 5
+        },
+        {
+          "field": "fields.service_description",
+          "header": "Service Description",
+          "order": 6
+        },
+        {
+          "field": "pid_number",
+          "header": "P&ID No.",
+          "order": 7
+        },
+        {
+          "field": "fields.line_no",
+          "header": "Line No.",
+          "order": 8
+        },
+        {
+          "field": "fields.equipment_no",
+          "header": "Equipment No.",
+          "order": 9
+        },
+        {
+          "field": "fields.location",
+          "header": "Location",
+          "order": 10
+        },
+        {
+          "field": "fields.system",
+          "header": "System",
+          "order": 11
+        },
+        {
+          "field": "fields.io_type",
+          "header": "IO Type",
+          "order": 12
+        },
+        {
+          "field": "fields.signal_type",
+          "header": "Signal Type",
+          "order": 13
+        },
+        {
+          "field": "fields.signal_level",
+          "header": "Signal Level",
+          "order": 14
+        },
+        {
+          "field": "fields.junction_box_panel",
+          "header": "Junction Box / Panel",
+          "order": 15
+        },
+        {
+          "field": "vendor_match.vendor_name",
+          "header": "Manufacturer",
+          "order": 16
+        },
+        {
+          "field": "vendor_match.product_name",
+          "header": "Model No",
+          "order": 17
+        },
+        {
+          "field": "fields.remark",
+          "header": "Remark",
+          "order": 18
+        },
+        {
+          "field": "sub_class",
+          "header": "Process Function",
+          "order": -1
+        }
+      ]
+    },
+    "equipment_list": {
+      "sheet_name": "EQUIPMENT LIST",
+      "font": "Arial",
+      "columns": [
+        {
+          "field": "fields.unit_number",
+          "header": "Unit Number",
+          "order": 1
+        },
+        {
+          "field": "tag",
+          "header": "Equipment Tag",
+          "order": 2
+        },
+        {
+          "field": "fields.equipment_type",
+          "header": "Equipment Type",
+          "order": 3
+        },
+        {
+          "field": "fields.service_duty",
+          "header": "Service Duty",
+          "order": 4
+        },
+        {
+          "field": "fields.quantity",
+          "header": "Quantity",
+          "order": 5
+        },
+        {
+          "field": "fields.equip_spec_type",
+          "header": "Type",
+          "order": 6
+        },
+        {
+          "field": "fields.rated_capacity",
+          "header": "Rated Capacity",
+          "order": 7
+        },
+        {
+          "field": "fields.differential_pressure",
+          "header": "Diff. Pressure",
+          "order": 8
+        },
+        {
+          "field": "fields.design_temp",
+          "header": "Design Temp.",
+          "order": 9
+        },
+        {
+          "field": "fields.motor_rating",
+          "header": "Motor Rating",
+          "order": 10
+        },
+        {
+          "field": "fields.material",
+          "header": "Material",
+          "order": 11
+        },
+        {
+          "field": "pid_number",
+          "header": "P&ID Ref.",
+          "order": 12
+        },
+        {
+          "field": "fields.location",
+          "header": "Location",
+          "order": 13
+        }
+      ]
+    },
+    "io_list": {
+      "sheet_name": "I/O LIST",
+      "font": "Arial",
+      "columns": [
+        {
+          "field": "pid_number",
+          "header": "P&ID No.",
+          "order": 1
+        },
+        {
+          "field": "tag",
+          "header": "Tag No.",
+          "order": 2
+        },
+        {
+          "field": "sub_class",
+          "header": "Process Function",
+          "order": 3
+        },
+        {
+          "field": "fields.loop_name",
+          "header": "Loop No.",
+          "order": 4
+        },
+        {
+          "field": "fields.tag_type_code",
+          "header": "Instrument Type",
+          "order": 5
+        },
+        {
+          "field": "fields.service_description",
+          "header": "Service Description",
+          "order": 6
+        },
+        {
+          "field": "fields.line_no",
+          "header": "Line No.",
+          "order": 7
+        },
+        {
+          "field": "fields.equipment_no",
+          "header": "Equipment No.",
+          "order": 8
+        },
+        {
+          "field": "fields.location",
+          "header": "Location",
+          "order": 9
+        },
+        {
+          "field": "fields.io_type",
+          "header": "IO Type",
+          "order": 10
+        },
+        {
+          "field": "fields.io_output",
+          "header": "IO Output",
+          "order": 11
+        },
+        {
+          "field": "fields.signal_type",
+          "header": "Signal Type",
+          "order": 12
+        },
+        {
+          "field": "fields.external_power_supply",
+          "header": "External Power Supply",
+          "order": 13
+        },
+        {
+          "field": "fields.system",
+          "header": "System",
+          "order": 14
+        },
+        {
+          "field": "fields.sub_system",
+          "header": "Sub System",
+          "order": 15
+        },
+        {
+          "field": "fields.wet_dry",
+          "header": "Wet / Dry",
+          "order": 16
+        },
+        {
+          "field": "fields.state_0",
+          "header": "State 0",
+          "order": 17
+        },
+        {
+          "field": "fields.state_1",
+          "header": "State 1",
+          "order": 18
+        },
+        {
+          "field": "fields.multi_cable_type",
+          "header": "Multi-Cable Type",
+          "order": 19
+        },
+        {
+          "field": "fields.junction_box_panel",
+          "header": "Junction Box / Panel",
+          "order": 20
+        },
+        {
+          "field": "fields.junction_tb_1",
+          "header": "Junction TB-1",
+          "order": 21
+        },
+        {
+          "field": "fields.junction_tb_2",
+          "header": "Junction TB-2",
+          "order": 22
+        },
+        {
+          "field": "fields.marshalling_tb_strip",
+          "header": "Marshalling Cabinet TB Strip",
+          "order": 23
+        },
+        {
+          "field": "fields.marshalling_tb_1",
+          "header": "Marshalling Cabinet TB-1",
+          "order": 24
+        },
+        {
+          "field": "fields.marshalling_tb_2",
+          "header": "Marshalling Cabinet TB-2",
+          "order": 25
+        },
+        {
+          "field": "fields.alarm_high_high",
+          "header": "Alarm HH",
+          "order": 26
+        },
+        {
+          "field": "fields.alarm_high",
+          "header": "Alarm H",
+          "order": 27
+        },
+        {
+          "field": "fields.alarm_low",
+          "header": "Alarm L",
+          "order": 28
+        },
+        {
+          "field": "fields.alarm_low_low",
+          "header": "Alarm LL",
+          "order": 29
+        },
+        {
+          "field": "fields.explosion_proof",
+          "header": "Explosion Certificate",
+          "order": 30
+        },
+        {
+          "field": "fields.interlock",
+          "header": "Interlock",
+          "order": 31
+        },
+        {
+          "field": "fields.remark",
+          "header": "Remark",
+          "order": 32
+        }
+      ]
+    },
+    "datasheet": {
+      "sheet_name": "Datasheet",
+      "font": "Arial",
+      "columns": [
+        {
+          "field": "tag",
+          "header": "Tag No.",
+          "order": 1
+        },
+        {
+          "field": "fields.service_description",
+          "header": "Service",
+          "order": 2
+        },
+        {
+          "field": "pid_number",
+          "header": "P&ID Ref.",
+          "order": 3
+        },
+        {
+          "field": "vendor_match.vendor_name",
+          "header": "Manufacturer",
+          "order": 4
+        },
+        {
+          "field": "vendor_match.product_name",
+          "header": "Model",
+          "order": 5
+        },
+        {
+          "field": "vendor_match.part_number",
+          "header": "Part No.",
+          "order": 6
+        }
+      ]
+    }
+  }
+}

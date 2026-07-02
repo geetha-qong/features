@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Semantic colors</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin: 0; padding: 20px; background: #fff; font-family: var(--font-sans); }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .row { border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+  .row .top { padding: 14px; color: #fff; font-weight: 700; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+  .row .bot { padding: 10px 14px; font-family: var(--font-mono); font-size: 11px; }
+  .hex { font-family: var(--font-mono); font-size: 11px; opacity: 0.85; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="row"><div class="top" style="background:#10B981">OK<span class="hex">#10B981</span></div><div class="bot" style="background:#D1FAE5;color:#065F46">--ok · extraction valid</div></div>
+  <div class="row"><div class="top" style="background:#F59E0B">WARN<span class="hex">#F59E0B</span></div><div class="bot" style="background:#FEF3C7;color:#92400E">--warn · needs review</div></div>
+  <div class="row"><div class="top" style="background:#EF4444">ERROR<span class="hex">#EF4444</span></div><div class="bot" style="background:#FEE2E2;color:#991B1B">--error · validation failed</div></div>
+  <div class="row"><div class="top" style="background:#22D3EE;color:#083344">SCAN<span class="hex" style="opacity:1">#22D3EE</span></div><div class="bot" style="background:#CFFAFE;color:#155E75">--scan-cyan · live extract</div></div>
+</div>
+</body>
+</html>

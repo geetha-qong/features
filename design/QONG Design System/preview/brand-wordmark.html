@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QONG wordmark</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin: 0; padding: 0; background: #fff; font-family: var(--font-sans); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .pane { padding: 28px; display: flex; align-items: center; justify-content: center; position: relative; min-height: 140px; }
+  .pane.light { background: #fff; }
+  .pane.dark  { background: var(--ink-1000); }
+
+  /* The lockup — Barlow Condensed Black for QONG (matches the wordmark image),
+     Outfit medium for "Systems" baseline-aligned */
+  .lockup { display: inline-flex; align-items: baseline; gap: 12px; }
+  .qong {
+    font-family: var(--font-condensed);
+    font-weight: 900;
+    font-size: 56px;
+    letter-spacing: -0.005em;
+    line-height: 1;
+    background: var(--qong-gradient-pink);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    text-transform: uppercase;
+  }
+  .systems {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 22px;
+    letter-spacing: -0.015em;
+    line-height: 1;
+  }
+  .pane.light .systems { color: var(--ink-900); }
+  .pane.dark  .systems { color: var(--ink-100); }
+
+  .lbl { position: absolute; bottom: 10px; left: 16px; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .pane.light .lbl { color: var(--fg-3); }
+  .pane.dark  .lbl { color: var(--ink-400); }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="pane light">
+    <div class="lockup"><span class="qong">QONG</span><span class="systems">Systems</span></div>
+    <span class="lbl">on light</span>
+  </div>
+  <div class="pane dark">
+    <div class="lockup"><span class="qong">QONG</span><span class="systems">Systems</span></div>
+    <span class="lbl">on ink-1000</span>
+  </div>
+</div>
+</body>
+</html>

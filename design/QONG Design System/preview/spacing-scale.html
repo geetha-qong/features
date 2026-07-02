@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Spacing tokens</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body { margin: 0; padding: 22px 26px; background: #fff; font-family: var(--font-sans); }
+  .stack { display: grid; gap: 6px; }
+  .row { display: grid; grid-template-columns: 60px 50px 1fr; align-items: center; gap: 12px; font-size: 12px; }
+  .nm { font-family: var(--font-mono); font-size: 11px; color: var(--fg); font-weight: 600; }
+  .px { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+  .bar { height: 14px; background: var(--qong-gradient); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="stack">
+  <div class="row"><span class="nm">--s-1</span><span class="px">4 px</span><div class="bar" style="width:4px"></div></div>
+  <div class="row"><span class="nm">--s-2</span><span class="px">8 px</span><div class="bar" style="width:8px"></div></div>
+  <div class="row"><span class="nm">--s-3</span><span class="px">12 px</span><div class="bar" style="width:12px"></div></div>
+  <div class="row"><span class="nm">--s-4</span><span class="px">16 px</span><div class="bar" style="width:16px"></div></div>
+  <div class="row"><span class="nm">--s-5</span><span class="px">20 px</span><div class="bar" style="width:20px"></div></div>
+  <div class="row"><span class="nm">--s-6</span><span class="px">24 px</span><div class="bar" style="width:24px"></div></div>
+  <div class="row"><span class="nm">--s-7</span><span class="px">32 px</span><div class="bar" style="width:32px"></div></div>
+  <div class="row"><span class="nm">--s-8</span><span class="px">40 px</span><div class="bar" style="width:40px"></div></div>
+  <div class="row"><span class="nm">--s-9</span><span class="px">48 px</span><div class="bar" style="width:48px"></div></div>
+  <div class="row"><span class="nm">--s-10</span><span class="px">64 px</span><div class="bar" style="width:64px"></div></div>
+  <div class="row"><span class="nm">--s-11</span><span class="px">80 px</span><div class="bar" style="width:80px"></div></div>
+  <div class="row"><span class="nm">--s-12</span><span class="px">120 px</span><div class="bar" style="width:120px"></div></div>
+</div>
+</body>
+</html>

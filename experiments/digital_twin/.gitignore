@@ -1,0 +1,21 @@
+# Track-local virtualenvs and caches
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+
+# data/ is for symlinks / fixtures pulled from ../../job_outputs/.
+# Nothing inside should be committed — graph fixtures are large and live in S3.
+data/*
+!data/.gitkeep
+!data/README.md
+
+# Notebook outputs can be huge — we keep code but strip outputs.
+# (Set up nbstripout as a pre-commit hook later.)
+
+# Backend runtime artefacts
+backend/.env
+backend/*.db
+backend/uploads/

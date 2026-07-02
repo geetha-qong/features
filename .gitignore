@@ -1,0 +1,82 @@
+# Secrets — NEVER commit .env files with real keys
+# .env.example is the template and IS committed with blank/placeholder values
+.env
+.env.local
+.env.*.local
+
+# Intermediate / temp files
+tmp/
+uploads/
+job_outputs/
+
+# Database
+*.db
+annotate/ls_data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Claude Code session state
+.claude/
+memory/
+
+# Intermediate run outputs (keep only final CSV)
+docs/runs/
+
+# Large binary inputs (PDFs/images tracked separately if needed)
+docs/*.pdf
+
+# Excel working files
+*.xlsx
+
+# Own-system model artifacts (large binaries)
+models/*.onnx
+models/*.pt
+models/paddle_det/
+models/paddle_rec/
+models/paddle_cls/
+# Same binaries wherever they're copied (e.g. experiments/digital_twin/models/)
+**/models/*.onnx
+**/models/*.pt
+runs/
+annotate/tiles/
+
+# Stray PyTorch weights at repo root (e.g. yolov8s.pt base weights)
+/*.pt
+
+# Stray screenshots at repo root (Playwright / QA artifacts).
+# Nested PNGs under design/, docs/, webapp/ etc. are tracked normally.
+/*.png
+
+# YOLO dataset images, label files and caches (regenerated from job_outputs)
+datasets/pid_valves/images/
+datasets/pid_valves/labels/
+datasets/**/*.cache
+
+# Label Studio export archives (large, regenerable from LS)
+annotate/exports/*.zip
+
+# VC / investor data room — kept locally, never pushed
+data_room/
+
+# Playwright session data
+.playwright-mcp/
+themes/screenshots/
+# (docker-compose.override.yml is now committed — provides local-dev
+#  bind-mounts. Per-developer customization should go in
+#  docker-compose.local.yml which IS gitignored:)
+docker-compose.local.yml
+.github_pat
+
+# Bruno API client — local REST client collections and environments
+bruno/
+bruno1/
